@@ -64,6 +64,7 @@ Powered by a lightweight Python 3 host running **Edge WebView2 (Chromium)**, the
   - **Musical word timing for line-synced fallbacks:** LRCLIB only timestamps whole lines, so word fills used to march at one robotic pace. A timing model now distributes each line's window over its syllables using the track's tempo (mean inter-onset interval), delivery density, an energy factor (pulse near the ~150 BPM sweet spot + sung-to-written ratio), and prosodic stress — content words hold the beat while glue words ('in the', 'a') rush past. Syllable runs from the Spicy API are matched to LRCLIB lines **by text** (sliding-window word match, not length), and the matched line's timestamp re-anchors the item to fix constant clock offsets between the two sources.
   - Thread-safe bounded LRU disk cache (`storage.py`) with a 3-day TTL, debounced writes, and atomic flushes to eliminate disk thrashing.
   - **Self-healing cache:** every cached payload is re-validated when it is read. A payload whose repeated lines share one timestamp — the fingerprint of a bad merge — is discarded and refetched instead of served, so a poisoned cache can never reach the screen even if it carries a parser version the current build accepts. Startup also sweeps out payloads from older parser versions, so the file cannot accumulate one dead generation per parser change (measured: a 10.8 MB cache reduced to 0.27 MB).
+  - **Works with any audio source.** Anything that broadcasts to Windows System Media Transport Controls is followed — Spotify, browsers, and local players like MusicBee, foobar2000 and Windows Media Player. Local files with poor tags are repaired before lookup: filename stems ("07 - Artist - Title.mp3"), track-number prefixes and underscore titles are cleaned, and the album name (when the player provides a real one) sharpens both the LRCLIB and Spotify-ID lookups. The Resolve report shows the album and whether metadata came from tags or a filename repair. (Apps that never broadcast to Windows media controls cannot be followed — Windows offers no alternative short of audio capture.)
 
 - **🌐 Translations, Transliteration & Letter Timing**
   - Optional translation/transliteration layer rendered beneath the active lyric, toggleable from the settings page or `T`.
@@ -338,6 +339,9 @@ The Windows-only paths (GSMTC, global hotkeys, WebView2 window) can't be exercis
 - [ ] On a song with a repeated hook, those lines breathe with a halo while live (Distract: check the chorus lines animate differently from the verses).
 - [ ] `Ctrl + Shift + T` toggles click-through (the hotkey must bind; otherwise the row reports Off and a notice is printed).
 - [ ] With click-through on, the mouse passes through to the app underneath, and `Ctrl + Shift + T` restores mouse control.
+- [ ] Play a local file whose tags are missing (filename only): lyrics resolve, and the Resolve report's Metadata row shows `filename`.
+- [ ] Play the same song from two different albums: the second triggers a lyric reload (album+duration in the track signature).
+- [ ] Play from Spotify, then from a local player: session handover happens after ~4 s and lyrics follow the playing app.
 - [ ] Long song (150+ lines): lyrics appear instantly after a track change, with no multi-second hitch before the first paint.
 
 ## 🤝 Acknowledgements
