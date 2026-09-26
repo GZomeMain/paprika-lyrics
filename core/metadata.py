@@ -48,3 +48,61 @@ def extract_clean_metadata(raw_title: str, raw_artist: str) -> tuple[str, str, s
     primary_artist = re.split(r"[,/&]", artist)[0].strip() if artist else ""
 
     return title, primary_artist, artist
+
+
+# Common audio extensions a player may leave inside the broadcast title when
+# it is really a filename stem.
+_AUDIO_EXT_PATTERN = re.compile(
+    r"\.(?:mp3|flac|ogg|oga|m4a|mp4|wav|wma|opus|aac|alac|aiff?|ape|dsf)\s*$",
+    re.IGNORECASE,
+)
+_TRACK_NUM_PATTERN = re.compile(r"^(\d{1,3})\s*[-._)\]]?\s+(.+)$")
+
+
+def strip_audio_extension(text: str) -> str:
+    """Removes a trailing audio-file extension, e.g. 'song.mp3' -> 'song'."""
+    return _AUDIO_EXT_PATTERN.sub("", (text or "").strip()).strip()
+
+
+def split_track_number_prefix(text: str) -> tuple[int | None, str]:
+    """Splits a leading track number: '01 - Artist - Title' -> (1, 'Artist - Title')."""
+    m = _TRACK_NUM_PATTERN.match((text or "").strip())
+    if not m:
+        return None, (text or "").strip()
+    return int(m.group(1)), m.group(2).strip()
+
+
+def normalize_weak_title(title: str, artist: str) -> tuple[str, str, str]:
+    """
+    Repairs weak local-file metadata (players that broadcast filename stems).
+
+    Returns (cleaned_title, cleaned_artist, source). `source` is "smtc" when
+    the input already looked like real tags, and "filename" when repair fired
+    — the diagnostics layer reports it so users can see why a lookup missed.
+    Well-tagged input is passed through `extract_clean_metadata` unchanged.
+    """
+    raw_title, raw_artist = (title or "").strip(), (artist or "").strip()
+
+    # Looks like real tags: nothing to repair beyond the standard clean.
+    if raw_artist and not _AUDIO_EXT_PATTERN.search(raw_title):
+        c_title, primary, _full = extract_clean_metadata(raw_title, raw_artist)
+        return c_title, primary, "smtc"
+
+    repaired = strip_audio_extension(raw_title)
+    _track_no, repaired = split_track_number_prefix(repaired)
+
+    # Underscore filenames ('nightcall_kavinsky') carry structure the player
+    # lost: with no artist tag, the last underscore-separated segment is the
+    # artist far more often than part of the title.
+    inferred_artist = raw_artist
+    if "_" in repaired and not raw_artist:
+        stem, _, tail = repaired.rpartition("_")
+        if stem and tail:
+            repaired, inferred_artist = stem, tail
+
+    repaired = repaired.replace("_", " ")
+    repaired = re.sub(r"\s+", " ", repaired).strip()
+
+    c_title, primary_artist, _full = extract_clean_metadata(repaired, inferred_artist)
+    source = "smtc" if (raw_artist and c_title == raw_title) else "filename"
+    return c_title, primary_artist, source
