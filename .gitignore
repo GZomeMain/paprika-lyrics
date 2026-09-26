@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local secrets — never commit the Spicy Lyrics API key
+.env
+
+# Local runtime cache: contains the user's listening history (track IDs, offsets, lyrics).
+# The wildcard also covers hand-made backups (spotify_cache.json.bak), which hold
+# the same private data and would otherwise be committed.
+spotify_cache.json*
+spotify_cache.tmp
+*.tmp
