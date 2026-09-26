@@ -12,8 +12,12 @@ the lyric payload. That stream turns out to be enough to do much better than
   with the wrong offset puts the pulse half a beat out.
 * **Occupancy.** Every grid slot is scored by whether any onset lands on it,
   rolled over a window of recent slots. Delivery that rides a beat fills most
-  of them; a rubato phrase, a held note, an a cappella bar or an instrumental
-  gap leaves them empty. Measured over a 60-track corpus this is the one
+  of them;a rubato phrase, a held note, an a cappella bar or a long instrumental gap
+  leaves them empty. A *bounded* break (≤ ~16 slots, ~8 s at 120 BPM) that sits
+  between two driven sections is the exception: it is bridged after the gate, at
+  the quieter neighbour's depth, because a drop's quiet middle is exactly where
+  the pulse must survive. Long breaks, intros and outros keep nothing to bridge
+  against and stay dark. Measured over a 60-track corpus this is the one
   feature that actually separates driven from calm delivery (0.27 → 0.92,
   median 0.57).
 * **Rate.** Syllables per beat, from the onset mass rather than just presence,
@@ -580,6 +584,11 @@ def build_beat_plan(lines: list[dict] | None) -> dict | None:
         for k in range(count)
     ]
 
+    # Instrumental breaks: occupancy only sees sung syllables, so a drop's
+    # quiet middle reads as empty slots and the gate closes exactly at the
+    # drop. A bounded break between two driven sections is carried instead.
+    bridged = _bridge_gaps(active, strength)
+
     # Runs are split where the strength changes, so the pulse deepens and eases
     # with the music rather than switching between flat on and off.
     runs: list[list[float]] = []
@@ -638,6 +647,7 @@ def build_beat_plan(lines: list[dict] | None) -> dict | None:
             "activeSlots": sum(1 for a in active if a),
             "builds": sum(1 for _, _, kind in spans if kind == "build"),
             "drops": len(peaks),
+            "bridgedSlots": bridged,
         },
     }
 
