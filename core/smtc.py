@@ -4,6 +4,7 @@ import datetime
 import json
 import threading
 import time
+from dataclasses import replace as dc_replace
 from winsdk.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager as MediaManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
@@ -13,6 +14,12 @@ from config import DEFAULT_LATENCY_MS, debug_log
 from storage import CACHE
 from core.beat import build_beat_plan
 from core.lyrics import fetch_lyrics
+from core.media_meta import (
+    album_for_search,
+    build_track_signature,
+    media_meta_from_smtc,
+)
+from core.metadata import normalize_weak_title
 from core.resolver import resolve_artwork_url
 from core.session import select_session
 
@@ -198,8 +205,11 @@ class SmtcBridge:
 
                 # Read track metadata safely
                 info = await session.try_get_media_properties_async()
-                title = (info.title if info else "").strip()
-                artist = (info.artist if info else "").strip()
+                meta = media_meta_from_smtc(info, duration_ms=self._get_duration_ms())
+                title, artist, metadata_source = normalize_weak_title(
+                    meta.raw_title, meta.raw_artist)
+                meta = dc_replace(meta, raw_title=title, raw_artist=artist)
+                album = album_for_search(meta)
 
                 app_id = ""
                 try:
@@ -207,7 +217,11 @@ class SmtcBridge:
                 except Exception:
                     pass
 
-                track_sig = f"{app_id}:::{title}:::{artist}"
+                # Computed from the REPAIRED title/artist, so the signature
+                # matches what fetch_lyrics will search for. Album and duration
+                # join the key so same-name tracks on different albums reload
+                # instead of reusing the previous track's lyrics.
+                track_sig = build_track_signature(meta, app_id)
 
                 # 1. Update Play / Pause state in UI if changed
                 if is_playing != last_playing:
@@ -252,7 +266,7 @@ class SmtcBridge:
                     duration_ms = self._get_duration_ms()
                     try:
                         lines, source, track_id, diagnostics = await self.event_loop.run_in_executor(
-                            None, fetch_lyrics, title, artist, duration_ms
+                            None, fetch_lyrics, title, artist, duration_ms, album, metadata_source
                         )
                     except Exception as exc:
                         # Do NOT commit the signature: a transient failure has to
