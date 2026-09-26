@@ -165,6 +165,33 @@ class TriggerTest(unittest.TestCase):
         plan = build_beat_plan(_track(onsets, dur_ms=120))
         self.assertGreater(_covered(plan, 42000, 58000), 10_000)
 
+    def test_short_instrumental_break_between_driven_sections_stays_live(self):
+        # Two dense 120 BPM blocks with a ~6 s instrumental break between them —
+        # a drop's quiet middle. The pulse eases through instead of dying.
+        onsets = list(range(0, 20000, 500)) + list(range(26000, 46000, 500))
+        plan = build_beat_plan(_track(onsets, dur_ms=120))
+        self.assertIsNotNone(plan)
+        # The gap window (20.0s–26.0s) is carried: over 3 s of pulse in it.
+        self.assertGreater(_covered(plan, 20500, 25500), 3000)
+        # Carried at reduced depth: the gap's strength is the quieter boundary
+        # and never above either neighbour's.
+        before = _strength_at_ms(plan, 19000)
+        inside = _strength_at_ms(plan, 23000)
+        after = _strength_at_ms(plan, 30000)
+        self.assertGreaterEqual(inside, MACRO_FLOOR)
+        self.assertLessEqual(inside, max(before, after) + 1e-9)
+
+    def test_bridge_strength_is_the_quieter_boundary(self):
+        # Quiet verse → loud chorus with a short break: the bridge rides at the
+        # verse's depth, not the chorus's.
+        onsets = (list(range(0, 20000, 1000))          # sparse-ish verse
+                  + list(range(26000, 46000, 250)))    # double-time chorus
+        plan = build_beat_plan(_track(onsets, dur_ms=120))
+        self.assertIsNotNone(plan)
+        inside = _strength_at_ms(plan, 23000)
+        after = _strength_at_ms(plan, 30000)
+        self.assertLessEqual(inside, after + 1e-9)
+
     def test_chorus_flag_alone_does_not_trigger(self):
         # Structure is deliberately ignored: a chorus with no rhythmic drive is
         # still calm, which is precisely what used to over-trigger.
@@ -220,6 +247,12 @@ class PlanShapeTest(unittest.TestCase):
         self.assertEqual(beat_plan_at(self.plan, start + 1), (True, strength))
         self.assertEqual(beat_plan_at(self.plan, start - 1), (False, 0.0))
         self.assertEqual(beat_plan_at(None, start), (False, 0.0))
+
+    def test_stats_report_bridged_slots(self):
+        plan = build_beat_plan(
+            _track(list(range(0, 20000, 500)) + list(range(26000, 36000, 500))))
+        self.assertIn("bridgedSlots", plan["stats"])
+        self.assertGreater(plan["stats"]["bridgedSlots"], 0)
 
     def test_lookup_walks_forward_the_way_playback_does(self):
         runs = self.plan["runs"]
