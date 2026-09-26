@@ -247,6 +247,12 @@ class WindowApi:
     def toggle_playback(self):
         SMTC_BRIDGE.toggle_playback()
 
+    def skip_next(self):
+        SMTC_BRIDGE.skip_next()
+
+    def skip_previous(self):
+        SMTC_BRIDGE.skip_previous()
+
     def seek_position(self, target_ms: float):
         SMTC_BRIDGE.seek_position(target_ms)
 
@@ -306,6 +312,8 @@ if __name__ == '__main__':
         api.save_window_size,
         api.toggle_playback,
         api.seek_position,
+        api.skip_next,
+        api.skip_previous,
         api.save_latency,
         api.set_click_through,
         api.toggle_fullscreen,

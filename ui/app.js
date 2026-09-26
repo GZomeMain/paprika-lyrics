@@ -138,7 +138,10 @@ let lastRenderEnd = 0;
 let latencySaveTimer = null;
 
 const container = document.getElementById('lyrics-container');
-const playBtns = [document.getElementById('art-play-btn')].filter(Boolean);
+const playBtns = [
+  document.getElementById('art-play-btn'),
+  document.getElementById('transport-play-btn'),
+].filter(Boolean);
 const timerDisplay = document.getElementById('timer-display');
 // NOTE: the old #latency-bar / #latency-label elements were removed from the
 // DOM when the latency rail and settings page replaced them; the guarded
@@ -1073,6 +1076,18 @@ if (container) {
 function toggleSimpMusicPlay() {
   if (window.pywebview && window.pywebview.api) {
     window.pywebview.api.toggle_playback();
+  }
+}
+
+function skipNext() {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.skip_next) {
+    window.pywebview.api.skip_next();
+  }
+}
+
+function skipPrevious() {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.skip_previous) {
+    window.pywebview.api.skip_previous();
   }
 }
 

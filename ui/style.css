@@ -1238,27 +1238,72 @@ body.latency-rail-hot .latency-rail,
   font-family: var(--ui-font);
 }
 
-/* ---------- Float transport: elapsed — bar — duration under the track info ---------- */
-.float-transport {
+/* ---------- Float transport: progress row under the art, transport buttons under the text ---------- */
+.float-progress-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin: 6px 0 7px;
   pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
-.float-transport #timer-display,
-.float-transport #duration-display {
-  font-size: 10.5px;
+/* Transport controls: prev / play / next under the title-artist block. */
+.transport-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.transport-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--dur-2) var(--ease-fluid), color var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+.transport-btn .icon { width: 16px; height: 16px; }
+.transport-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.transport-btn:active { transform: scale(0.92); }
+
+.transport-play .icon { width: 20px; height: 20px; }
+.transport-play .icon-pause { display: none; }
+.transport-play.is-playing .icon-play { display: none; }
+.transport-play.is-playing .icon-pause { display: block; }
+.transport-play {
+  background: rgba(255, 255, 255, 0.16);
+}
+.transport-play:hover { background: rgba(255, 255, 255, 0.24); }
+
+.float-progress-row #timer-display,
+.float-progress-row #duration-display {
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: rgba(255, 255, 255, 0.72);
   font-weight: 600;
   white-space: nowrap;
+  min-width: 30px;
 }
 
+.float-progress-row #timer-display { text-align: right; }
+.float-progress-row #duration-display { text-align: left; }
+
 .float-progress {
-  width: 120px;
-  height: 3px;
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 4px;
   border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.18);
   overflow: hidden;
@@ -1282,6 +1327,7 @@ body.latency-rail-hot .latency-rail,
 
 .float-progress-fill {
   height: 100%;
+  position: relative;
   width: 0%;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.85);
@@ -1420,11 +1466,11 @@ body.latency-rail-hot .latency-rail,
   padding: 10px;
   padding-top: 12px;
   background:
-    radial-gradient(120% 85% at 8% 0%, rgba(72, 68, 112, 0.14), transparent 58%),
-    radial-gradient(110% 75% at 100% 100%, rgba(36, 48, 82, 0.14), transparent 55%),
-    rgba(4, 4, 7, 0.92);
-  backdrop-filter: blur(36px) saturate(110%);
-  -webkit-backdrop-filter: blur(36px) saturate(110%);
+    radial-gradient(120% 85% at 8% 0%, rgba(72, 68, 112, 0.10), transparent 58%),
+    radial-gradient(110% 75% at 100% 100%, rgba(36, 48, 82, 0.10), transparent 55%),
+    rgba(4, 4, 7, 0.55);
+  backdrop-filter: blur(28px) saturate(115%);
+  -webkit-backdrop-filter: blur(28px) saturate(115%);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -1446,7 +1492,7 @@ body.latency-rail-hot .latency-rail,
   display: flex;
   flex-direction: column;
   border-radius: var(--r-lg);
-  background: linear-gradient(160deg, rgba(28, 28, 36, 0.72), rgba(12, 12, 18, 0.68));
+  background: linear-gradient(160deg, rgba(24, 24, 32, 0.82), rgba(10, 10, 16, 0.80));
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid rgba(255, 255, 255, 0.13);
@@ -2148,13 +2194,15 @@ body.layout-split .track-float {
 
 .track-float .float-art-wrap,
 .track-float .track-text,
-.track-float .float-transport {
+.track-float .float-progress-row,
+.track-float .transport-row {
   pointer-events: auto;
 }
 
 /* Text next to the art stays part of the drag region (the float sets drag);
    the transport row and art opt out individually. */
-.track-float .float-transport,
+.track-float .float-progress-row,
+.track-float .transport-row,
 .track-float .float-art-wrap {
   -webkit-app-region: no-drag;
 }

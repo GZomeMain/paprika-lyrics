@@ -73,14 +73,37 @@
         </button>
       </div>
       <div class="track-text">
-        <div id="title">Waiting for SimpMusic...</div>
-        <div id="artist">Play any track to begin</div>
-        <div class="float-transport">
+        <!-- Progress row directly under the art: full-width seekable bar with
+             elapsed / duration flanking it, then title and artist beneath. -->
+        <div class="float-progress-row">
           <span id="timer-display">00:00</span>
-          <div class="float-progress" id="float-progress" title="Progress">
+          <div class="float-progress" id="float-progress" title="Seek">
             <div class="float-progress-fill" id="float-progress-fill"></div>
           </div>
           <span id="duration-display">00:00</span>
+        </div>
+        <div id="title">Waiting for SimpMusic...</div>
+        <div id="artist">Play any track to begin</div>
+        <div class="transport-row">
+          <button class="transport-btn" id="btn-prev" onclick="skipPrevious(); event.stopPropagation();" title="Previous track" aria-label="Previous track">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zm10.9-.74c.72-.43 1.63.09 1.63.94v12.4c0 .85-.91 1.37-1.63.94l-9.2-5.9a1.1 1.1 0 0 1 0-1.88l9.2-5.9z"/>
+            </svg>
+          </button>
+          <button class="transport-btn transport-play" id="transport-play-btn" onclick="toggleSimpMusicPlay(); event.stopPropagation();" title="Play / Pause" aria-label="Play or pause">
+            <svg class="icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M8.2 5.4c0-.86.94-1.39 1.67-.94l9.1 5.6a1.1 1.1 0 0 1 0 1.88l-9.1 5.6c-.73.45-1.67-.08-1.67-.94V5.4z"/>
+            </svg>
+            <svg class="icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="6.6" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+              <rect x="13.2" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+            </svg>
+          </button>
+          <button class="transport-btn" id="btn-next" onclick="skipNext(); event.stopPropagation();" title="Next track" aria-label="Next track">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M16.8 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zM6.1 4.86c-.72-.43-1.63.09-1.63.94v12.4c0 .85.91 1.37 1.63.94l9.2-5.9a1.1 1.1 0 0 0 0-1.88l-9.2-5.9z"/>
+            </svg>
+          </button>
         </div>
       </div>
     </div>
