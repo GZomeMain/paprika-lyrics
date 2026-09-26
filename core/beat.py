@@ -66,6 +66,12 @@ ON_TOL_MIN_MS = 55.0
 # --- trigger -------------------------------------------------------------
 COVER_WINDOW = 8        # slots the rolling occupancy window looks back over
 MIN_RUN = 3             # consecutive driven slots before a pulse may start
+# An instrumental break this short, sitting between two driven sections, is a
+# drop's quiet middle — not the end of the groove. The pulse is carried across
+# it at the quieter neighbour's depth. Longer breaks, and anything before the
+# first or after the last driven slot, stay dark: with no evidence on one side
+# there is nothing to carry.
+GAP_BRIDGE_MAX_SLOTS = 16  # ~8 s at 120 BPM
 ENTER_OCCUPANCY = 0.50  # occupancy needed to start...
 EXIT_OCCUPANCY = 0.34   # ...versus to keep going (hysteresis)
 # Sustained delivery has to clear a higher bar to start, but is not banned: a
@@ -280,6 +286,38 @@ def _percussiveness(count: int, dur_weighted: list[float], weight: list[float]) 
             running = max(PERCUSSIVE_FLOOR, min(1.0, PERCUSSIVE_MS / (num / den)))
         out.append(running)
     return out
+
+
+def _bridge_gaps(active: list[bool], strength: list[float],
+                 max_slots: int = GAP_BRIDGE_MAX_SLOTS) -> int:
+    """
+    Carry the pulse across bounded instrumental breaks between driven sections.
+
+    Occupancy is built from sung syllables only, so a drop's quiet middle has
+    zero evidence and the hysteresis gate closes exactly where the beat lands —
+    the one place the pulse matters most. A dark stretch bounded by active
+    sections on *both* sides and no longer than `max_slots` is made active at
+    the quieter neighbour's depth. Longer gaps, and gaps touching the first or
+    last driven slot, stay dark: on one side there is nothing to carry.
+    """
+    count = len(active)
+    bridged = 0
+    k = 0
+    while k < count:
+        if active[k]:
+            k += 1
+            continue
+        j = k
+        while j < count and not active[j]:
+            j += 1
+        if 0 < k and j < count and (j - k) <= max_slots:
+            level = min(strength[k - 1], strength[j])
+            for m in range(k, j):
+                active[m] = True
+                strength[m] = level
+                bridged += 1
+        k = j
+    return bridged
 
 
 def _rolling(values: list[float]) -> list[float]:

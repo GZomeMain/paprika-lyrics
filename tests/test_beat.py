@@ -2,9 +2,11 @@ import unittest
 
 from core.beat import (
     EXIT_OCCUPANCY,
+    GAP_BRIDGE_MAX_SLOTS,
     MACRO_FLOOR,
     MIN_ONSETS,
     PEAK_MIN_SEPARATION,
+    _bridge_gaps,
     _collect_onsets,
     _estimate_bpm,
     _find_builds,
@@ -314,6 +316,55 @@ class MacroIntensityTest(unittest.TestCase):
         spans = [(start, end) for start, end in builds]
         for (_, previous_end), (next_start, _) in zip(spans, spans[1:]):
             self.assertLessEqual(previous_end, next_start)
+
+
+class BridgeGapsTest(unittest.TestCase):
+    """The instrumental-drop fix: a bounded break between two driven sections
+    carries the pulse at reduced depth; anything else stays dark."""
+
+    def _active(self, n, filled_ranges):
+        a = [False] * n
+        for lo, hi in filled_ranges:
+            for k in range(lo, hi):
+                a[k] = True
+        return a
+
+    def test_short_gap_between_driven_sections_is_carried(self):
+        active = self._active(20, [(0, 8), (12, 20)])
+        strength = [0.8] * 8 + [0.3] * 4 + [0.6] * 8
+        bridged = _bridge_gaps(active, strength)
+        self.assertEqual(bridged, 4)
+        self.assertTrue(all(active[8:12]))
+        # Carried depth is the quieter of the two boundaries, not the gap's own
+        # evidence-free reading.
+        self.assertEqual(strength[8:12], [0.6, 0.6, 0.6, 0.6])
+
+    def test_long_gap_stays_dark(self):
+        # 40 s gap in test_instrumental_gap_rests is ~80 slots: far over the cap.
+        active = self._active(40, [(0, 10), (30, 40)])
+        strength = [0.8] * 10 + [0.3] * 20 + [0.6] * 10
+        bridged = _bridge_gaps(active, strength, max_slots=GAP_BRIDGE_MAX_SLOTS)
+        self.assertEqual(bridged, 0)
+        self.assertEqual(active[10:30], [False] * 20)
+
+    def test_leading_gap_stays_dark(self):
+        active = self._active(10, [(4, 10)])
+        strength = [0.3] * 4 + [0.7] * 6
+        self.assertEqual(_bridge_gaps(active, strength), 0)
+        self.assertEqual(active[:4], [False] * 4)
+
+    def test_trailing_gap_stays_dark(self):
+        active = self._active(10, [(0, 6)])
+        strength = [0.7] * 6 + [0.3] * 4
+        self.assertEqual(_bridge_gaps(active, strength), 0)
+        self.assertEqual(active[6:], [False] * 4)
+
+    def test_gap_bounded_by_only_one_active_side_stays_dark(self):
+        # Sparse delivery (inactive) on the far side: no bridge, the calm bridge
+        # behaviour is preserved.
+        active = self._active(20, [(0, 8)])  # slots 8..19 inactive
+        strength = [0.8] * 8 + [0.3] * 12
+        self.assertEqual(_bridge_gaps(active, strength), 0)
 
 
 class OccupancyBoundaryTest(unittest.TestCase):
