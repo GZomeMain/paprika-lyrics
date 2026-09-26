@@ -613,6 +613,8 @@ function renderDiagnostics() {
     ['Source', d.source || '\u2014'],
     ['Cache', d.cache ? (d.cache === 'hit' ? 'Hit' : 'Miss') : '\u2014'],
     ['Timing', d.timing || '\u2014'],
+    ['Album', d.album || '\u2014'],
+    ['Metadata', d.metadata || '\u2014'],
     ['Lines', d.lines === undefined || d.lines === null ? '\u2014' : String(d.lines)],
     ['Syllables', d.syllables === undefined || d.syllables === null ? '\u2014' : String(d.syllables)],
     ['API key', d.api_key === undefined ? '\u2014' : (d.api_key ? 'Set' : 'Missing')],
