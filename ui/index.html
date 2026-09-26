@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Spicy Lyrics Overlay — real-time lyric display for SimpMusic">
+  <title>Simp2Spicy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-root">
+
+    <div class="ambient-backdrop">
+      <!-- Dynamic cover-art layers are created and cross-faded by app.js. The
+           artwork IS the background; the scrim over it is a ::after, and the
+           grain is the last layer. -->
+      <div class="noise-overlay"></div>
+    </div>
+
+    <!-- Top drag strip: hold anywhere along the top edge to move the window -->
+    <div class="top-drag-strip pywebview-drag-region" aria-hidden="true"></div>
+
+    <!-- In compact/split the header hides and this floating block owns the
+         track info: art + title + artist, sitting a bit lower, seamlessly. -->
+    <div class="track-float pywebview-drag-region" id="track-float">
+      <div class="float-art-wrap" id="float-art-wrap">
+        <img id="track-art" class="track-art" alt="" draggable="false">
+
+        <!-- Spicy-style on-art controls, revealed while hovered -->
+        <div class="art-controls" id="art-controls">
+          <button class="art-btn" id="art-btn-fs" onclick="toggleFullscreen(); event.stopPropagation();"
+                  title="Fullscreen (F11)" aria-label="Toggle fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-layout" onclick="cycleLayout(); event.stopPropagation();"
+                  title="Cycle layout: Compact / Split" aria-label="Cycle layout">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="M9.5 4.5v15"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-settings" onclick="toggleSettings(event); event.stopPropagation();"
+                  title="Settings" aria-label="Open settings">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2"/>
+              <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+            </svg>
+          </button>
+          <button class="art-btn art-btn-danger" id="art-btn-close" onclick="window.pywebview.api.close(); event.stopPropagation();"
+                  title="Close" aria-label="Close">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" aria-hidden="true">
+              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+            </svg>
+          </button>
+        </div>
+        <!-- Centre play/pause: a quiet glass dot over the art -->
+        <button class="art-play-btn" id="art-play-btn" onclick="toggleSimpMusicPlay(); event.stopPropagation();" title="Play / Pause" aria-label="Play or pause">
+          <svg class="icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M8.2 5.4c0-.86.94-1.39 1.67-.94l9.1 5.6a1.1 1.1 0 0 1 0 1.88l-9.1 5.6c-.73.45-1.67-.08-1.67-.94V5.4z"/>
+          </svg>
+          <svg class="icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6.6" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+            <rect x="13.2" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+          </svg>
+        </button>
+      </div>
+      <div class="track-text">
+        <div id="title">Waiting for SimpMusic...</div>
+        <div id="artist">Play any track to begin</div>
+        <div class="float-transport">
+          <span id="timer-display">00:00</span>
+          <div class="float-progress" id="float-progress" title="Progress">
+            <div class="float-progress-fill" id="float-progress-fill"></div>
+          </div>
+          <span id="duration-display">00:00</span>
+        </div>
+      </div>
+    </div>
+
+    <header class="pywebview-drag-region" id="app-header">
+      <div class="track-meta pywebview-drag-region">
+      </div>
+      <div class="window-controls">
+        <button class="btn" id="btn-minimize" onclick="window.pywebview.api.minimize()" title="Minimize" aria-label="Minimize">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M5 12h14"/>
+          </svg>
+        </button>
+        <button class="btn btn-danger" id="btn-close" onclick="window.pywebview.api.close()" title="Close" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="lyrics-container"></div>
+
+    <!-- Split layout: art fixed on the left with its own transport, fullscreen only -->
+    <aside class="track-side-panel" id="track-side-panel" aria-hidden="true">
+      <div class="side-art-wrap">
+        <img id="side-art" class="side-art" alt="" draggable="false">
+        <!-- Same hover controls as the compact float, so split is fully operable -->
+        <div class="art-controls side-art-controls">
+          <button class="art-btn" onclick="cycleLayout(); event.stopPropagation();" title="Cycle layout" aria-label="Cycle layout">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="M9.5 4.5v15"/>
+            </svg>
+          </button>
+          <button class="art-btn" onclick="toggleSettings(event); event.stopPropagation();" title="Settings" aria-label="Open settings">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2"/>
+              <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="side-transport">
+        <div class="side-progress-row">
+          <span class="side-time" id="side-time-now">0:00</span>
+          <div class="side-progress-track"><div class="side-progress-fill" id="side-progress-fill"></div></div>
+          <span class="side-time" id="side-time-total">0:00</span>
+        </div>
+        <div class="side-title" id="side-title"></div>
+        <div class="side-artist" id="side-artist"></div>
+      </div>
+    </aside>
+
+    <!-- Latency rail: hidden at the right edge, slides in on approach.
+         A vertical sync slider with small +/- steppers. -->
+    <div class="latency-rail" id="latency-rail" aria-label="Sync latency">
+      <div class="latency-rail-inner">
+        <span class="latency-rail-label">Sync</span>
+        <button class="latency-rail-btn" id="latency-rail-minus" title="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50 milliseconds">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M7 12h10"/></svg>
+        </button>
+        <div class="latency-slider" id="latency-slider" title="Drag to adjust sync">
+          <div class="latency-slider-track"></div>
+          <div class="latency-slider-fill" id="latency-slider-fill"></div>
+          <div class="latency-slider-thumb" id="latency-slider-thumb"></div>
+        </div>
+        <button class="latency-rail-btn" id="latency-rail-plus" title="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50 milliseconds">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 7v10M7 12h10"/></svg>
+        </button>
+        <span class="latency-rail-value" id="latency-rail-value">+600ms</span>
+      </div>
+    </div>
+
+    <!-- Settings: a full-window sheet rather than a dropdown. Every option gets
+         a section, a real label and room to explain itself, which a 236px
+         popover could never do. Same liquid glass, over a near-black wash. -->
+    <section class="settings-page" id="quick-panel" role="dialog" aria-modal="true"
+             aria-label="Settings" aria-hidden="true">
+      <div class="sp-sheet">
+        <header class="sp-head">
+          <div>
+            <div class="sp-title">Settings</div>
+            <div class="sp-sub">Spicy Lyrics Overlay</div>
+          </div>
+          <button class="sp-close" onclick="closeSettings()" title="Close (Esc)" aria-label="Close settings">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+            </svg>
+          </button>
+        </header>
+
+        <div class="sp-body">
+          <section class="sp-group">
+            <h2 class="sp-group-title">Sync</h2>
+            <div class="qp-row qp-static">
+              <span class="qp-label">Latency</span>
+              <div class="qp-stepper">
+                <button class="qp-btn" onclick="nudgeLatency(-50)" title="Later by 50ms" aria-label="Sync later by 50 milliseconds">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M7 12h10"/>
+                  </svg>
+                </button>
+                <span class="qp-value" id="qp-latency">+600ms</span>
+                <button class="qp-btn" onclick="nudgeLatency(50)" title="Earlier by 50ms" aria-label="Sync earlier by 50 milliseconds">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M12 7v10M7 12h10"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <p class="sp-hint">Adjusts lyric timing against playback. A larger offset shows lyrics earlier. Also use <kbd style="font-family:inherit;opacity:.6">Ctrl+[</kbd> later / <kbd style="font-family:inherit;opacity:.6">Ctrl+]</kbd> earlier. Saved per track.</p>
+          </section>
+
+          <section class="sp-group">
+            <h2 class="sp-group-title">Lyrics</h2>
+            <button class="qp-row qp-action" id="qp-trans" onclick="toggleTranslations()">
+              <span class="qp-label">Translations</span>
+              <span class="qp-state">On</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-font" onclick="cycleFont()">
+              <span class="qp-label">Font</span>
+              <span class="qp-state">Apple</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-align" onclick="cycleLyricAlign()">
+              <span class="qp-label">Alignment</span>
+              <span class="qp-state" id="qp-align-state">Left</span>
+            </button>
+          </section>
+
+          <section class="sp-group">
+            <h2 class="sp-group-title">Motion</h2>
+            <button class="qp-row qp-action" id="qp-motion" onclick="toggleMotion()">
+              <span class="qp-label">Motion</span>
+              <span class="qp-state">Full</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-motion-style" onclick="cycleMotionStyle()">
+              <span class="qp-label">Motion style</span>
+              <span class="qp-state" id="qp-motion-style-state">Auto</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-beat" onclick="cycleBeatMode()">
+              <span class="qp-label">Beat sync</span>
+              <span class="qp-state" id="qp-beat-state">Subtle</span>
+            </button>
+          </section>
+
+          <section class="sp-group">
+            <h2 class="sp-group-title">Window</h2>
+            <button class="qp-row qp-action" id="qp-layout" onclick="cycleLayout()">
+              <span class="qp-label">Layout</span>
+              <span class="qp-state" id="qp-layout-state">Compact</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-fullscreen" onclick="toggleFullscreen()">
+              <span class="qp-label">Fullscreen</span>
+              <span class="qp-state" id="qp-fs-state">Off</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-ontop" onclick="toggleAlwaysOnTop()">
+              <span class="qp-label">Always on top</span>
+              <span class="qp-state" id="qp-ontop-state">Off</span>
+            </button>
+            <button class="qp-row qp-action" id="qp-clickthrough" onclick="toggleClickThrough()">
+              <span class="qp-label">Click-through</span>
+              <span class="qp-state">Off</span>
+            </button>
+          </section>
+
+          <section class="sp-group">
+            <h2 class="sp-group-title">Diagnostics</h2>
+            <button class="qp-row qp-action" id="qp-info-toggle" onclick="toggleDiagnostics()"
+                    aria-expanded="false" aria-controls="qp-info">
+              <span class="qp-label">Resolve report</span>
+              <span class="qp-state" id="qp-info-caret">Show</span>
+            </button>
+            <div class="qp-info" id="qp-info">
+              <div class="qp-info-body" id="qp-info-body"></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Settings footer: version + close hint -->
+        <div style="flex-shrink:0;padding:10px 16px;border-top:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:10px;color:rgba(255,255,255,0.28);font-family:var(--ui-font);letter-spacing:.04em;">Simp2Spicy</span>
+          <span style="font-size:10px;color:rgba(255,255,255,0.22);font-family:var(--ui-font);letter-spacing:.04em;">Esc to close</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Invisible resize grips: edges and corners -->
+    <div class="resize-handle resize-e" data-dir="e" title=""></div>
+    <div class="resize-handle resize-w" data-dir="w" title=""></div>
+    <div class="resize-handle resize-s" data-dir="s" title=""></div>
+    <div class="resize-handle resize-n" data-dir="n" title=""></div>
+    <div class="resize-handle resize-se" data-dir="se" title=""></div>
+    <div class="resize-handle resize-sw" data-dir="sw" title=""></div>
+    <div class="resize-handle resize-ne" data-dir="ne" title=""></div>
+    <div class="resize-handle resize-nw" data-dir="nw" title=""></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
