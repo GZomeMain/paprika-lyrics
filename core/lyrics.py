@@ -18,19 +18,26 @@ def _warn_key_once():
         warn_missing_api_key()
 
 
-def _lyrics_cache_key(title: str, artist: str, duration_ms: float | None = None) -> str:
+def _lyrics_cache_key(title: str, artist: str, duration_ms: float | None = None,
+                      album: str | None = None) -> str:
     """
-    Cache key that folds in a coarse duration bucket so two different tracks
-    sharing a title/artist (remasters, live vs studio) never collide.
+    Cache key folding in a coarse duration bucket and (when present) the album,
+    so two different tracks sharing a title/artist (remasters, live vs studio,
+    same-name singles) never collide. Omitting the album keeps the legacy key
+    shape so existing cache entries remain reachable.
     """
     base = f"{title}___{artist}".lower()
+    if album:
+        base = f"{base}___{album.lower()}"
     if duration_ms and duration_ms > 0:
         return f"{base}___{int(round(duration_ms / 1000.0))}s"
     return base
 
 
-def fetch_lrclib(title: str, artist: str, duration_ms: float | None = None) -> list[dict]:
-    # Tier 1: exact LRCLIB lookup.
+def fetch_lrclib(title: str, artist: str, duration_ms: float | None = None,
+                 album: str | None = None) -> list[dict]:
+    # Tier 1: exact LRCLIB lookup (unchanged — adding album here would miss
+    # entries whose album metadata disagrees with ours).
     try:
         res = http_get(
             "https://lrclib.net/api/get",
@@ -43,26 +50,36 @@ def fetch_lrclib(title: str, artist: str, duration_ms: float | None = None) -> l
     except Exception as exc:
         debug_log("LRCLIB exact lookup failed:", exc)
 
-    # Tier 2: fuzzy search, preferring the closest matching duration.
-    params = {"track_name": title, "artist_name": artist}
+    # Tier 2: fuzzy search. An album-scoped attempt first gives compilations
+    # and same-name tracks the right recording; the plain search below is the
+    # unchanged fallback that keeps today's hit rate.
+    base_params = {"track_name": title, "artist_name": artist}
     if duration_ms and duration_ms > 0:
-        params["duration"] = int(round(duration_ms / 1000.0))
-    try:
-        res = http_get("https://lrclib.net/api/search", params=params)
-        if res and res.status_code == 200:
-            results = res.json()
-            if isinstance(results, list):
-                candidates = [r for r in results if isinstance(r, dict) and r.get("syncedLyrics")]
-                if duration_ms and duration_ms > 0:
-                    target_s = duration_ms / 1000.0
-                    candidates.sort(key=lambda r: abs(float(r.get("duration") or 0) - target_s))
-                for item in candidates:
-                    lines = parse_lrc(item["syncedLyrics"])
-                    if lines:
-                        debug_log(f"LRCLIB search matched '{item.get('trackName')}'")
-                        return lines
-    except Exception as exc:
-        debug_log("LRCLIB search failed:", exc)
+        base_params["duration"] = int(round(duration_ms / 1000.0))
+    attempts = []
+    if album:
+        album_params = dict(base_params)
+        album_params["album_name"] = album
+        attempts.append(album_params)
+    attempts.append(dict(base_params))
+
+    for params in attempts:
+        try:
+            res = http_get("https://lrclib.net/api/search", params=params)
+            if res and res.status_code == 200:
+                results = res.json()
+                if isinstance(results, list):
+                    candidates = [r for r in results if isinstance(r, dict) and r.get("syncedLyrics")]
+                    if duration_ms and duration_ms > 0:
+                        target_s = duration_ms / 1000.0
+                        candidates.sort(key=lambda r: abs(float(r.get("duration") or 0) - target_s))
+                    for item in candidates:
+                        lines = parse_lrc(item["syncedLyrics"])
+                        if lines:
+                            debug_log(f"LRCLIB search matched '{item.get('trackName')}'")
+                            return lines
+        except Exception as exc:
+            debug_log("LRCLIB search failed:", exc)
 
     return []
 
@@ -163,10 +180,13 @@ def _count_syllables(lines: list[dict]) -> int:
 
 
 def _build_diagnostics(source: str, cache: str, lines: list[dict],
-                       syllables: int | None = None, track_id: str | None = None) -> dict:
+                       syllables: int | None = None, track_id: str | None = None,
+                       album: str = "", metadata_source: str = "smtc") -> dict:
     """
     Small, user-facing report of how this track's lyrics were obtained. Surfaced
     in the UI so a fallback to line-synced lyrics is explainable without stdout.
+    `album` and `metadata_source` report what the player broadcast ("filename"
+    means a local file whose tags needed repair).
     """
     syl = _count_syllables(lines) if syllables is None else syllables
     if not lines:
@@ -182,14 +202,18 @@ def _build_diagnostics(source: str, cache: str, lines: list[dict],
         "lines": len(lines or []),
         "syllables": syl,
         "track_id": track_id or "",
+        "album": album,
+        "metadata": metadata_source,
         "parser_version": PARSER_VERSION,
         "api_key": bool(SPICY_API_KEY),
     }
 
 
-def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None) -> tuple[list[dict], str, str | None, dict]:
+def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
+                 album: str | None = None,
+                 metadata_source: str = "smtc") -> tuple[list[dict], str, str | None, dict]:
     c_title, primary_artist, _ = extract_clean_metadata(title, artist)
-    lyrics_cache_key = _lyrics_cache_key(c_title, primary_artist, duration_ms)
+    lyrics_cache_key = _lyrics_cache_key(c_title, primary_artist, duration_ms, album)
 
     cached_payload = CACHE.get_lyrics(lyrics_cache_key, PARSER_VERSION)
     if cached_payload and _lines_look_corrupt(cached_payload.get("lines")):
@@ -215,7 +239,8 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None) -> t
 
     _warn_key_once()
 
-    lrclib_future = ASYNC_EXECUTOR.submit(fetch_lrclib, c_title, primary_artist, duration_ms)
+    lrclib_future = ASYNC_EXECUTOR.submit(
+        fetch_lrclib, c_title, primary_artist, duration_ms, album)
 
     # The Spicy chain (resolve ID -> fetch -> parse) runs as ONE background task,
     # and only waits on LRCLIB at the last moment it is actually needed (parse
@@ -247,7 +272,9 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None) -> t
                 "track_id": track_id,
                 "syllables": syl_count
             })
-            return lines, source, track_id, _build_diagnostics(source, "miss", lines, syl_count, track_id)
+            return lines, source, track_id, _build_diagnostics(
+                source, "miss", lines, syl_count, track_id,
+                album=album, metadata_source=metadata_source)
 
     print("⚠️ Falling back to LRCLIB (Line-only timing)...")
     lrclib_lines = lrclib_future.result()
@@ -259,6 +286,10 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None) -> t
             "track_id": track_id,
             "syllables": 0
         })
-        return lrclib_lines, "LRCLIB", track_id, _build_diagnostics("LRCLIB", "miss", lrclib_lines, 0, track_id)
+        return lrclib_lines, "LRCLIB", track_id, _build_diagnostics(
+            "LRCLIB", "miss", lrclib_lines, 0, track_id,
+            album=album, metadata_source=metadata_source)
 
-    return [], "None", track_id, _build_diagnostics("None", "miss", [], 0, track_id)
+    return [], "None", track_id, _build_diagnostics(
+        "None", "miss", [], 0, track_id,
+        album=album, metadata_source=metadata_source)

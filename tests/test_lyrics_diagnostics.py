@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from core.lyrics import (
     _build_diagnostics,
@@ -154,6 +155,112 @@ class LyricsCacheKeyTest(unittest.TestCase):
         self.assertEqual(_lyrics_cache_key("Song", "Artist"), "song___artist")
         self.assertEqual(_lyrics_cache_key("Song", "Artist", 0), "song___artist")
         self.assertEqual(_lyrics_cache_key("Song", "Artist", 205_000), "song___artist___205s")
+
+    def test_album_disambiguates_same_title_and_artist(self):
+        self.assertNotEqual(
+            _lyrics_cache_key("Song", "Artist", 200_000, "Album A"),
+            _lyrics_cache_key("Song", "Artist", 200_000, "Album B"),
+        )
+
+    def test_no_album_keeps_legacy_key_shape(self):
+        # Existing cache entries must stay reachable: album is folded in only
+        # when present.
+        self.assertEqual(
+            _lyrics_cache_key("Song", "Artist", 200_000, None),
+            "song___artist___200s",
+        )
+        self.assertEqual(
+            _lyrics_cache_key("Song", "Artist", 200_000, ""),
+            "song___artist___200s",
+        )
+
+
+class AlbumAwareLookupTest(unittest.TestCase):
+    def test_album_scoped_search_attempted_first(self):
+        import core.lyrics as L
+
+        calls = []
+
+        def fake_get(url, **kwargs):
+            calls.append((url, kwargs.get("params", {})))
+            if "api/search" in url:
+                return SimpleNamespace(status_code=200, json=lambda: [
+                    {"trackName": "Song", "syncedLyrics": "[00:01.00]hello"}])
+            return SimpleNamespace(status_code=404, json=lambda: {})
+
+        orig = L.http_get
+        L.http_get = fake_get
+        try:
+            lines = L.fetch_lrclib("Song", "Artist", 200_000, album="Album A")
+        finally:
+            L.http_get = orig
+
+        self.assertEqual(len(lines), 1)
+        searches = [p for u, p in calls if "api/search" in u]
+        self.assertEqual(searches[0].get("album_name"), "Album A")
+        # A successful album-scoped search returns immediately: the plain
+        # search is a fallback for the MISS case, not a second always-on call.
+        self.assertEqual(len(searches), 1)
+
+    def test_plain_search_fires_when_album_scoped_misses(self):
+        import core.lyrics as L
+
+        calls = []
+
+        def fake_get(url, **kwargs):
+            calls.append((url, kwargs.get("params", {})))
+            if "api/search" in url:
+                if "album_name" in kwargs.get("params", {}):
+                    return SimpleNamespace(status_code=200, json=lambda: [])  # album miss
+                return SimpleNamespace(status_code=200, json=lambda: [
+                    {"trackName": "Song", "syncedLyrics": "[00:01.00]hello"}])
+            return SimpleNamespace(status_code=404, json=lambda: {})
+
+        orig = L.http_get
+        L.http_get = fake_get
+        try:
+            lines = L.fetch_lrclib("Song", "Artist", 200_000, album="Album A")
+        finally:
+            L.http_get = orig
+
+        self.assertEqual(len(lines), 1)
+        searches = [p for u, p in calls if "api/search" in u]
+        self.assertEqual(len(searches), 2)
+        self.assertIn("album_name", searches[0])
+        self.assertNotIn("album_name", searches[1])
+
+    def test_fetch_lyrics_forwards_album(self):
+        import core.lyrics as L
+        seen = {}
+
+        orig = (L.CACHE.get_lyrics, L.fetch_lrclib, L.fetch_spicy_with_id)
+        L.CACHE.get_lyrics = lambda *a, **k: None
+
+        def fake_lrclib(t, a, d=None, album=None):
+            seen["album"] = album
+            return [{"text": "x", "startTimeMs": 0, "endTimeMs": 1, "words": []}]
+
+        L.fetch_lrclib = fake_lrclib
+        L.fetch_spicy_with_id = lambda tid, lrclib_lines=None: ([], None)
+        try:
+            L.fetch_lyrics("Song", "Artist", 200_000, album="Album A")
+        finally:
+            (L.CACHE.get_lyrics, L.fetch_lrclib, L.fetch_spicy_with_id) = orig
+
+        self.assertEqual(seen["album"], "Album A")
+
+
+class MetadataSourceDiagnosticsTest(unittest.TestCase):
+    def test_album_and_metadata_surface(self):
+        diag = _build_diagnostics("LRCLIB", "miss", [], 0, None,
+                                  album="MAYHEM", metadata_source="filename")
+        self.assertEqual(diag["album"], "MAYHEM")
+        self.assertEqual(diag["metadata"], "filename")
+
+    def test_defaults_keep_legacy_shape(self):
+        diag = _build_diagnostics("LRCLIB", "hit", [])
+        self.assertEqual(diag["album"], "")
+        self.assertEqual(diag["metadata"], "smtc")
 
 
 if __name__ == "__main__":
