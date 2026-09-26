@@ -141,6 +141,7 @@ const container = document.getElementById('lyrics-container');
 const playBtns = [
   document.getElementById('art-play-btn'),
   document.getElementById('transport-play-btn'),
+  document.getElementById('art-tp-play'),
 ].filter(Boolean);
 const timerDisplay = document.getElementById('timer-display');
 // NOTE: the old #latency-bar / #latency-label elements were removed from the
@@ -1124,12 +1125,26 @@ function updateFloatProgress(ms) {
   }
   const durEl = document.getElementById('duration-display');
   if (durEl && sideTotalMs > 0) durEl.textContent = formatTime(sideTotalMs);
+  // The on-art player mirrors the float's row so both read the same clock.
+  const artFill = document.getElementById('art-progress-fill');
+  if (artFill && sideTotalMs > 0) {
+    const second = Math.floor(ms / 1000);
+    if (second !== lastArtFillSecond) {
+      lastArtFillSecond = second;
+      artFill.style.width = Math.max(0, Math.min(100, (ms / sideTotalMs) * 100)).toFixed(2) + '%';
+    }
+  }
+  const artDurEl = document.getElementById('art-duration-display');
+  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTime(sideTotalMs);
+  const artNowEl = document.getElementById('art-timer-display');
+  if (artNowEl && second !== undefined) artNowEl.textContent = formatTime(ms);
 }
 
 // Split-layout transport + float transport state.
 let sideTotalMs = 0;
 let lastSideFillSecond = -1;
 let lastFloatFillSecond = -1;
+let lastArtFillSecond = -1;
 
 window.setTrackDuration = function(ms) {
   sideTotalMs = (typeof ms === 'number' && ms > 0) ? ms : 0;
@@ -1137,6 +1152,8 @@ window.setTrackDuration = function(ms) {
   if (totalEl && sideTotalMs > 0) totalEl.textContent = formatTime(sideTotalMs).replace(/^0/, '');
   const durEl = document.getElementById('duration-display');
   if (durEl && sideTotalMs > 0) durEl.textContent = formatTime(sideTotalMs);
+  const artDurEl = document.getElementById('art-duration-display');
+  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTime(sideTotalMs);
 };
 
 function updateSideTransport(ms) {
@@ -1184,6 +1201,7 @@ function applySeek(targetMs) {
   lastDisplayedSecond = -1;
   lastFloatFillSecond = -1;
   lastSideFillSecond = -1;
+  lastArtFillSecond = -1;
   updateTimer(targetMs);
   renderProgress(playheadMs + latencyOffsetMs);
   if (window.pywebview && window.pywebview.api && window.pywebview.api.seek_position) {
@@ -1216,6 +1234,7 @@ function initSeekBars() {
     });
   };
   attach(document.getElementById('float-progress'), false);
+  attach(document.getElementById('art-progress'), false);
   attach(document.querySelector('.side-progress-track'), false);
 }
 initSeekBars();

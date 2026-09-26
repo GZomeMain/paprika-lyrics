@@ -430,6 +430,7 @@ header:active {
    NEW interactive element added inside .track-float needs this too. */
 .track-float .art-controls,
 .track-float .art-play-btn,
+.track-float .art-player,
 .track-float .float-progress {
   -webkit-app-region: no-drag;
 }
@@ -1248,7 +1249,9 @@ body.latency-rail-hot .latency-rail,
   -webkit-app-region: no-drag;
 }
 
-/* Transport controls: prev / play / next under the title-artist block. */
+/* Transport controls: prev / play / next. In compact layout the hovered art
+   carries the transport itself (art-player), so the text-column row retires;
+   it stays visible wherever an art-player does not exist. */
 .transport-row {
   display: flex;
   align-items: center;
@@ -1257,6 +1260,10 @@ body.latency-rail-hot .latency-rail,
   margin-top: 6px;
   pointer-events: auto;
   -webkit-app-region: no-drag;
+}
+
+body.layout-compact .track-text > .transport-row {
+  display: none;
 }
 
 .transport-btn {
@@ -1333,6 +1340,93 @@ body.latency-rail-hot .latency-rail,
   background: rgba(255, 255, 255, 0.85);
   transition: width 0.25s linear;
 }
+
+/* ---------- On-art player (Spotify-style): transport + progress on the hovered art ----------
+   The art becomes the player: a bottom scrim carries the transport row and the
+   seekable progress row with times. Same components as the float's rows
+   (transport-btn / float-progress), duplicated with art- prefixed ids so both
+   update together; any new interactive element inside the drag region opts out
+   individually (see the drag-region note above). */
+.art-player {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 26px 14px 12px;
+  border-radius: inherit;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--dur-3) var(--ease-fluid), transform var(--dur-3) var(--ease-fluid);
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(8, 8, 10, 0.66), rgba(8, 8, 10, 0.3) 55%, transparent);
+}
+
+.float-art-wrap:hover .art-player,
+.side-art-wrap:hover .art-player {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* On-art transport: tighter gaps than the float's row so three buttons fit a
+   220px art card without crowding the progress row above. */
+.art-transport {
+  gap: 10px;
+  margin-top: 0;
+}
+
+.art-transport .transport-btn {
+  width: 34px;
+  height: 34px;
+}
+
+.art-transport .transport-btn .icon { width: 18px; height: 18px; }
+
+/* The centre play/pause glyph sits in the transport row only — the big centre
+   dot would collide with it, and the reference shows a single transport. */
+.art-player .transport-play {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.art-player .transport-play:hover { background: rgba(255, 255, 255, 0.26); }
+
+/* On-art progress: same seek bar behaviour as the float's, times flank it. */
+.art-progress {
+  width: 100%;
+  margin: 0;
+}
+
+.art-time {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  min-width: 26px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+.art-time#art-timer-display { text-align: right; }
+.art-time#art-duration-display { text-align: left; }
+
+/* In fullscreen the hover-grown art (300px) hosts the same on-art player; the
+   larger card gets roomier spacing and slightly larger glyphs. */
+body.is-fullscreen .art-player {
+  padding: 30px 18px 14px;
+  gap: 9px;
+}
+
+body.is-fullscreen .art-transport .transport-btn {
+  width: 40px;
+  height: 40px;
+}
+
+body.is-fullscreen .art-transport .transport-btn .icon { width: 20px; height: 20px; }
 
 /* ---------- Centre play/pause over the art ----------
    Same material as the other on-art options: borderless glyph on a soft glass
