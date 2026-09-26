@@ -81,6 +81,28 @@ class SmtcBridge:
         if self.current_session and self.event_loop and self.event_loop.is_running():
             asyncio.run_coroutine_threadsafe(self._do_seek(target_ms), self.event_loop)
 
+    def skip_next(self):
+        if self.current_session and self.event_loop and self.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._do_skip_next(), self.event_loop)
+
+    def skip_previous(self):
+        if self.current_session and self.event_loop and self.event_loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._do_skip_previous(), self.event_loop)
+
+    async def _do_skip_next(self):
+        try:
+            if self.current_session:
+                await self.current_session.try_skip_next_async()
+        except Exception:
+            pass  # Session may have closed or changed
+
+    async def _do_skip_previous(self):
+        try:
+            if self.current_session:
+                await self.current_session.try_skip_previous_async()
+        except Exception:
+            pass  # Session may have closed or changed
+
     async def _do_toggle(self):
         try:
             if not self.current_session:
