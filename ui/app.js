@@ -1359,7 +1359,11 @@ function tick() {
   if (isPlaying) {
     // Decay any pending drift correction, then read the position off the wall clock.
     if (Math.abs(targetDriftMs) > 1) {
-      targetDriftMs -= targetDriftMs * 0.12;
+      // Time-based exponential decay (tau ≈ 250 ms), so the ease completes in
+      // about a second whatever the display's refresh rate. The old per-frame
+      // 12% decay finished in 2–6 frames — a yank, not an ease — and its depth
+      // silently depended on 60 vs 144 Hz.
+      targetDriftMs -= targetDriftMs * Math.min(1, delta / 250);
     } else {
       targetDriftMs = 0;
     }
@@ -2591,9 +2595,23 @@ window.syncPlayhead = function(ms) {
     resetAllLines();
     renderProgress(playheadMs + latencyOffsetMs);
   } else if (Math.abs(diff) > 75) {
-    // Small correction: fold it into the decaying drift term so the wipe eases
-    // into sync instead of stepping.
-    targetDriftMs += diff;
+    // Small correction: re-anchor to the reported position, but ease the
+    // *display* into it. The anchor absorbs the full correction now (the
+    // trajectory is fixed and never reverts) and a cancelling drift term decays,
+    // so the wipe glides across the gap instead of stepping. Folding the diff
+    // into the decaying drift alone — the old behaviour — applied the
+    // correction and then took it back, so any steady offset (a stale SMTC
+    // snapshot, a brief buffering stall) re-triggered on every one-second
+    // heartbeat and the lyric stuttered, visibly slowing, once per second.
+    anchorPosMs += diff;
+    anchorWallMs = now;
+    targetDriftMs = -diff;
+    if (!isPlaying) {
+      // Paused there is no advancing wipe to ease: land directly.
+      targetDriftMs = 0;
+      playheadMs = anchorPosMs;
+      updateTimer(playheadMs);
+    }
   }
 };
 
