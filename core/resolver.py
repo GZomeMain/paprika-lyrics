@@ -72,14 +72,20 @@ def query_odesli(url_or_id: str, platform: str | None = None) -> str | None:
         pass
     return None
 
-def resolve_spotify_track_id(raw_title: str, raw_artist: str) -> str | None:
+def resolve_spotify_track_id(raw_title: str, raw_artist: str,
+                             album: str | None = None) -> str | None:
     """
     Resolves Spotify Track ID through multi-tiered resolution:
     Cache -> SpotifyScraper -> Apple Music (iTunes + Odesli) -> Deezer (+ Odesli)
+
+    `album` sharpens the scraper search term and the cache key when present;
+    omitting it keeps the legacy cache-key shape so existing entries stay valid.
     """
     c_title, primary_artist, full_artist = extract_clean_metadata(raw_title, raw_artist)
     artist_query = primary_artist or full_artist
     cache_key = f"{c_title}___{artist_query}".lower()
+    if album:
+        cache_key = f"{cache_key}___{album.lower()}"
 
     cached_id = CACHE.get_track(cache_key)
     if cached_id:
@@ -92,6 +98,8 @@ def resolve_spotify_track_id(raw_title: str, raw_artist: str) -> str | None:
     if SPOTIFY_SCRAPER_AVAILABLE and SCRAPER_CLIENT:
         try:
             search_query = f"{c_title} {artist_query}".strip()
+            if album:
+                search_query = f"{search_query} {album}".strip()
             with SCRAPER_LOCK:
                 results = SCRAPER_CLIENT.search(search_query, types=("track",), limit=1)
             if results and results.tracks:

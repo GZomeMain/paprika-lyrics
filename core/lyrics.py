@@ -252,7 +252,7 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
     # in hand — total latency is max(LRCLIB, ID+Spicy) instead of
     # max(LRCLIB, ID) + Spicy.
     def _spicy_chain():
-        tid = resolve_spotify_track_id(title, artist)
+        tid = resolve_spotify_track_id(title, artist, album)
         if not tid:
             return tid, None
         return tid, fetch_spicy_with_id(tid, lrclib_lines=lrclib_future.result())
