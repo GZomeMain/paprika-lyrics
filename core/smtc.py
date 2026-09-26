@@ -2,6 +2,7 @@ import asyncio
 import base64
 import datetime
 import json
+import os
 import threading
 import time
 from dataclasses import replace as dc_replace
@@ -20,6 +21,7 @@ from core.media_meta import (
     media_meta_from_smtc,
 )
 from core.metadata import normalize_weak_title
+from core.vlc_source import VlcSource
 from core.resolver import resolve_artwork_url
 from core.session import select_session
 
@@ -69,6 +71,15 @@ class SmtcBridge:
         # app has been the only candidate to replace it.
         self.pinned_app_id = ""
         self.challenger_since: tuple[str, float] | None = None
+        # VLC 3.x never appears in GSMTC; when no media session exists we poll
+        # its HTTP interface instead. Password comes from the environment
+        # (VLC_HTTP_PASSWORD / VLC_HTTP_HOST / VLC_HTTP_PORT).
+        self.vlc = VlcSource(
+            password=os.getenv("VLC_HTTP_PASSWORD", ""),
+            host=os.getenv("VLC_HTTP_HOST", "127.0.0.1"),
+            port=int(os.getenv("VLC_HTTP_PORT", "8080")),
+        )
+        self._vlc_track_sig = "" 
 
     # =========================================================================
     # Media Control Actions (Called from UI Buttons / Seeking)
@@ -76,18 +87,26 @@ class SmtcBridge:
     def toggle_playback(self):
         if self.current_session and self.event_loop and self.event_loop.is_running():
             asyncio.run_coroutine_threadsafe(self._do_toggle(), self.event_loop)
+        elif self.vlc.configured:
+            self.vlc.command("pl_pause")
 
     def seek_position(self, target_ms: float):
         if self.current_session and self.event_loop and self.event_loop.is_running():
             asyncio.run_coroutine_threadsafe(self._do_seek(target_ms), self.event_loop)
+        elif self.vlc.configured:
+            self.vlc.command("seek", val=f"{int(target_ms / 1000)}")
 
     def skip_next(self):
         if self.current_session and self.event_loop and self.event_loop.is_running():
             asyncio.run_coroutine_threadsafe(self._do_skip_next(), self.event_loop)
+        elif self.vlc.configured:
+            self.vlc.command("pl_next")
 
     def skip_previous(self):
         if self.current_session and self.event_loop and self.event_loop.is_running():
             asyncio.run_coroutine_threadsafe(self._do_skip_previous(), self.event_loop)
+        elif self.vlc.configured:
+            self.vlc.command("pl_previous")
 
     async def _do_skip_next(self):
         try:
@@ -204,6 +223,9 @@ class SmtcBridge:
 
         last_track_sig = ""
         last_playing = False
+        self._vlc_last_playing = False
+        self._vlc_track_sig = ""
+        self._vlc_last_pos_ms = 0.0
         last_periodic_sync = 0.0
 
         while not self.shutdown_event.is_set():
@@ -214,12 +236,16 @@ class SmtcBridge:
                 self.current_session = session
 
                 if not session:
-                    if last_track_sig != "":
-                        last_track_sig = ""
-                        window.evaluate_js("window.setPlaybackState(false);")
-                        window.evaluate_js("window.setCoverArt(null);")
-                    # Sleep longer when no media player is active
-                    await asyncio.sleep(1.2)
+                    vlc_state = self._vlc_tick(window)
+                    if vlc_state is None:
+                        if last_track_sig != "":
+                            last_track_sig = ""
+                            window.evaluate_js("window.setPlaybackState(false);")
+                            window.evaluate_js("window.setCoverArt(null);")
+                        # Sleep longer when no media player is active
+                        await asyncio.sleep(1.2)
+                        continue
+                    await asyncio.sleep(self.vlc.poll_interval(vlc_state))
                     continue
 
                 playback = session.get_playback_info()
@@ -377,6 +403,51 @@ class SmtcBridge:
             return session.source_app_user_model_id or ""
         except Exception:
             return ""
+
+    def _vlc_tick(self, window):
+        """One VLC poll cycle when SMTC has no session. Returns the state or None.
+
+        Feeds the same JS entry points the SMTC path uses, so the overlay's
+        behaviour is identical no matter which source is live.
+        """
+        state = self.vlc.poll()
+        if state is None:
+            return None
+
+        is_playing = state.playing
+        if is_playing != self._vlc_last_playing:
+            self._vlc_last_playing = is_playing
+            window.evaluate_js(f"window.setPlaybackState({str(is_playing).lower()});")
+
+        if not state.title:
+            return state  # radio/untitled stream: nothing to look up
+
+        track_sig = f"vlc:::{state.title}:::{state.artist}:::{state.album}:::{int(state.length_ms or 0)}"
+        if track_sig != self._vlc_track_sig:
+            self._vlc_track_sig = track_sig
+            window.evaluate_js(f"window.showLoading({json.dumps(state.title)}, {json.dumps(state.artist)});")
+            window.evaluate_js("window.setCoverArt(null);")
+            try:
+                lines, source, _tid, diagnostics = fetch_lyrics(
+                    state.title, state.artist, state.length_ms, state.album, "filename")
+                if not self.shutdown_event.is_set():
+                    lines_json = json.dumps(lines)
+                    window.evaluate_js(
+                        f"window.loadLyrics({lines_json}, {json.dumps(state.title)}, "
+                        f"{json.dumps(state.artist)}, {json.dumps(source)}, "
+                        f"{state.position_ms or 0}, {json.dumps(track_sig)}, "
+                        f"{DEFAULT_LATENCY_MS}, null);"
+                    )
+                    window.evaluate_js(f"window.setDiagnostics({json.dumps(diagnostics)});")
+                    window.evaluate_js(f"window.setTrackDuration({state.length_ms or 0});")
+                    window.evaluate_js(f"window.setPlaybackState({str(is_playing).lower()});")
+            except Exception as exc:
+                debug_log("VLC lyric fetch failed:", exc)
+                self._vlc_track_sig = ""   # retry next tick
+
+        if is_playing and state.position_ms is not None and state.position_ms > 0:
+            window.evaluate_js(f"window.syncPlayhead({state.position_ms});")
+        return state
 
     def _pick_session(self, manager):
         """

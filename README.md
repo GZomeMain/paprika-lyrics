@@ -65,6 +65,15 @@ Powered by a lightweight Python 3 host running **Edge WebView2 (Chromium)**, the
   - Thread-safe bounded LRU disk cache (`storage.py`) with a 3-day TTL, debounced writes, and atomic flushes to eliminate disk thrashing.
   - **Self-healing cache:** every cached payload is re-validated when it is read. A payload whose repeated lines share one timestamp — the fingerprint of a bad merge — is discarded and refetched instead of served, so a poisoned cache can never reach the screen even if it carries a parser version the current build accepts. Startup also sweeps out payloads from older parser versions, so the file cannot accumulate one dead generation per parser change (measured: a 10.8 MB cache reduced to 0.27 MB).
   - **Works with any audio source.** Anything that broadcasts to Windows System Media Transport Controls is followed — Spotify, browsers, and local players like MusicBee, foobar2000 and Windows Media Player. Local files with poor tags are repaired before lookup: filename stems ("07 - Artist - Title.mp3"), track-number prefixes and underscore titles are cleaned, and the album name (when the player provides a real one) sharpens both the LRCLIB and Spotify-ID lookups. The Resolve report shows the album and whether metadata came from tags or a filename repair. (Apps that never broadcast to Windows media controls cannot be followed — Windows offers no alternative short of audio capture.)
+- **VLC support (HTTP interface).** VLC 3.x does not broadcast to Windows media controls, so the overlay polls VLC's Lua HTTP interface instead. One-time setup in VLC: Tools → Preferences → Show settings: All → Interface → Main interfaces → check **Web**; then Main interfaces → Lua → set a **Lua HTTP password**. Then add to the overlay's `.env`:
+
+  ```env
+  VLC_HTTP_PASSWORD="your_lua_password"
+  VLC_HTTP_HOST=127.0.0.1   # optional, default 127.0.0.1
+  VLC_HTTP_PORT=8080        # optional, default 8080
+  ```
+
+  When no Windows media session is active the overlay polls VLC (~0.7 s while playing, 2 s idle) for the playing file's tags, position and length — untagged files are repaired from the filename exactly like the SMTC path — and the transport buttons/seek bar drive VLC via `pl_pause`/`pl_next`/`pl_previous`/`seek`. SMTC sessions always take priority when present.
 
 - **🌐 Translations, Transliteration & Letter Timing**
   - Optional translation/transliteration layer rendered beneath the active lyric, toggleable from the settings page or `T`.
