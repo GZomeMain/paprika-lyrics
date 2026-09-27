@@ -24,6 +24,7 @@ try:
     from core.lyrics import ASYNC_EXECUTOR
     from core.smtc import SmtcBridge
     from core.hotkeys import GlobalHotkeyManager
+    from core import native_window
 except ImportError as exc:
     print(f"[Spicy Lyrics] Failed to load a core module: {exc}\n" + DEPENDENCY_HINT)
     sys.exit(1)
@@ -31,48 +32,13 @@ except ImportError as exc:
 SHUTDOWN_SIGNAL = threading.Event()
 SMTC_BRIDGE = SmtcBridge(SHUTDOWN_SIGNAL)
 HOTKEY_MANAGER = None
-WINDOW_REF = None
-WINDOW_API_REF = None
+WINDOW_REF = NoneWINDOW_API_REF = None
 CLICK_THROUGH_ENABLED = False
 
-# Extended window styles used by click-through mode.
-GWL_EXSTYLE = -20
-WS_EX_TRANSPARENT = 0x00000020
-WS_EX_LAYERED = 0x00080000
-
-
-def _overlay_hwnd(window=None) -> int:
-    """
-    Resolves the overlay's native window handle. FindWindowW is declared with an
-    explicit restype because the default c_int truncates a 64-bit HWND.
-    """
-    user32 = ctypes.windll.user32
-    try:
-        if window is not None and hasattr(window, 'native') and hasattr(window.native, 'Handle'):
-            handle = int(window.native.Handle)
-            if handle:
-                return handle
-    except Exception:
-        pass
-    try:
-        user32.FindWindowW.restype = ctypes.c_void_p
-        user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
-        return int(user32.FindWindowW(None, 'Spicy Lyrics Overlay') or 0)
-    except Exception:
-        return 0
 
 def apply_native_rounded_corners(window):
     """Enables Windows 11 native DWM rounded corners safely without DPI cropping."""
-    try:
-        hwnd = _overlay_hwnd(window)
-        if hwnd:
-            # DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2
-            val = ctypes.c_int(2)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 33, ctypes.byref(val), ctypes.sizeof(val)
-            )
-    except Exception:
-        pass
+    native_window.apply_rounded_corners(window)
 
 def on_hotkey_adjust(delta_ms: int):
     """Dispatches latency adjustments to the webview UI."""
@@ -143,6 +109,17 @@ class WindowApi:
         Toggles fullscreen. The windowed geometry is saved first so leaving
         fullscreen restores exactly where the user was. Returns the new state,
         which the UI mirrors back for its layout scaling.
+
+        Driven through core/native_window rather than pywebview's built-in:
+        its WinForms fullscreen sets WindowState = Maximized over the screen
+        bounds, and Windows re-applies a maximized window's bounds from the
+        *work area* whenever the window is later touched (SetWindowPos from
+        always-on-top, an ex-style change from click-through, a resize).
+        The overlay then silently shrank to work-area size while the UI still
+        believed it was fullscreen — which presented as "changing a setting
+        breaks fullscreen": the auto-hidden taskbar could come up over it.
+        Entering fullscreen at *normal* window state with explicit monitor
+        bounds leaves Windows no derived bounds to re-apply.
         """
         try:
             self._fullscreen = not getattr(self, '_fullscreen', False)
@@ -151,7 +128,12 @@ class WindowApi:
                     self._saved_geometry = (self.window.x, self.window.y, self.window.width, self.window.height)
                 except Exception:
                     self._saved_geometry = None
-            self.window.toggle_fullscreen()
+                if not native_window.apply_fullscreen(self.window):
+                    self._fullscreen = False
+                    return self._fullscreen
+            else:
+                native_window.restore_windowed(self.window, getattr(self, '_saved_geometry', None))
+                self._saved_geometry = None
             return self._fullscreen
         except Exception as exc:
             print(f"[Spicy Lyrics] Fullscreen toggle failed: {exc}")
@@ -188,50 +170,30 @@ class WindowApi:
         return CLICK_THROUGH_ENABLED
 
     def _apply_click_through(self, enabled: bool):
-        try:
-            hwnd = _overlay_hwnd(self.window)
-            if not hwnd:
-                return
-
-            user32 = ctypes.windll.user32
-            get_long = user32.GetWindowLongPtrW
-            set_long = user32.SetWindowLongPtrW
-            get_long.restype = ctypes.c_longlong
-            get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
-            set_long.restype = ctypes.c_longlong
-            set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_longlong]
-
-            ex_style = get_long(ctypes.c_void_p(hwnd), GWL_EXSTYLE)
-            if enabled:
-                new_style = ex_style | WS_EX_TRANSPARENT | WS_EX_LAYERED
-            else:
-                new_style = ex_style & ~WS_EX_TRANSPARENT
-            set_long(ctypes.c_void_p(hwnd), GWL_EXSTYLE, new_style)
-        except Exception as exc:
-            print(f"[Spicy Lyrics] Could not change click-through state: {exc}")
+        if native_window.set_click_through(self.window, enabled):
+            # A style mutation can nudge a maximized/borderless window's derived
+            # bounds back to the work area; if we were fullscreen, put the
+            # monitor coverage back immediately.
+            if getattr(self, '_fullscreen', False):
+                native_window.reassert_fullscreen(self.window)
+        else:
+            print("[Spicy Lyrics] Could not change click-through state.")
 
     def set_always_on_top(self, enabled: bool):
         """
         Toggles always-on-top via Win32. pywebview exposes no runtime setter for
         on_top (assigning window.on_top is a no-op at best, and touching the
         events object here crashes), so go straight to SetWindowPos.
+
+        A SetWindowPos against a maximized fullscreen window makes Windows
+        re-derive its bounds from the work area — the fullscreen-breaking bug —
+        so the monitor bounds are reasserted right after when fullscreen is on.
         """
-        try:
-            hwnd = _overlay_hwnd(self.window)
-            if not hwnd:
-                return
-            HWND_TOPMOST = -1
-            HWND_NOTOPMOST = -2
-            SWP_NOMOVE = 0x0002
-            SWP_NOSIZE = 0x0001
-            ctypes.windll.user32.SetWindowPos(
-                ctypes.c_void_p(hwnd),
-                ctypes.c_void_p(HWND_TOPMOST if enabled else HWND_NOTOPMOST),
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE,
-            )
-        except Exception as exc:
-            print(f"[Spicy Lyrics] Could not change always-on-top: {exc}")
+        if native_window.set_topmost(self.window, enabled):
+            if getattr(self, '_fullscreen', False):
+                native_window.reassert_fullscreen(self.window)
+        else:
+            print("[Spicy Lyrics] Could not change always-on-top.")
 
     def get_hotkey_binding(self) -> dict:
         """
