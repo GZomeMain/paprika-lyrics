@@ -84,6 +84,8 @@ Powered by a lightweight Python 3 host running **Edge WebView2 (Chromium)**, the
   - Depth-of-field styling is applied per depth bucket and skipped when a line's depth has not changed, so moving the focus no longer restyles every line in the song.
 
 - **🖥️ Desktop-Overlay Extras**
+  - **Mini player (lyrics only):** the PiP icon on the hovered art shrinks this same window to a lyrics-only surface, `320×380` at the smallest and `900×1200` at the largest. It is a *mode* of the overlay rather than a second window, so the song, playhead and sync carry straight over — no second copy of the pipeline — and the remembered mini size is kept apart from the real one, so leaving mini restores the window you were working in. Fullscreen and mini are mutually exclusive by construction.
+  - **Anchored resizing:** every edge and corner drag is handed to pywebview as a fix point, which applies position and size in a single `SetWindowPos`. Grabbing the west edge therefore holds the east edge still and a corner drag pins the opposite corner, instead of the window always growing from its top-left. Fullscreen disables the grips entirely, and the whole overlay is undraggable there (drag regions are removed from the DOM, because pywebview's drag is a JS walk-up over marked elements — CSS `app-region` never took part in it).
   - **Click-through mode** (`Ctrl + Shift + T`): the overlay ignores the mouse entirely so it can sit over a game or browser. It is refused unless that escape hotkey actually registered, so the window can never become mouse-proof with no way back.
   - **Instrumental break countdown:** long instrumental sections no longer look frozen. The glass chip (dots + countdown) sits as its **own row in the lyric flow** — between the just-sung line and the next one — so it reads as part of the song and never displaces or indents the upcoming lyric.
     - The three dots are a **continuous meter**: each fills across its third of the countdown, so the row visibly fills up and reaches the timer exactly as it reads 0:00. The value lifts to full white as it completes.
@@ -96,7 +98,8 @@ Powered by a lightweight Python 3 host running **Edge WebView2 (Chromium)**, the
 - **🎛️ One Design System**
   - **A single glass material:** the settings page, the latency rail and the countdown chip all resolve to the same `--glass-*` tokens (blur, border, sheen, shadow), so every floating surface reads as one substance. The settings page is the same glass laid over a near-black wash (`rgba(3,3,5,0.90)` plus two faint colour pools for the blur to refract), so it reads as black tinted glass rather than a translucent panel — and the lyrics stay dimly visible behind it.
   - **A shared motion scale:** four duration tokens (`0.14s` press → `0.5s` layout) and three easings replace the dozens of one-off timings. Verified: the window controls, on-art options, latency buttons and panel steppers now report *identical* colour and transition values.
-  - **One icon material:** every control is a borderless glyph on a soft hover surface, with a shared focus ring for keyboard users, and a deliberate icon-size hierarchy (26px transport → 17px on-art → 14px chrome → 12px steppers).
+  - **One icon material:** every control is a borderless glyph on a soft hover surface, with a shared focus ring for keyboard users, and a deliberate icon-size hierarchy (28px transport → 18px on-art → 14px chrome → 12px steppers). On-art glyphs carry one shared 2.15px stroke weight, set in CSS rather than per-SVG, because they sit on a photograph and a thin stroke washed out over a light sleeve.
+  - **Photograph-aware chrome:** hovering the art darkens the whole picture by one constant amount (a uniform scrim, not a vignette) so the glyphs hold their contrast on a white cover as well as a black one, and an invisible hotspot as wide as the card is about to grow keeps the control row reachable — otherwise reaching for a control left the art before it expanded, and the click fell through to the lyric line behind it.
   - **Feedback instead of silence:** a changed setting pulses its value once, seek bars lift and glow on hover, and the settings panel reveals with a staggered row cascade.
 
 ---
@@ -216,9 +219,9 @@ pip install pywebview winsdk requests spotify-scraper
 | **Nudge Latency Later** | `Ctrl + [` | Moves lyrics **later** by 50 ms (works system-wide) |
 | **Nudge Latency Earlier** | `Ctrl + ]` | Moves lyrics **earlier** by 50 ms (works system-wide) |
 | **Zoom Font Size** | `Ctrl + Mouse Wheel` | Dynamically scales font between `18px` and `60px`. Works in fullscreen too — the windowed zoom becomes a ×1.7 multiplier there |
-| **Move Window** | Click & Drag Header | Smoothly repositions the overlay across your monitors |
-| **Resize Window** | Click & Drag Bottom-Right | Resizes window dimensions (hit-area is invisible at bottom-right) |
-| **Jump to Lyric** | Click any lyric line | Seeks playback in SimpMusic directly to that timestamp |
+| **Move Window** | Click & Drag Header, the top strip, or the track card's details | Smoothly repositions the overlay across your monitors. **Fullscreen is a fixed surface**: every drag region is disabled there, so the window cannot be dragged out of place |
+| **Resize Window** | Click & Drag any edge or corner | Resizes with the grabbed edge anchored — dragging the west edge holds the east edge still, a corner drag pins the opposite corner. Disabled in fullscreen, where the window already covers the monitor |
+| **Jump to Lyric** | Click the **words** of a lyric line | Seeks playback in SimpMusic directly to that timestamp. Only the glyphs are a target: the leading and margin around a line are not, so the space under the track card never seeks by accident |
 | **Settings page** | Gear icon on the hovered art, or `Ctrl + ,` | Opens a **full-window sheet**, not a dropdown: group headings, room to label and explain each option, and one close button. Sections: Sync, Lyrics, Motion, Window, Diagnostics. Closes on the button, `Esc`, or a click on the dimmed area behind it |
 | **Nudge Sync** | `−` / `+` in the settings page | Adjusts latency by 50 ms without opening the bottom bar |
 
@@ -226,13 +229,14 @@ pip install pywebview winsdk requests spotify-scraper
 | **Change Lyric Font** | "Font" row in the settings page | Switches between the Apple-style sans (default) and Barriecito (saved locally) |
 | **Reduce Motion** | "Motion" row in the settings page | Toggles decorative motion (backdrop drift, dots, word motion, type specials) off and on (saved locally). The lyric fill always stays, since that carries information |
 | **Motion Style** | "Motion style" row in the settings page | Cycles **Auto → Subtle → Lively → Wild** (saved locally). Scales every animation variant and type special uniformly, clamped so even Wild stays clean |
-| **Fullscreen** | "Fullscreen" row, `F11`, or the expand icon on the hovered art | Expands to the whole screen; lyrics, gap indicator and hover art all scale up. Windowed geometry is restored on exit |
+| **Fullscreen** | "Fullscreen" row, `F11`, or the expand icon on the hovered art | Expands to the whole screen; lyrics, gap indicator and hover art all scale up. Windowed geometry is restored on exit. In fullscreen that slot becomes the **exit** button (withdrawing the corners) — the two never show at once |
+| **Mini Player** | The PiP icon on the hovered art (windowed only) | Shrinks this same window to a **lyrics-only** surface between `320×380` and `900×1200`: the track card, header, split panel and sync rail retire and a slim bar takes over, carrying the drag handle plus settings / restore / close. Its size is remembered separately, so leaving mini restores the window you were working in |
 | **Layout Mode** | "Layout" row in the settings page, or the panels icon on the hovered art (both layouts) | Cycles **Compact → Split** (compact is the default; saved locally). In both the top bar disappears and art + title + artist float a bit lower, seamlessly. Split adds a large art panel with its own transport on the left — fullscreen only; picked while windowed, it activates on entering fullscreen |
 | **Lyric Alignment** | "Alignment" row in the settings page | Cycles **Left → Center → Right**; the karaoke wipe's transform origin follows the alignment so the highlight always sweeps in from the anchored edge |
-| **Hover Art (compact/split)** | Hover the floating artwork | The art grows into the player itself: prev/play/next transport and a seekable progress bar with times ride a scrim at the art's bottom edge, with the same two window controls (layout cycle, settings) along the top in both compact and split — the lyrics part downward while hovered. The row's play/pause is the art's only play control |
-| **Seek Bar (on-art only)** | Hover the artwork | The app draws **one** progress bar: the on-art one. Click or drag it to seek — elapsed sits left, total right. Seeking while paused never starts playback. The resting card carries no bar at all (just art, title, artist), so two bars are never on screen at once |
+| **Hover Art (compact/split)** | Hover the floating artwork | The whole picture dims uniformly (not a vignette) so the glyphs stay legible over a white sleeve, and the art grows into the player itself: prev/play/next with a thin progress rail and a white playhead dot, plus layout / settings / fullscreen+mini (or the exit, in fullscreen) along the top — in both compact and split. The lyrics part downward while hovered. The row's play/pause is the art's only play control |
+| **Seek Bar (on-art only)** | Hover the artwork | The app draws **one** progress bar: the on-art one. Click or drag it to seek — elapsed sits left, total right, with a dot riding the playhead that snaps on a seek and sweeps continuously while playing. Seeking while paused never starts playback. The resting card carries no bar at all (just art, title, artist), so two bars are never on screen at once |
 | **Latency Rail** | Hidden at the right edge; slide in from the right | A vertical liquid-glass sync slider (drag, click, or nudge with the small ± buttons — hold to repeat). Zero sits mid-track; the fill grows toward the thumb. The trigger is the rail's **own footprint** (its height, plus a small pad), not a band down the whole right edge, so brushing the right side of the window no longer throws the rail open |
-| **Window Move / Resize** | Drag the top strip, or drag any edge/corner | The whole top edge moves the window; all eight edges and corners resize it |
+| **Window Move / Resize** | Drag the top strip, or drag any edge/corner | The whole top edge moves the window; all eight edges and corners resize it, each anchored on the opposite edge |
 | **Always on Top** | "Always on top" row in the settings page | Keeps the overlay above other windows. **Off by default**, and the saved value is applied at launch (the window is created non-topmost and the setting takes effect as soon as the bridge is ready) |
 | **Click-Through Mode** | "Click-through" row, or `Ctrl + Shift + T` anywhere | Makes the overlay ignore the mouse so it can sit over a game/browser; the hotkey turns it back off |
 | **Diagnostics** | "Resolve report" row in the settings page | Unfolds the resolve/timing report (source, cache, timing mode, counts, sync, parser, API key) |
@@ -252,7 +256,7 @@ Close the panel with `Esc`, or by clicking anywhere outside it.
 simp2spicy/
 ├── config.py              # Central configuration (PARSER_VERSION=11, DEFAULT_LATENCY_MS=600, cache TTL)
 ├── storage.py             # Thread-safe bounded LRU disk cache with 3-day TTL (spotify_cache.json)
-├── spicy_app.py           # Application entry point, window lifecycle, Win32 hotkeys
+├── spicy_app.py           # Entry point, window lifecycle (fullscreen, mini player, clamped anchored resize), Win32 hotkeys
 ├── requirements.txt       # Python dependencies
 ├── .gitignore             # Ignores __pycache__, .env, and the local listening cache (including .bak copies)
 ├── core/
@@ -261,10 +265,13 @@ simp2spicy/
 │   ├── hotkeys.py         # Layout-aware Win32 RegisterHotKey daemon (sync, click-through)
 │   ├── lyrics.py          # Parallel executor orchestrating LRCLIB & Spicy resolution + diagnostics
 │   ├── metadata.py        # Regex cleaner stripping YouTube Music tags, video noise, and features
+│   ├── native_window.py   # ctypes Win32 seam under an injectable user32/dwmapi (fullscreen repair, resize anchors)
 │   ├── parser.py          # Apple Music TTML/LRC parser: lead/background vocals, letters, translations
 │   ├── resolver.py        # Multi-tiered track resolver (SpotifyScraper -> iTunes -> Deezer)
 │   └── smtc.py            # Windows GSMTC listener & live byte-stream album art extractor
-├── tests/                 # unittest coverage for parser, metadata, storage, beat, and diagnostics
+├── tests/                 # unittest coverage for parser, metadata, storage, beat, window API, and diagnostics
+├── tools/
+│   └── ui-preview-regression.js  # Paste-in devtools assertions for the UI invariants (every viewport size)
 └── ui/
     ├── index.html         # Overlay DOM structure, ambient liquid mesh, and noise filter
     ├── style.css          # Configurable font, liquid background, letter masks, depth-of-field
@@ -328,6 +335,13 @@ The Windows-only paths (GSMTC, global hotkeys, WebView2 window) can't be exercis
 - [ ] Play/pause button toggles playback; the timer starts and stops.
 - [ ] Playhead drift: during a 30s listen, lyrics stay in sync without visible jumps.
 - [ ] Click-to-seek **forward**: target line becomes active and previous lines settle to "sung".
+- [ ] Clicking the *blank* leading/space **around** a line (the band just under the track card) does **not** seek; clicking the line's words does.
+- [ ] Drag the **west, north and NW** edges/corners: the opposite edge stays put (nothing snaps to the bottom-right corner).
+- [ ] Fullscreen cannot be dragged by the card's details strip, and every resize grip is inert there.
+- [ ] In fullscreen the art shows the exit button and no fullscreen/mini buttons; windowed it is the other way round.
+- [ ] The PiP icon on the hovered art opens the lyrics-only mini window; its bar drags the window, the restore button brings back the previous size, and the window refuses to shrink below `320×380`.
+- [ ] The lyric list shows a slim scrollbar that fades up on hover, and the playhead dot on the on-art progress bar sweeps rather than stepping once a second.
+- [ ] The settings sheet is centred, shorter than the window, and scrolls internally instead of stretching edge to edge.
 - [ ] Click-to-seek **backward**: no later line stays fully highlighted (this was the stale-state bug).
 - [ ] Manual scroll: wheel scrolling pauses auto-follow, and auto-follow resumes ~2.4s later.
 - [ ] `Ctrl + [` / `Ctrl + ]` nudge latency by 50ms, even with the overlay unfocused.

@@ -66,6 +66,49 @@ DWMWA_COLOR_DEFAULT = 0xFFFFFFFF
 FULLSCREEN_CLEAR_STYLE = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
 
 
+# Window resizing is anchored, and the anchor is chosen by *which edge the user
+# grabbed*: dragging the west edge must keep the east edge still, and a corner
+# drag must pin the opposite corner. pywebview's Window.resize already takes a
+# fix_point and the winforms backend applies it in a single SetWindowPos
+# (`x = x + Width - newWidth` for EAST, the same for SOUTH), so the whole
+# anchored resize is one atomic native call. The alternative — dispatching a
+# move plus a resize from JavaScript — was two async bridge calls with the move
+# gated on a size threshold, and because the resize ran with the default
+# NORTH|WEST fix the window always grew from its top-left corner.
+#
+# Keyed by resize-handle direction; the value lists the edges that must NOT
+# move. 'e' keeps north+west, which for winforms means "do not touch x/y".
+ANCHOR_EDGES = {
+    "e": ("NORTH", "WEST"),
+    "s": ("NORTH", "WEST"),
+    "se": ("NORTH", "WEST"),
+    "w": ("EAST",),
+    "n": ("SOUTH",),
+    "sw": ("NORTH", "EAST"),
+    "ne": ("SOUTH", "WEST"),
+    "nw": ("SOUTH", "EAST"),
+}
+DEFAULT_ANCHOR = "e"
+
+
+def fix_point_for(anchor: str, fix_point):
+    """
+    The pywebview FixPoint flags that hold `anchor`'s opposite edge still.
+
+    `fix_point` is passed in (it is `webview.window.FixPoint`) so this module
+    stays free of pywebview imports and testable with plain-int fakes. An
+    unknown/missing anchor falls back to 'e' — the common case, and the one
+    whose behavior (grow toward the bottom-right) is what a plain resize does
+    anyway.
+    """
+    edges = ANCHOR_EDGES.get(str(anchor or "").lower(), ANCHOR_EDGES[DEFAULT_ANCHOR])
+    flags = None
+    for name in edges:
+        bit = getattr(fix_point, name)
+        flags = bit if flags is None else (flags | bit)
+    return flags
+
+
 def _real_dlls():
     """The real Win32 DLLs, resolved lazily so import never touches ctypes.windll."""
     return ctypes.windll.user32, ctypes.windll.dwmapi
