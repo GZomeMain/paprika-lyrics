@@ -141,6 +141,7 @@ const container = document.getElementById('lyrics-container');
 const playBtns = [
   document.getElementById('transport-play-btn'),
   document.getElementById('art-tp-play'),
+  document.getElementById('side-tp-play'),
 ].filter(Boolean);
 // NOTE: the old #latency-bar / #latency-label elements were removed from the
 // DOM when the latency rail and settings page replaced them; the guarded
@@ -276,6 +277,10 @@ function syncArtControls() {
     // Compact is 'off', split 'on' — a second read of which layout is active.
     layoutBtn.classList.toggle('is-on', document.body.classList.contains('layout-split'));
   }
+  const sideLayoutBtn = document.getElementById('side-btn-layout');
+  if (sideLayoutBtn) sideLayoutBtn.classList.toggle('is-on', document.body.classList.contains('layout-split'));
+  const fsBtn = document.getElementById('side-btn-fs');
+  if (fsBtn) fsBtn.classList.toggle('is-on', isFullscreen);
 }
 
 // =========================================================
@@ -2400,7 +2405,20 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
           window.pywebview.api.seek_position(targetSeekMs);
         }
       };
-      lineDiv.onclick = activateLine;
+      lineDiv.onclick = (e) => {
+        // The compact float card overlaps the top of the scroller; a click that
+        // starts inside its footprint must seek to THAT line, not the lyric
+        // painted behind the card. elementFromPoint sees through pointer-events,
+        // so hit-test the card explicitly.
+        const float = document.getElementById('track-float');
+        if (float && document.body.classList.contains('layout-compact')) {
+          const r = float.getBoundingClientRect();
+          if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+            return;   // card area: swallow, it is not a lyric click
+          }
+        }
+        activateLine.call(lineDiv, e);
+      };
       lineDiv.onkeydown = activateLine;
 
       const wordsDom = line.words.map((w, wIdx) => {

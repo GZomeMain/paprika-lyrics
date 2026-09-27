@@ -141,20 +141,58 @@
         <img id="side-art" class="side-art" alt="" draggable="false">
         <!-- Same hover controls as the compact float, so split is fully operable -->
         <div class="art-controls side-art-controls">
-          <button class="art-btn" onclick="cycleLayout(); event.stopPropagation();" title="Cycle layout" aria-label="Cycle layout">
+          <button class="art-btn" id="side-btn-fs" onclick="toggleFullscreen(); event.stopPropagation();" title="Fullscreen (F11)" aria-label="Toggle fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="side-btn-layout" onclick="cycleLayout(); event.stopPropagation();" title="Cycle layout: Compact / Split" aria-label="Cycle layout">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
               <path d="M9.5 4.5v15"/>
             </svg>
           </button>
-          <button class="art-btn" onclick="toggleSettings(event); event.stopPropagation();" title="Settings" aria-label="Open settings">
+          <button class="art-btn" id="side-btn-settings" onclick="toggleSettings(event); event.stopPropagation();" title="Settings" aria-label="Open settings">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="3.2"/>
               <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
             </svg>
           </button>
+          <button class="art-btn art-btn-danger" id="side-btn-close" onclick="window.pywebview.api.close(); event.stopPropagation();" title="Close" aria-label="Close">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" aria-hidden="true">
+              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+            </svg>
+          </button>
+        </div>
+        <!-- On-art transport, matching the compact float's art player: the
+             reference split shows prev/play/next on the art above the progress
+             row, which stays under the art with title/artist beneath. -->
+        <div class="art-player">
+          <div class="transport-row art-transport">
+            <button class="transport-btn" onclick="skipPrevious(); event.stopPropagation();" title="Previous track" aria-label="Previous track">
+              <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M7 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zm10.9-.74c.72-.43 1.63.09 1.63.94v12.4c0 .85-.91 1.37-1.63.94l-9.2-5.9a1.1 1.1 0 0 1 0-1.88l9.2-5.9z"/>
+              </svg>
+            </button>
+            <button class="transport-btn transport-play" id="side-tp-play" onclick="toggleSimpMusicPlay(); event.stopPropagation();" title="Play / Pause" aria-label="Play or pause">
+              <svg class="icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M8.2 5.4c0-.86.94-1.39 1.67-.94l9.1 5.6a1.1 1.1 0 0 1 0 1.88l-9.1 5.6c-.73.45-1.67-.08-1.67-.94V5.4z"/>
+              </svg>
+              <svg class="icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6.6" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+                <rect x="13.2" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+              </svg>
+            </button>
+            <button class="transport-btn" onclick="skipNext(); event.stopPropagation();" title="Next track" aria-label="Next track">
+              <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M16.8 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zM6.1 4.86c-.72-.43-1.63.09-1.63.94v12.4c0 .85.91 1.37 1.63.94l9.2-5.9a1.1 1.1 0 0 0 0-1.88l-9.2-5.9z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
       <div class="side-transport">

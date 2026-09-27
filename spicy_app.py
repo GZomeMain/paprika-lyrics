@@ -85,6 +85,10 @@ class WindowApi:
             w = max(320, min(1400, int(width)))
             h = max(380, min(1600, int(height)))
             self.window.resize(w, h)
+            # A resize while fullscreen would shrink the window out of monitor
+            # coverage; put the monitor bounds back (no-op while windowed).
+            if getattr(self, '_fullscreen', False):
+                native_window.reassert_fullscreen(self.window)
         except Exception:
             pass
 
@@ -110,29 +114,27 @@ class WindowApi:
         fullscreen restores exactly where the user was. Returns the new state,
         which the UI mirrors back for its layout scaling.
 
-        Driven through core/native_window rather than pywebview's built-in:
-        its WinForms fullscreen sets WindowState = Maximized over the screen
-        bounds, and Windows re-applies a maximized window's bounds from the
-        *work area* whenever the window is later touched (SetWindowPos from
-        always-on-top, an ex-style change from click-through, a resize).
-        The overlay then silently shrank to work-area size while the UI still
-        believed it was fullscreen — which presented as "changing a setting
-        breaks fullscreen": the auto-hidden taskbar could come up over it.
-        Entering fullscreen at *normal* window state with explicit monitor
-        bounds leaves Windows no derived bounds to re-apply.
+        Entry/exit go through pywebview's own toggle (it handles the style and
+        DWM border attributes correctly). What this adds on top is a repair
+        pass: pywebview enters fullscreen as a *maximized* borderless window,
+        and Windows re-applies a maximized window's derived bounds from the
+        *work area* whenever the window is later touched — SetWindowPos from
+        always-on-top, an ex-style change from click-through. The overlay then
+        silently shrank to taskbar-cut size while the UI still believed it was
+        fullscreen. After every native mutation we therefore reapply the
+        monitor bounds (see set_always_on_top / _apply_click_through).
         """
         try:
             self._fullscreen = not getattr(self, '_fullscreen', False)
+            self.window.toggle_fullscreen()
             if self._fullscreen:
                 try:
                     self._saved_geometry = (self.window.x, self.window.y, self.window.width, self.window.height)
                 except Exception:
                     self._saved_geometry = None
-                if not native_window.apply_fullscreen(self.window):
-                    self._fullscreen = False
-                    return self._fullscreen
+                # Enter at true monitor bounds, not the maximized work area.
+                native_window.reassert_fullscreen(self.window)
             else:
-                native_window.restore_windowed(self.window, getattr(self, '_saved_geometry', None))
                 self._saved_geometry = None
             return self._fullscreen
         except Exception as exc:
