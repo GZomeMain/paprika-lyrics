@@ -333,7 +333,12 @@ body:not(.beat-live) .ambient-backdrop {
    Header & Window Controls
    ========================================================= */
 
-header {
+/* Scoped by id, not by tag: a bare `header` selector also matched the settings
+   sheet's own <header class="sp-head">, and the compact/split rules below then
+   handed the sheet's whole head `pointer-events: none` — which killed its
+   close button (and its sheen, and its cursor). The app header is the only
+   header these rules are about. */
+#app-header {
   flex-shrink: 0;
   min-height: 58px;
   padding: 10px 12px 10px 16px;
@@ -353,7 +358,7 @@ header {
               border-color var(--dur-3) var(--ease-fluid);
 }
 
-header:active {
+#app-header:active {
   cursor: grabbing;
 }
 
@@ -429,7 +434,6 @@ header:active {
    nested buttons and the seek bar intermittently never saw their clicks. Any
    NEW interactive element added inside .track-float needs this too. */
 .track-float .art-controls,
-.track-float .art-play-btn,
 .track-float .art-player,
 .track-float .float-progress {
   -webkit-app-region: no-drag;
@@ -508,12 +512,6 @@ header:active {
   height: 12px;
 }
 
-/* Dimmed while paused so the transport reads idle at a glance. */
-#timer-display,
-#duration-display {
-  transition: color var(--dur-3) var(--ease-fluid);
-}
-
 /* Neutral focus ring instead of the browser's default blue outline.
    Every interactive control gets the same ring, including the on-art and
    latency-rail buttons (they had none before). */
@@ -521,7 +519,6 @@ header:active {
 .qp-btn:focus,
 .qp-action:focus,
 .art-btn:focus,
-.art-play-btn:focus,
 .latency-rail-btn:focus,
 .latency-slider:focus {
   outline: none;
@@ -531,7 +528,6 @@ header:active {
 .qp-btn:focus-visible,
 .qp-action:focus-visible,
 .art-btn:focus-visible,
-.art-play-btn:focus-visible,
 .latency-rail-btn:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
@@ -1240,6 +1236,8 @@ body.latency-rail-hot .latency-rail,
 }
 
 /* ---------- Float transport: progress row under the art, transport buttons under the text ---------- */
+/* Shared row layout for a progress bar flanked by its times. Only the on-art
+   controller uses it now (see .art-progress) — the text-column row was removed. */
 .float-progress-row {
   display: flex;
   align-items: center;
@@ -1294,19 +1292,6 @@ body.layout-compact .track-text > .transport-row {
 }
 .transport-play:hover { background: rgba(255, 255, 255, 0.24); }
 
-.float-progress-row #timer-display,
-.float-progress-row #duration-display {
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.72);
-  font-weight: 600;
-  white-space: nowrap;
-  min-width: 30px;
-}
-
-.float-progress-row #timer-display { text-align: right; }
-.float-progress-row #duration-display { text-align: left; }
-
 .float-progress {
   flex: 1 1 auto;
   min-width: 60px;
@@ -1343,10 +1328,12 @@ body.layout-compact .track-text > .transport-row {
 
 /* ---------- On-art player (Spotify-style): transport + progress on the hovered art ----------
    The art becomes the player: a bottom scrim carries the transport row and the
-   seekable progress row with times. Same components as the float's rows
-   (transport-btn / float-progress), duplicated with art- prefixed ids so both
-   update together; any new interactive element inside the drag region opts out
-   individually (see the drag-region note above). */
+   seekable progress row with times. It reuses the text column's component
+   classes (transport-btn / float-progress) with art- prefixed ids, so this is
+   now the only place a track's own transport is drawn; any new interactive
+   element inside the drag region opts out individually (see the drag-region
+   note above). The centred glass play dot that used to hover over the art is
+   gone: the row's play/pause is the art's single play control. */
 .art-player {
   position: absolute;
   left: 0;
@@ -1373,8 +1360,8 @@ body.layout-compact .track-text > .transport-row {
   pointer-events: auto;
 }
 
-/* On-art transport: tighter gaps than the float's row so three buttons fit a
-   220px art card without crowding the progress row above. */
+/* On-art transport: tighter gaps than the text column's row so three buttons
+   fit a 220px art card without crowding the progress row above. */
 .art-transport {
   gap: 10px;
   margin-top: 0;
@@ -1388,17 +1375,55 @@ body.layout-compact .track-text > .transport-row {
 .art-transport .transport-btn .icon { width: 18px; height: 18px; }
 
 /* The centre play/pause glyph sits in the transport row only — the big centre
-   dot would collide with it, and the reference shows a single transport. */
+   dot would collide with it, and the reference draws the transport as bare
+   glyphs: no ring behind play, just a larger white triangle. */
 .art-player .transport-play {
-  background: rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: #fff;
 }
 
-.art-player .transport-play:hover { background: rgba(255, 255, 255, 0.26); }
+.art-player .transport-play:hover { background: rgba(255, 255, 255, 0.14); }
 
-/* On-art progress: same seek bar behaviour as the float's, times flank it. */
+/* The one "primary" glyph, so it out-reads prev/next. Sized again after the
+   fullscreen block, which only sizes the ring buttons. */
+.art-player .transport-play .icon { width: 26px; height: 26px; }
+
+/* On-art progress: same seek behaviour as the split panel's, times flank it,
+   but the reference stacks TWO bars on one baseline — a hairline track spanning
+   the whole song and a heavier white capsule for the played part. Reading the
+   progress twice (line + capsule) is what keeps it legible over busy artwork. */
 .art-progress {
   width: 100%;
   margin: 0;
+  gap: 9px;
+}
+
+/* Bar 1 of the pair: the hairline track. `overflow: visible` lets the capsule
+   overhang it, and the base bar's hover-grown height is cancelled because the
+   thicker fill already supplies the "this is draggable" affordance. */
+#art-progress {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.26);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  overflow: visible;
+  display: flex;
+  align-items: center;
+}
+
+#art-progress:hover {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* Bar 2 of the pair: the played capsule, thick enough to stay white over a
+   light cover. min-width keeps a stub visible at 0:00, as in the reference. */
+#art-progress .float-progress-fill {
+  height: 6px;
+  min-width: 6px;
+  border-radius: var(--r-pill);
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
 .art-time {
@@ -1428,86 +1453,9 @@ body.is-fullscreen .art-transport .transport-btn {
 
 body.is-fullscreen .art-transport .transport-btn .icon { width: 20px; height: 20px; }
 
-/* ---------- Centre play/pause over the art ----------
-   Same material as the other on-art options: borderless glyph on a soft glass
-   surface, and it only appears while the art is hovered. */
-.art-play-btn {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) scale(0.94);
-  width: 54px;
-  height: 54px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(18, 18, 22, 0.34);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-3) var(--ease-fluid), transform var(--dur-3) var(--ease-fluid), background var(--dur-2) var(--ease-fluid);
-  z-index: 30;
-}
-
-.float-art-wrap:hover .art-play-btn,
-.side-art-wrap:hover .art-play-btn {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translate(-50%, -50%) scale(1);
-}
-
-.art-play-btn:hover {
-  background: rgba(18, 18, 22, 0.5);
-  transform: translate(-50%, -50%) scale(1.08);
-}
-
-.art-play-btn:active {
-  transform: translate(-50%, -50%) scale(0.97);
-}
-
-/* Large, plain glyphs: a solid triangle and two solid bars, like the reference.
-   Both icons are stacked and crossfade, so the swap animates instead of
-   hard-cutting between two different display values. */
-.art-play-btn .icon {
-  position: absolute;
-  width: 26px;
-  height: 26px;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
-  transition: opacity var(--dur-2) var(--ease-fluid), transform var(--dur-2) var(--ease-spring);
-}
-
-.art-play-btn .icon-play {
-  opacity: 1;
-  transform: scale(1) translateX(1px);
-}
-
-.art-play-btn .icon-pause {
-  opacity: 0;
-  transform: scale(0.7);
-}
-
-.art-play-btn.is-playing .icon-play {
-  opacity: 0;
-  transform: scale(0.7) translateX(1px);
-}
-
-.art-play-btn.is-playing .icon-pause {
-  opacity: 1;
-  transform: scale(1);
-}
-
-#timer-display {
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.9);
-  font-weight: 600;
-  white-space: nowrap;
-  font-size: 11.5px;
-}
+/* The fullscreen block above sizes every ring button's glyph; the play
+   triangle keeps its lead on the bigger card too. */
+body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px; }
 
 #source-badge {
   font-size: 9px;
@@ -1583,6 +1531,9 @@ body.is-fullscreen .art-transport .transport-btn .icon { width: 20px; height: 20
   width: 100%;
   max-width: 400px;
   max-height: calc(100% - 8px);
+  /* Row density is one token so a small window can compact the sheet without
+     a parallel set of rules per element. */
+  --sp-row-min-h: 36px;
   display: flex;
   flex-direction: column;
   border-radius: var(--r-lg);
@@ -1728,7 +1679,7 @@ body.is-fullscreen .art-transport .transport-btn .icon { width: 20px; height: 20
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  min-height: 36px;
+  min-height: var(--sp-row-min-h, 36px);
   padding: 0 11px;
   border-radius: var(--r-md);
   color: rgba(255, 255, 255, 0.88);
@@ -1808,6 +1759,58 @@ body.is-fullscreen .art-transport .transport-btn .icon { width: 20px; height: 20
   0%   { transform: scale(1.14); opacity: 0.55; }
   60%  { transform: scale(1.02); opacity: 1; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+/* ---------- Small-window density for the settings sheet ----------
+   The sheet already fits any window (max-height + internal scroll); what read
+   as "broken" at small sizes was density: the full-size paddings and 36px rows
+   filled nearly the whole window. Below 420 px of height the sheet compacts —
+   tighter page padding, shorter rows, smaller headings and hints — through the
+   same token the full-size rules consume. Below 340 px of width it also drops
+   the horizontal page padding so rows keep their label/state gap. */
+@media (max-height: 420px) {
+  .sp-sheet {
+    --sp-row-min-h: 28px;
+  }
+
+  .settings-page {
+    padding-top: 6px;
+  }
+
+  .sp-head {
+    padding: 8px 10px 7px 12px;
+  }
+
+  .sp-title { font-size: 13px; }
+  .sp-sub { margin-top: 1px; font-size: 9px; }
+
+  .sp-group-title {
+    padding: 0 10px 3px;
+    font-size: 8px;
+  }
+
+  .sp-hint {
+    padding: 2px 10px 0;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .qp-row {
+    padding: 0 9px;
+    font-size: 11px;
+  }
+
+  .sp-close {
+    width: 26px;
+    height: 26px;
+  }
+}
+
+@media (max-width: 340px) {
+  .settings-page {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
 }
 
 .reduce-motion .value-flash {
@@ -2030,8 +2033,7 @@ body.resizing-sw, body.resizing-ne { cursor: nesw-resize !important; }
   .line.part-down {
     animation: none !important;
   }
-  .art-controls,
-  .art-play-btn {
+  .art-controls {
     transition: none !important;
   }
 }
@@ -2057,7 +2059,7 @@ body.is-fullscreen #artist {
   font-size: 14px;
 }
 
-body.is-fullscreen header {
+body.is-fullscreen #app-header {
   min-height: 76px;
   padding: 16px 18px 14px 24px;
 }
@@ -2197,14 +2199,14 @@ body.layout-split.is-fullscreen .track-side-panel {
   font-family: var(--ui-font);
 }
 
-body.layout-compact header .track-meta,
-body.layout-split header .track-meta {
+body.layout-compact #app-header .track-meta,
+body.layout-split #app-header .track-meta {
   visibility: hidden;
 }
 
 /* In split layout the header shrinks to just the window buttons; the left panel
    owns the track info. */
-body.layout-split.is-fullscreen header .track-meta {
+body.layout-split.is-fullscreen #app-header .track-meta {
   visibility: hidden;
 }
 
@@ -2340,8 +2342,8 @@ body.layout-split .track-float {
 }
 
 /* ---------- Header disappears in compact/split: the top is clean ---------- */
-body.layout-compact header,
-body.layout-split header {
+body.layout-compact #app-header,
+body.layout-split #app-header {
   background: transparent;
   border-bottom-color: transparent;
   backdrop-filter: none;
@@ -2351,13 +2353,13 @@ body.layout-split header {
   pointer-events: none;
 }
 
-body.layout-compact header .window-controls,
-body.layout-split header .window-controls {
+body.layout-compact #app-header .window-controls,
+body.layout-split #app-header .window-controls {
   pointer-events: auto;
 }
 
-body.layout-compact header .track-meta,
-body.layout-split header .track-meta {
+body.layout-compact #app-header .track-meta,
+body.layout-split #app-header .track-meta {
   visibility: hidden;
 }
 
@@ -2435,6 +2437,8 @@ body.layout-split header .track-meta {
   filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
 }
 
+/* The danger tint retired with the on-art close button (close lives on the
+   header window controls); the rule is kept out of the HTML-critical path. */
 .art-btn-danger:hover {
   color: var(--danger-text-hover);
 }

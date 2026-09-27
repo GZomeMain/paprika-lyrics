@@ -28,15 +28,11 @@
       <div class="float-art-wrap" id="float-art-wrap">
         <img id="track-art" class="track-art" alt="" draggable="false">
 
-        <!-- Spicy-style on-art controls, revealed while hovered -->
+        <!-- Spicy-style on-art controls, revealed while hovered. Same two-button
+             arrangement as the split panel (layout, settings): fullscreen stays
+             on F11 and the settings row, close on the header's window controls,
+             which remain interactive in every layout. -->
         <div class="art-controls" id="art-controls">
-          <button class="art-btn" id="art-btn-fs" onclick="toggleFullscreen(); event.stopPropagation();"
-                  title="Fullscreen (F11)" aria-label="Toggle fullscreen">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
-            </svg>
-          </button>
           <button class="art-btn" id="art-btn-layout" onclick="cycleLayout(); event.stopPropagation();"
                   title="Cycle layout: Compact / Split" aria-label="Cycle layout">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
@@ -53,24 +49,7 @@
               <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
             </svg>
           </button>
-          <button class="art-btn art-btn-danger" id="art-btn-close" onclick="window.pywebview.api.close(); event.stopPropagation();"
-                  title="Close" aria-label="Close">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-                 stroke-linecap="round" aria-hidden="true">
-              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
-            </svg>
-          </button>
         </div>
-        <!-- Centre play/pause: a quiet glass dot over the art -->
-        <button class="art-play-btn" id="art-play-btn" onclick="toggleSimpMusicPlay(); event.stopPropagation();" title="Play / Pause" aria-label="Play or pause">
-          <svg class="icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M8.2 5.4c0-.86.94-1.39 1.67-.94l9.1 5.6a1.1 1.1 0 0 1 0 1.88l-9.1 5.6c-.73.45-1.67-.08-1.67-.94V5.4z"/>
-          </svg>
-          <svg class="icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <rect x="6.6" y="5.2" width="4.2" height="13.6" rx="1.5"/>
-            <rect x="13.2" y="5.2" width="4.2" height="13.6" rx="1.5"/>
-          </svg>
-        </button>
         <!-- On-art player: transport + seekable progress live on the hovered
              art itself (Spotify-style). Same components as the float's rows,
              duplicated with art- prefixed ids so both update together. -->
@@ -97,24 +76,18 @@
             </button>
           </div>
           <div class="float-progress-row art-progress">
-            <span class="art-time" id="art-timer-display">00:00</span>
+            <span class="art-time" id="art-timer-display">0:00</span>
             <div class="float-progress" id="art-progress" title="Seek">
               <div class="float-progress-fill" id="art-progress-fill"></div>
             </div>
-            <span class="art-time" id="art-duration-display">00:00</span>
+            <span class="art-time" id="art-duration-display">0:00</span>
           </div>
         </div>
       </div>
       <div class="track-text">
-        <!-- Progress row directly under the art: full-width seekable bar with
-             elapsed / duration flanking it, then title and artist beneath. -->
-        <div class="float-progress-row">
-          <span id="timer-display">00:00</span>
-          <div class="float-progress" id="float-progress" title="Seek">
-            <div class="float-progress-fill" id="float-progress-fill"></div>
-          </div>
-          <span id="duration-display">00:00</span>
-        </div>
+        <!-- The text column is title + artist only: the old text-column progress
+             row was removed in favour of the single on-art controller, which
+             already carries elapsed / duration / seek. -->
         <div id="title">Waiting for SimpMusic...</div>
         <div id="artist">Play any track to begin</div>
         <div class="transport-row">

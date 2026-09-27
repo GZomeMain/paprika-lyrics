@@ -139,11 +139,9 @@ let latencySaveTimer = null;
 
 const container = document.getElementById('lyrics-container');
 const playBtns = [
-  document.getElementById('art-play-btn'),
   document.getElementById('transport-play-btn'),
   document.getElementById('art-tp-play'),
 ].filter(Boolean);
-const timerDisplay = document.getElementById('timer-display');
 // NOTE: the old #latency-bar / #latency-label elements were removed from the
 // DOM when the latency rail and settings page replaced them; the guarded
 // lookups that used to sit here went with them.
@@ -273,8 +271,6 @@ function initFloatArt() {
 
 // Mirrors fullscreen state onto the on-art buttons (active look).
 function syncArtControls() {
-  const fsBtn = document.getElementById('art-btn-fs');
-  if (fsBtn) fsBtn.classList.toggle('is-on', isFullscreen);
   const layoutBtn = document.getElementById('art-btn-layout');
   if (layoutBtn) {
     // Compact is 'off', split 'on' — a second read of which layout is active.
@@ -1101,59 +1097,50 @@ function formatTime(ms) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// The on-art row prints M:SS — the reference shows "0:01" / "3:33", so minutes
+// there are unpadded while the split panel keeps its padded MM:SS.
+function formatTimeShort(ms) {
+  return formatTime(ms).replace(/^0/, '');
+}
+
 function updateTimer(ms) {
   const second = Math.max(0, Math.floor(ms / 1000));
   if (second !== lastDisplayedSecond) {
     lastDisplayedSecond = second;
-    if (timerDisplay) {
-      timerDisplay.textContent = formatTime(ms);
-    }
-    updateFloatProgress(ms);
+    updateArtProgress(ms);
     updateSideTransport(ms);
   }
 }
 
-// Float transport (under the art info): elapsed / fill / duration.
-function updateFloatProgress(ms) {
-  const fill = document.getElementById('float-progress-fill');
-  if (fill && sideTotalMs > 0) {
-    const second = Math.floor(ms / 1000);
-    if (second !== lastFloatFillSecond) {
-      lastFloatFillSecond = second;
-      fill.style.width = Math.max(0, Math.min(100, (ms / sideTotalMs) * 100)).toFixed(2) + '%';
-    }
-  }
-  const durEl = document.getElementById('duration-display');
-  if (durEl && sideTotalMs > 0) durEl.textContent = formatTime(sideTotalMs);
-  // The on-art player mirrors the float's row so both read the same clock.
+// On-art transport — the only progress row left: elapsed / fill / duration.
+function updateArtProgress(ms) {
+  // One clock read per call, so every throttled fill advances on the same
+  // second. `second` used to be declared inside each `if` block while the last
+  // line read it from outside them — a ReferenceError thrown on every tick,
+  // which killed loadLyrics mid-render (empty lyric view) and the render loop.
+  const second = Math.floor(ms / 1000);
   const artFill = document.getElementById('art-progress-fill');
-  if (artFill && sideTotalMs > 0) {
-    const second = Math.floor(ms / 1000);
-    if (second !== lastArtFillSecond) {
-      lastArtFillSecond = second;
-      artFill.style.width = Math.max(0, Math.min(100, (ms / sideTotalMs) * 100)).toFixed(2) + '%';
-    }
+  if (artFill && sideTotalMs > 0 && second !== lastArtFillSecond) {
+    lastArtFillSecond = second;
+    artFill.style.width = Math.max(0, Math.min(100, (ms / sideTotalMs) * 100)).toFixed(2) + '%';
   }
   const artDurEl = document.getElementById('art-duration-display');
-  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTime(sideTotalMs);
+  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTimeShort(sideTotalMs);
   const artNowEl = document.getElementById('art-timer-display');
-  if (artNowEl && second !== undefined) artNowEl.textContent = formatTime(ms);
+  if (artNowEl) artNowEl.textContent = formatTimeShort(ms);
 }
 
-// Split-layout transport + float transport state.
+// Split-layout transport + on-art transport state.
 let sideTotalMs = 0;
 let lastSideFillSecond = -1;
-let lastFloatFillSecond = -1;
 let lastArtFillSecond = -1;
 
 window.setTrackDuration = function(ms) {
   sideTotalMs = (typeof ms === 'number' && ms > 0) ? ms : 0;
   const totalEl = document.getElementById('side-time-total');
   if (totalEl && sideTotalMs > 0) totalEl.textContent = formatTime(sideTotalMs).replace(/^0/, '');
-  const durEl = document.getElementById('duration-display');
-  if (durEl && sideTotalMs > 0) durEl.textContent = formatTime(sideTotalMs);
   const artDurEl = document.getElementById('art-duration-display');
-  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTime(sideTotalMs);
+  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTimeShort(sideTotalMs);
 };
 
 function updateSideTransport(ms) {
@@ -1174,9 +1161,9 @@ function updateSideTransport(ms) {
   }
 }
 
-// Click-to-seek (and drag-to-seek) shared by the vertical rail and the
-// split-panel progress bar. The vertical rail fills bottom→top, so its
-// fraction is measured from the bottom edge.
+// Click-to-seek (and drag-to-seek) shared by the vertical rail, the on-art
+// progress bar and the split-panel progress bar. The vertical rail fills
+// bottom→top, so its fraction is measured from the bottom edge.
 function seekFromFraction(el, evt, vertical) {
   if (!el || sideTotalMs <= 0) return;
   const rect = el.getBoundingClientRect();
@@ -1197,9 +1184,8 @@ function applySeek(targetMs) {
   userScrolledRecently = false;
   resetAllLines();
   lastActiveSig = "";
-  // Force every throttled display (timer, float/side fills) to refresh now.
+  // Force every throttled display (on-art + side fills) to refresh now.
   lastDisplayedSecond = -1;
-  lastFloatFillSecond = -1;
   lastSideFillSecond = -1;
   lastArtFillSecond = -1;
   updateTimer(targetMs);
@@ -1233,7 +1219,6 @@ function initSeekBars() {
       window.addEventListener('mouseup', onUp);
     });
   };
-  attach(document.getElementById('float-progress'), false);
   attach(document.getElementById('art-progress'), false);
   attach(document.querySelector('.side-progress-track'), false);
 }
@@ -1418,9 +1403,8 @@ window.showLoading = function(title, artist) {
   anchorPosMs = 0;
   anchorWallMs = performance.now();
   lastDisplayedSecond = -1;
-  // Fresh track: clear per-second throttle state so the float/side fills
+  // Fresh track: clear per-second throttle state so the on-art/side fills
   // always repaint, even if the new track starts at the same second.
-  lastFloatFillSecond = -1;
   lastSideFillSecond = -1;
   updateTimer(0);
 
@@ -2321,9 +2305,8 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
     lastRenderEnd = 0;
     userScrolledRecently = false;
     scrollVelocity = 0;
-  // Fresh track: clear per-second throttle state so the float/side fills
+  // Fresh track: clear per-second throttle state so the on-art/side fills
   // always repaint, even if the new track starts at the same second.
-  lastFloatFillSecond = -1;
   lastSideFillSecond = -1;
   lyrics = [];
   lyricDom = [];
@@ -2559,9 +2542,6 @@ window.setPlaybackState = function(playing) {
   playBtns.forEach(b => b.classList.toggle('is-playing', isPlaying));
   // The beat pulse follows playback: a paused track should not keep glowing.
   document.body.classList.toggle('beat-paused', !isPlaying);
-  if (timerDisplay) {
-    timerDisplay.style.color = isPlaying ? "rgba(255, 255, 255, 0.92)" : "rgba(255, 255, 255, 0.42)";
-  }
   lastTick = now;
 };
 
