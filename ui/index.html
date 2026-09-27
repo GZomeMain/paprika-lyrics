@@ -28,10 +28,13 @@
       <div class="float-art-wrap" id="float-art-wrap">
         <img id="track-art" class="track-art" alt="" draggable="false">
 
-        <!-- Spicy-style on-art controls, revealed while hovered. Same two-button
-             arrangement as the split panel (layout, settings): fullscreen stays
-             on F11 and the settings row, close on the header's window controls,
-             which remain interactive in every layout. -->
+        <!-- Spicy-style on-art controls, revealed while hovered: layout and
+             settings always, plus the window-mode pair. The windowed pair is
+             fullscreen (enter) + mini player; in fullscreen it becomes the
+             single exit. data-when is what syncArtControls() gates on — the
+             exit button never appears while windowed, and the mini button is
+             meaningless in fullscreen (a mini window inside a fullscreen one
+             has nowhere to go). -->
         <div class="art-controls" id="art-controls">
           <button class="art-btn" id="art-btn-layout" onclick="cycleLayout(); event.stopPropagation();"
                   title="Cycle layout: Compact / Split" aria-label="Cycle layout">
@@ -47,6 +50,31 @@
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="3.2"/>
               <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-fs" data-when="windowed"
+                  onclick="toggleFullscreen(); event.stopPropagation();"
+                  title="Fullscreen (F11)" aria-label="Enter fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-pip" data-when="windowed"
+                  onclick="toggleMiniMode(); event.stopPropagation();"
+                  title="Mini player — lyrics only" aria-label="Open the lyrics-only mini player">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="5" width="17" height="14" rx="2.5"/>
+              <rect x="11.5" y="11.5" width="7" height="5.5" rx="1.4" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-exit" data-when="fullscreen"
+                  onclick="toggleFullscreen(); event.stopPropagation();"
+                  title="Leave fullscreen (F11)" aria-label="Leave fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>
             </svg>
           </button>
         </div>
@@ -79,6 +107,7 @@
             <span class="art-time" id="art-timer-display">0:00</span>
             <div class="float-progress" id="art-progress" title="Seek">
               <div class="float-progress-fill" id="art-progress-fill"></div>
+              <div class="art-thumb" id="art-thumb"></div>
             </div>
             <span class="art-time" id="art-duration-display">0:00</span>
           </div>
@@ -133,20 +162,47 @@
       </div>
     </header>
 
+    <!-- Mini player chrome: the only bar a lyrics-only window keeps. The drag
+         region is a SIBLING of the buttons, never their ancestor — pywebview
+         starts a window drag for any mousedown whose target has a marked
+         ancestor, so a bar wrapping its own buttons would drag instead of
+         click them. -->
+    <div class="mini-bar" id="mini-bar">
+      <div class="mini-drag pywebview-drag-region" aria-hidden="true"></div>
+      <button class="mini-btn" onclick="toggleSettings(event); event.stopPropagation();"
+              title="Settings" aria-label="Open settings">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2"/>
+          <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+        </svg>
+      </button>
+      <button class="mini-btn" onclick="setMiniMode(false); event.stopPropagation();"
+              title="Back to the full player" aria-label="Leave the mini player">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+        </svg>
+      </button>
+      <button class="mini-btn mini-btn-danger" onclick="window.pywebview.api.close()"
+              title="Close" aria-label="Close">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+        </svg>
+      </button>
+    </div>
+
     <div id="lyrics-container"></div>
 
     <!-- Split layout: art fixed on the left with its own transport, fullscreen only -->
     <aside class="track-side-panel" id="track-side-panel" aria-hidden="true">
       <div class="side-art-wrap">
         <img id="side-art" class="side-art" alt="" draggable="false">
-        <!-- Same hover controls as the compact float, so split is fully operable -->
+        <!-- Same hover controls as the compact float, so split is fully operable.
+             Split only ever renders in fullscreen, so its window-mode button is
+             the exit (the mini player and fullscreen entry are windowed states). -->
         <div class="art-controls side-art-controls">
-          <button class="art-btn" id="side-btn-fs" onclick="toggleFullscreen(); event.stopPropagation();" title="Fullscreen (F11)" aria-label="Toggle fullscreen">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
-            </svg>
-          </button>
           <button class="art-btn" id="side-btn-layout" onclick="cycleLayout(); event.stopPropagation();" title="Cycle layout: Compact / Split" aria-label="Cycle layout">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -161,10 +217,10 @@
               <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
             </svg>
           </button>
-          <button class="art-btn art-btn-danger" id="side-btn-close" onclick="window.pywebview.api.close(); event.stopPropagation();" title="Close" aria-label="Close">
+          <button class="art-btn" id="side-btn-exit" onclick="toggleFullscreen(); event.stopPropagation();" title="Leave fullscreen (F11)" aria-label="Leave fullscreen">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-                 stroke-linecap="round" aria-hidden="true">
-              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>
             </svg>
           </button>
         </div>

@@ -147,5 +147,39 @@ class CacheManagerTest(unittest.TestCase):
         reloaded.flush()
 
 
+class WindowGeometryTest(unittest.TestCase):
+    """The mini player keeps its own size so leaving it restores the real one."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.path = Path(self.tmp_dir) / "cache.json"
+        self.store = storage.CacheManager(filepath=self.path)
+
+    def tearDown(self):
+        try:
+            self.store.flush()
+        except Exception:
+            pass
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_mini_size_roundtrips_without_touching_the_normal_size(self):
+        self.store.save_window_size(980, 720)
+        self.store.save_mini_size(440, 560)
+        self.store.flush()
+
+        reloaded = storage.CacheManager(filepath=self.path)
+        self.assertEqual(reloaded.get_mini_size(), {"width": 440, "height": 560})
+        self.assertEqual(reloaded.get_window_geometry()["width"], 980)
+        self.assertEqual(reloaded.get_window_geometry()["height"], 720)
+
+    def test_missing_mini_size_is_an_empty_dict(self):
+        self.assertEqual(self.store.get_mini_size(), {})
+
+    def test_a_later_normal_size_save_leaves_the_mini_size_alone(self):
+        self.store.save_mini_size(400, 520)
+        self.store.save_window_size(1100, 800)
+        self.assertEqual(self.store.get_mini_size(), {"width": 400, "height": 520})
+
+
 if __name__ == "__main__":
     unittest.main()

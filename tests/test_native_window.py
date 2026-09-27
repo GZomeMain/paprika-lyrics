@@ -147,6 +147,56 @@ class ApplyFullscreenTest(unittest.TestCase):
         self.assertFalse(nw.is_covering_monitor(u, u.hwnd))
 
 
+class FixPointTest(unittest.TestCase):
+    """
+    Resize anchoring: dragging an edge must hold the opposite one still.
+
+    FixPoint is faked as plain ints so the mapping can be asserted without
+    pywebview, and the assertions are written in terms of the edges that end up
+    held rather than the flag arithmetic that produces them.
+    """
+
+    class FakeFixPoint:
+        NORTH = 1
+        WEST = 2
+        EAST = 4
+        SOUTH = 8
+
+    def _held(self, anchor):
+        flags = nw.fix_point_for(anchor, self.FakeFixPoint)
+        return {name for name in ("NORTH", "WEST", "EAST", "SOUTH")
+                if flags & getattr(self.FakeFixPoint, name)}
+
+    def test_right_and_bottom_edges_grow_from_the_top_left(self):
+        for anchor in ("e", "s", "se"):
+            with self.subTest(anchor=anchor):
+                self.assertEqual(self._held(anchor), {"NORTH", "WEST"})
+
+    def test_west_edge_holds_the_east_edge(self):
+        held = self._held("w")
+        self.assertIn("EAST", held)
+        self.assertNotIn("SOUTH", held)   # width only: the height must not move
+
+    def test_north_edge_holds_the_south_edge(self):
+        held = self._held("n")
+        self.assertIn("SOUTH", held)
+        self.assertNotIn("EAST", held)
+
+    def test_each_corner_pins_the_opposite_corner(self):
+        self.assertEqual(self._held("nw"), {"SOUTH", "EAST"})
+        self.assertEqual(self._held("ne"), {"SOUTH", "WEST"})
+        self.assertEqual(self._held("sw"), {"NORTH", "EAST"})
+
+    def test_unknown_or_missing_anchor_falls_back_to_east(self):
+        fallback = self._held("e")
+        for anchor in (None, "", "sideways", "E"):
+            with self.subTest(anchor=anchor):
+                self.assertEqual(self._held(anchor), fallback)
+
+    def test_mapping_covers_every_handle_direction(self):
+        self.assertEqual(set(nw.ANCHOR_EDGES), {"e", "w", "n", "s", "ne", "nw", "se", "sw"})
+
+
 class TopmostAndClickThroughTest(unittest.TestCase):
     def test_set_topmost_true_then_false(self):
         u = FakeUser32()

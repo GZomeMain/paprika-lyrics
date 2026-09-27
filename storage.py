@@ -224,4 +224,19 @@ class CacheManager:
                 win["y"] = y
                 self._schedule_save(delay=0.6)
 
+    # The mini (lyrics-only) player is the same window at a much smaller size, so
+    # its size lives beside the normal one, under window["mini"]. Keeping them
+    # separate means leaving mini restores the size the user had before it, and
+    # closing the app while mini never boots the next launch into a stub window.
+    def save_mini_size(self, width: int, height: int):
+        with self._lock:
+            win = self._data.setdefault("window", {})
+            win["mini"] = {"width": int(width), "height": int(height)}
+            self._schedule_save(delay=0.6)
+
+    def get_mini_size(self) -> dict:
+        with self._lock:
+            mini = self._data.get("window", {}).get("mini") or {}
+            return dict(mini)
+
 CACHE = CacheManager()

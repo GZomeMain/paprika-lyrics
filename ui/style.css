@@ -543,6 +543,9 @@ body:not(.beat-live) .ambient-backdrop {
    Lyrics Container & Depth of Field Architecture
    ========================================================= */
 
+/* The scroller now shows its own slim bar: the auto-scroller already gives the
+   list motion, so the bar is only a position readout, and it stays out of the
+   way until the list is hovered. */
 #lyrics-container {
   /* How far down the list fades to nothing. The floating track card is painted
      over the scroller, so this has to reach past it or lyric glyphs show through
@@ -551,9 +554,10 @@ body:not(.beat-live) .ambient-backdrop {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: scroll;
-  padding: 180px 28px 240px 28px;
+  padding: 180px 22px 240px 28px;
   -webkit-app-region: no-drag;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
   z-index: 10;
   position: relative;
   /* Song changes cross-fade instead of hard-replacing the tree behind a spinner. */
@@ -576,8 +580,37 @@ body:not(.beat-live) .ambient-backdrop {
   );
 }
 
+/* ---------- Lyric scroller scrollbar ----------
+   A 10px gutter with a 4px pill thumb (the border + background-clip trick keeps
+   the painted thumb thin inside a wide, easy-to-grab hit area). It lives dim
+   and fades up on hover of the list, and the padding right is 22px so the
+   column does not shift when the bar appears. */
 #lyrics-container::-webkit-scrollbar {
-  display: none;
+  width: 10px;
+}
+
+#lyrics-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#lyrics-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.10);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+  transition: background-color var(--dur-3) var(--ease-fluid);
+}
+
+#lyrics-container:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.26);
+}
+
+#lyrics-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.45);
+}
+
+#lyrics-container::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .intro-dots {
@@ -811,6 +844,18 @@ body:not(.beat-live) .ambient-backdrop {
 .line:hover {
   opacity: 0.75 !important;
   filter: blur(0.5px) !important;
+}
+
+/* Lines are roving-tabindex buttons (the active line is a tab stop so keyboard
+   users can seek), and Chromium's default ring turned a stray Tab press into a
+   box drawn around a lyric — it read as the line being selected. The focus
+   state itself is still announced; it just is not painted as a rectangle over
+   the artwork. */
+.line:focus,
+.line:focus-visible,
+#lyrics-container:focus,
+#lyrics-container:focus-visible {
+  outline: none;
 }
 
 /* ---------- Lyric alignment: left (default) / center / right ----------
@@ -1398,12 +1443,13 @@ body.layout-compact .track-text > .transport-row {
   gap: 9px;
 }
 
-/* Bar 1 of the pair: the hairline track. `overflow: visible` lets the capsule
-   overhang it, and the base bar's hover-grown height is cancelled because the
-   thicker fill already supplies the "this is draggable" affordance. */
+/* The rail: one hairline at the same weight as the played portion, so the pair
+   reads as a single line with a dot travelling along it (the Spicy/Spotify
+   shape) rather than a track plus a capsule. `overflow: visible` is what lets
+   the dot overhang both ends of the bar. */
 #art-progress {
   height: 3px;
-  background: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.24);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   overflow: visible;
   display: flex;
@@ -1411,19 +1457,46 @@ body.layout-compact .track-text > .transport-row {
 }
 
 #art-progress:hover {
-  height: 3px;
-  background: rgba(255, 255, 255, 0.4);
+  height: 4px;
+  background: rgba(255, 255, 255, 0.34);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
-/* Bar 2 of the pair: the played capsule, thick enough to stay white over a
-   light cover. min-width keeps a stub visible at 0:00, as in the reference. */
+/* The played portion: same 3px as the rail, in white. */
 #art-progress .float-progress-fill {
-  height: 6px;
-  min-width: 6px;
+  height: 3px;
   border-radius: var(--r-pill);
   background: #fff;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+/* The playhead dot. updateArtProgress() writes its `left` once a second and the
+   1 s linear transition below is what turns those steps into one continuous
+   sweep; a seek drops the transition so the dot lands instead of gliding. */
+.art-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55), 0 0 7px rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  transition: left 1s linear, width var(--dur-2) var(--ease-fluid), height var(--dur-2) var(--ease-fluid);
+}
+
+.art-progress:hover .art-thumb,
+body.seeking .art-thumb {
+  width: 13px;
+  height: 13px;
+}
+
+/* Seeking (drag or click) is 1:1 with the pointer, so the dot must not chase it. */
+body.seeking .art-thumb,
+.art-progress.no-thumb-slide .art-thumb {
+  transition: left 0s, width var(--dur-2) var(--ease-fluid), height var(--dur-2) var(--ease-fluid);
 }
 
 .art-time {
@@ -1518,10 +1591,9 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   inset: 0;
   z-index: 60;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding: 10px;
-  padding-top: 12px;
+  padding: 14px;
   background:
     radial-gradient(120% 85% at 8% 0%, rgba(72, 68, 112, 0.10), transparent 58%),
     radial-gradient(110% 75% at 100% 100%, rgba(36, 48, 82, 0.10), transparent 55%),
@@ -1544,11 +1616,14 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
 .sp-sheet {
   position: relative;
   width: 100%;
-  max-width: 400px;
-  max-height: calc(100% - 8px);
+  max-width: 560px;
+  /* Shorter than the window and centred: a sheet stretched edge to edge read as
+     a page rather than a panel, so it now has a height ceiling of its own and
+     scrolls internally past it. */
+  max-height: min(760px, 100%);
   /* Row density is one token so a small window can compact the sheet without
      a parallel set of rules per element. */
-  --sp-row-min-h: 36px;
+  --sp-row-min-h: 40px;
   display: flex;
   flex-direction: column;
   border-radius: var(--r-lg);
@@ -1786,10 +1861,11 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
 @media (max-height: 420px) {
   .sp-sheet {
     --sp-row-min-h: 28px;
+    max-height: 100%;
   }
 
   .settings-page {
-    padding-top: 6px;
+    padding: 6px 10px;
   }
 
   .sp-head {
@@ -1825,6 +1901,14 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   .settings-page {
     padding-left: 4px;
     padding-right: 4px;
+  }
+}
+
+/* Below 520px of width the comfortable ceiling is the window itself, so the
+   sheet keeps the full-width feel the small layouts always had. */
+@media (max-width: 520px) {
+  .sp-sheet {
+    max-height: 100%;
   }
 }
 
@@ -1949,6 +2033,13 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   display: none !important;
   opacity: 0 !important;
   visibility: hidden !important;
+}
+
+/* A fullscreen window is a fixed surface: no edge drags. The host would only
+   have to reassert the monitor bounds after every one of them anyway, which
+   reads as the window fighting the pointer. */
+body.is-fullscreen .resize-handle {
+  display: none;
 }
 
 /* Slightly wider hit targets feel more native — 8px edges are easier to grab */
@@ -2240,6 +2331,7 @@ body.is-fullscreen .track-float {
 body.is-fullscreen .float-art-wrap {
   width: 96px;
   height: 96px;
+  --art-grow: 300px;
 }
 
 body.is-fullscreen .float-art-wrap:hover {
@@ -2336,6 +2428,24 @@ body.layout-split .track-float {
   width: 220px;
   height: 220px;
   z-index: 40;
+}
+
+/* ---------- Hover/click hotspot, as wide as the card is about to become ----------
+   The on-art control row is laid out across the *grown* card, but hover was only
+   recognised on the 72px art. Reaching a control therefore meant leaving the art
+   before it had grown: the row never appeared, and the click fell through to the
+   lyric line behind the card — which seeks the track instead of opening settings.
+   This invisible hotspot keeps the art hovered across the width it is about to
+   occupy, at the art's own height, so the space *below* the card stays real
+   lyrics rather than becoming a larger dead zone. */
+.float-art-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--art-grow, 220px);
+  height: 100%;
+  pointer-events: inherit;
 }
 
 .float-art-wrap .track-art {
@@ -2439,6 +2549,38 @@ body.layout-split #app-header .track-meta {
   pointer-events: auto;
 }
 
+/* ---------- Uniform darken on hover ----------
+   The two gradient scrims are a vignette: they protect the top and bottom edges
+   but leave the midtones as bright as the sleeve, so a white cover still beat
+   the glyphs in the middle. This flattens the whole picture by one constant
+   amount instead — the same value over a black or a white cover — and the
+   scrims then layer on top of it for the edges. It sits at z-index 2, under the
+   control layers at z-index 3. */
+.float-art-wrap::after,
+.side-art-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.34);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-fluid);
+}
+
+.float-art-wrap:hover::after,
+.side-art-wrap:hover::after,
+body.art-hover .float-art-wrap::after {
+  opacity: 1;
+}
+
+/* The gated window-mode controls: the exit exists only in fullscreen, the
+   fullscreen/mini pair only while windowed (see syncArtControls). */
+.art-btn.is-hidden {
+  display: none;
+}
+
 .art-btn {
   width: 30px;
   height: 30px;
@@ -2454,10 +2596,14 @@ body.layout-split #app-header .track-meta {
   transition: color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
 }
 
+/* Bolder glyphs: these sit on a photograph, and a 1.9px stroke at 17px washed
+   out over a light cover. The stroke weight is set here rather than per-SVG so
+   every on-art icon in the app shares one weight. */
 .art-btn .icon {
-  width: 17px;
-  height: 17px;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.55));
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.15;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.7));
   transition: filter var(--dur-2) var(--ease-fluid);
 }
 
@@ -2508,6 +2654,125 @@ body.is-fullscreen .track-float #title {
 
 body.is-fullscreen .track-float #artist {
   font-size: 19px;
+}
+
+/* =========================================================
+   Mini player — the windowed alternative to fullscreen
+   The same window at a small size, carrying the lyrics and nothing else. Every
+   surface that only makes sense on a big window retires (the card, the header,
+   the split panel, the sync rail) and a slim bar takes their place; that bar is
+   the one strip that stays draggable, so the lyrics-only window can still be
+   moved out of the way. Sizing is enforced by WindowApi (320x380 .. 900x1200).
+   ========================================================= */
+
+body.mini .top-drag-strip,
+body.mini header#app-header,
+body.mini .track-float,
+body.mini .track-side-panel,
+body.mini .latency-rail {
+  display: none;
+}
+
+.mini-bar {
+  display: none;
+}
+
+body.mini .mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 34px;
+  padding: 0 5px 0 0;
+  /* Below the settings sheet (z-index 60) so an open sheet is never covered,
+     above the lyrics (10). The grips that would fight it for the same strip are
+     hidden in mini mode instead (see below). */
+  z-index: 45;
+  background: linear-gradient(to bottom, rgba(9, 9, 11, 0.8), rgba(9, 9, 11, 0));
+}
+
+/* The mini bar owns the top edge, so the grips that would resize from that same
+   strip stand down; the sides and bottom still resize. */
+body.mini .resize-n,
+body.mini .resize-nw,
+body.mini .resize-ne {
+  display: none;
+}
+
+/* The drag handle is the bar's leftover space rather than the bar itself:
+   pywebview drags the window for any mousedown with a marked *ancestor*, so a
+   bar that wrapped its own buttons would drag the window instead of clicking
+   them. */
+.mini-drag {
+  flex: 1 1 auto;
+  align-self: stretch;
+  -webkit-app-region: drag;
+}
+
+.mini-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--icon-idle);
+  cursor: pointer;
+  transition: color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+  -webkit-app-region: no-drag;
+}
+
+.mini-btn .icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.1;
+}
+
+.mini-btn:hover {
+  color: var(--icon-hot);
+  background: var(--hover-surface);
+}
+
+.mini-btn:active {
+  transform: scale(0.92);
+}
+
+.mini-btn:focus {
+  outline: none;
+}
+
+.mini-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mini-btn-danger:hover {
+  color: var(--danger-text-hover);
+  background: var(--danger-hover);
+}
+
+/* Tighter gutter, and the mask's fade shortened to match the smaller top gap so
+   the first line is not half-erased by it. */
+body.mini #lyrics-container {
+  --lyrics-fade-top: 48px;
+  padding: 46px 18px 90px 20px;
+}
+
+.reduce-motion .float-art-wrap::after,
+.reduce-motion .side-art-wrap::after,
+.reduce-motion #lyrics-container::-webkit-scrollbar-thumb {
+  transition: none;
+}
+
+.reduce-motion .art-thumb {
+  transition: none;
 }
 
 

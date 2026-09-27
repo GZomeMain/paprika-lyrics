@@ -212,6 +212,24 @@ const LAYOUTS = ['compact', 'split'];
 let isFullscreen = false;
 let layoutMode = 'compact';
 
+// ---------------------------------------------------------
+// Window dragging, and why it is a DOM question
+//
+// pywebview implements drag regions in JavaScript, not with -webkit-app-region:
+// its injected body listener walks up from the event target looking for an
+// element that IS one of the `.pywebview-drag-region` nodes, and starts a native
+// window-move loop as soon as it finds one. A CSS rule therefore never took part
+// in that path, which is why a fullscreen overlay could still be dragged around
+// the desktop by its song-details strip. Locking the window means taking the
+// marker off the elements themselves; the stylesheet's no-drag rules stay as a
+// second line of defence for engines that do honour app-region.
+const DRAG_REGION_CLASS = 'pywebview-drag-region';
+const dragRegionElements = Array.from(document.querySelectorAll('.' + DRAG_REGION_CLASS));
+
+function syncWindowDrag() {
+  dragRegionElements.forEach((el) => el.classList.toggle(DRAG_REGION_CLASS, !isFullscreen));
+}
+
 function applyLayoutState() {
   document.body.classList.toggle('is-fullscreen', isFullscreen);
   document.body.classList.toggle('layout-compact', layoutMode === 'compact');
@@ -220,6 +238,8 @@ function applyLayoutState() {
   const splitActive = layoutMode === 'split' && isFullscreen;
   document.body.classList.toggle('layout-split', splitActive);
   document.body.classList.remove('layout-split-suppressed');
+  // A fullscreen overlay is a fixed surface: no drag regions while it is up.
+  syncWindowDrag();
   Settings.set('layout', layoutMode);
   Settings.set('fullscreen', isFullscreen ? '1' : '0');
   syncArtControls();
@@ -270,17 +290,23 @@ function initFloatArt() {
   wrap.addEventListener('transitionend', syncLyricsClearance);
 }
 
-// Mirrors fullscreen state onto the on-art buttons (active look).
+// Mirrors fullscreen state onto the on-art buttons: the active look, and which
+// of the window-mode controls exist at all. `data-when` in the markup is the one
+// declaration of that (the exit button is fullscreen-only, the fullscreen and
+// mini buttons are windowed-only), so the compact row and the split panel's row
+// cannot drift apart.
 function syncArtControls() {
+  // Compact is 'off', split 'on' — a second read of which layout is active.
+  const splitActive = document.body.classList.contains('layout-split');
   const layoutBtn = document.getElementById('art-btn-layout');
-  if (layoutBtn) {
-    // Compact is 'off', split 'on' — a second read of which layout is active.
-    layoutBtn.classList.toggle('is-on', document.body.classList.contains('layout-split'));
-  }
+  if (layoutBtn) layoutBtn.classList.toggle('is-on', splitActive);
   const sideLayoutBtn = document.getElementById('side-btn-layout');
-  if (sideLayoutBtn) sideLayoutBtn.classList.toggle('is-on', document.body.classList.contains('layout-split'));
-  const fsBtn = document.getElementById('side-btn-fs');
-  if (fsBtn) fsBtn.classList.toggle('is-on', isFullscreen);
+  if (sideLayoutBtn) sideLayoutBtn.classList.toggle('is-on', splitActive);
+
+  document.querySelectorAll('.art-controls .art-btn[data-when]').forEach((btn) => {
+    const wantsFullscreen = btn.dataset.when === 'fullscreen';
+    btn.classList.toggle('is-hidden', wantsFullscreen !== isFullscreen);
+  });
 }
 
 // =========================================================
@@ -313,12 +339,53 @@ function toggleAlwaysOnTop() {
 }
 
 function toggleFullscreen() {
+  // The two are mutually exclusive modes of one window: fullscreen covers the
+  // whole monitor, so it is always entered from the normal windowed state.
+  if (miniMode && !isFullscreen) setMiniMode(false);
   if (window.pywebview && window.pywebview.api && window.pywebview.api.toggle_fullscreen) {
     window.pywebview.api.toggle_fullscreen().then((state) => setFullscreen(!!state));
   } else {
     // Browser/dev fallback: no native window, just scale the layout.
     setFullscreen(!isFullscreen);
   }
+}
+
+// =========================================================
+// Mini player (lyrics only)
+// A windowed mode of this same surface rather than a second window: the overlay
+// exists to show one source's lyrics, and a separate window would need its own
+// copy of the whole sync pipeline (track pushes, playhead, latency) to show the
+// same song. So mini is a body class plus a resize, and the host owns the
+// geometry — the size to restore, and the 320x380..900x1200 range it will not
+// leave. The state it answers with is the source of truth, not what we asked for.
+// =========================================================
+let miniMode = false;
+
+function applyMiniState() {
+  document.body.classList.toggle('mini', miniMode);
+  syncWindowDrag();   // the mini bar is a drag region too
+  syncLyricsClearance();
+  wakeRenderLoop();   // entering/leaving mini animates the scroller's padding
+}
+
+function setMiniMode(on) {
+  const wants = !!on;
+  if (wants === miniMode) return;
+  miniMode = wants;
+  applyMiniState();
+  const api = window.pywebview && window.pywebview.api;
+  if (api && api.set_mini_mode) {
+    Promise.resolve(api.set_mini_mode(wants)).then((state) => {
+      if (typeof state === 'boolean' && state !== miniMode) {
+        miniMode = state;
+        applyMiniState();
+      }
+    }).catch(() => {});
+  }
+}
+
+function toggleMiniMode() {
+  setMiniMode(!miniMode);
 }
 
 // =========================================================
@@ -1127,7 +1194,13 @@ function updateArtProgress(ms) {
   const artFill = document.getElementById('art-progress-fill');
   if (artFill && sideTotalMs > 0 && second !== lastArtFillSecond) {
     lastArtFillSecond = second;
-    artFill.style.width = Math.max(0, Math.min(100, (ms / sideTotalMs) * 100)).toFixed(2) + '%';
+    const pct = Math.max(0, Math.min(100, (ms / sideTotalMs) * 100));
+    artFill.style.width = pct.toFixed(2) + '%';
+    // The playhead dot rides this same 1 Hz tick: its 1 s linear `left`
+    // transition (see .art-thumb) is what turns those steps into one
+    // continuous sweep, so nothing has to run per frame.
+    const thumb = document.getElementById('art-thumb');
+    if (thumb) thumb.style.left = pct.toFixed(2) + '%';
   }
   const artDurEl = document.getElementById('art-duration-display');
   if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTimeShort(sideTotalMs);
@@ -1180,6 +1253,13 @@ function seekFromFraction(el, evt, vertical) {
 
 function applySeek(targetMs) {
   wakeRenderLoop();
+  // A seek is 1:1 with the pointer, so the playhead dot must land rather than
+  // glide after it. The class is dropped again once the new position is applied.
+  const artProgress = document.getElementById('art-progress');
+  if (artProgress) {
+    artProgress.classList.add('no-thumb-slide');
+    setTimeout(() => artProgress.classList.remove('no-thumb-slide'), 80);
+  }
   playheadMs = targetMs;
   targetDriftMs = 0;
   anchorPosMs = targetMs;
@@ -2405,18 +2485,16 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
           window.pywebview.api.seek_position(targetSeekMs);
         }
       };
+      // Only the words are a seek target. A line is a full-width block with
+      // generous leading plus a 28px margin, so most of its box has no glyphs on
+      // it — and seeking from a click in that empty band is what made the space
+      // right below the track-details strip feel like it belonged to the lyrics
+      // (the card's leading sat over the first line's blank top). Anything that
+      // is not inside a word group, or the translation line, is not a seek.
       lineDiv.onclick = (e) => {
-        // The compact float card overlaps the top of the scroller; a click that
-        // starts inside its footprint must seek to THAT line, not the lyric
-        // painted behind the card. elementFromPoint sees through pointer-events,
-        // so hit-test the card explicitly.
-        const float = document.getElementById('track-float');
-        if (float && document.body.classList.contains('layout-compact')) {
-          const r = float.getBoundingClientRect();
-          if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-            return;   // card area: swallow, it is not a lyric click
-          }
-        }
+        const target = e.target;
+        const onWord = !!(target && target.closest && target.closest('.word-group, .line-secondary'));
+        if (!onWord) return;
         activateLine.call(lineDiv, e);
       };
       lineDiv.onkeydown = activateLine;
@@ -2826,19 +2904,19 @@ window.addEventListener('keydown', (e) => {
   const handles = document.querySelectorAll('.resize-handle');
   if (!handles.length) return;
 
-  const MIN_W = 320, MAX_W = 1400, MIN_H = 380, MAX_H = 1600;
-  const lastDispatchedW = { current: 0 };
-  const lastDispatchedH = { current: 0 };
+  // Mirrors WindowApi's clamps, including the much smaller one the lyrics-only
+  // mini player runs in. Both sides clamp so the window comes to rest exactly
+  // where the pointer stopped instead of drifting on every dispatch.
+  const NORMAL_BOUNDS = { minW: 320, maxW: 1400, minH: 380, maxH: 1600 };
+  const MINI_BOUNDS = { minW: 320, maxW: 900, minH: 380, maxH: 1200 };
 
   handles.forEach((handle) => {
     const dir = handle.dataset.dir || 'se';
-    const east = dir.includes('e'), west = dir.includes('w');
-    const south = dir.includes('s'), north = dir.includes('n');
 
     let dragging = false;
-    let startX = 0, startY = 0, startW = 0, startH = 0, startWinX = 0, startWinY = 0;
-    let pendingW = 0, pendingH = 0, pendingX = 0, pendingY = 0;
-    let lastDispatch = 0, rafId = null;
+    let startX = 0, startY = 0, startW = 0, startH = 0;
+    let pendingW = 0, pendingH = 0;
+    let lastW = 0, lastH = 0, lastDispatch = 0, rafId = null;
 
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -2846,44 +2924,43 @@ window.addEventListener('keydown', (e) => {
       dragging = true;
       startX = e.screenX; startY = e.screenY;
       startW = window.innerWidth; startH = window.innerHeight;
-      startWinX = window.screenX; startWinY = window.screenY;
       pendingW = startW; pendingH = startH;
-      pendingX = startWinX; pendingY = startWinY;
-      document.body.classList.add('resizing', 'resizing-' + dir);
-      lastDispatchedW.current = startW;
-      lastDispatchedH.current = startH;
+      lastW = startW; lastH = startH;
       lastDispatch = 0;
+      document.body.classList.add('resizing', 'resizing-' + dir);
     });
+
+    // The size is the only thing computed here. Which edge stays put is the
+    // host's job: pywebview's resize takes a fix point and applies position and
+    // size in a single SetWindowPos. Dispatching a move plus a resize from here
+    // used to mean two async calls per frame, and because the resize ran with
+    // the default fix point the window always grew from its top-left corner —
+    // grabbing any edge but the bottom-right resized as if that corner were
+    // anchored.
+    const dispatch = () => {
+      const api = window.pywebview && window.pywebview.api;
+      if (api && api.resize_window) api.resize_window(pendingW, pendingH, dir);
+    };
 
     window.addEventListener('mousemove', (e) => {
       if (!dragging) return;
       const dx = e.screenX - startX;
       const dy = e.screenY - startY;
+      const b = miniMode ? MINI_BOUNDS : NORMAL_BOUNDS;
 
-      if (east)  pendingW = Math.max(MIN_W, Math.min(MAX_W, Math.round(startW + dx)));
-      if (west) {
-        // Resizing from the west edge keeps the east edge fixed: grow moves the origin left.
-        pendingW = Math.max(MIN_W, Math.min(MAX_W, Math.round(startW - dx)));
-        pendingX = Math.round(startWinX + (startW - pendingW));
-      }
-      if (south) pendingH = Math.max(MIN_H, Math.min(MAX_H, Math.round(startH + dy)));
-      if (north) {
-        pendingH = Math.max(MIN_H, Math.min(MAX_H, Math.round(startH - dy)));
-        pendingY = Math.round(startWinY + (startH - pendingH));
-      }
+      if (dir.includes('e')) pendingW = Math.max(b.minW, Math.min(b.maxW, Math.round(startW + dx)));
+      if (dir.includes('w')) pendingW = Math.max(b.minW, Math.min(b.maxW, Math.round(startW - dx)));
+      if (dir.includes('s')) pendingH = Math.max(b.minH, Math.min(b.maxH, Math.round(startH + dy)));
+      if (dir.includes('n')) pendingH = Math.max(b.minH, Math.min(b.maxH, Math.round(startH - dy)));
 
       if (!rafId) {
         rafId = requestAnimationFrame(() => {
-          const now = performance.now();
-          const moved = Math.abs(pendingW - lastDispatchedW.current) >= 4 || Math.abs(pendingH - lastDispatchedH.current) >= 4;
-          if (moved && now - lastDispatch >= 30 && window.pywebview && window.pywebview.api) {
-            if (west || north) window.pywebview.api.move_window(pendingX, pendingY);
-            window.pywebview.api.resize_window(pendingW, pendingH);
-            lastDispatchedW.current = pendingW;
-            lastDispatchedH.current = pendingH;
-            lastDispatch = now;
-          }
           rafId = null;
+          const now = performance.now();
+          const changed = Math.abs(pendingW - lastW) >= 4 || Math.abs(pendingH - lastH) >= 4;
+          if (!changed || now - lastDispatch < 30) return;
+          lastW = pendingW; lastH = pendingH; lastDispatch = now;
+          dispatch();
         });
       }
     });
@@ -2892,11 +2969,9 @@ window.addEventListener('keydown', (e) => {
       if (!dragging) return;
       dragging = false;
       document.body.classList.remove('resizing', 'resizing-e', 'resizing-w', 'resizing-s', 'resizing-n', 'resizing-se', 'resizing-sw', 'resizing-ne', 'resizing-nw');
-      if (window.pywebview && window.pywebview.api) {
-        if (west || north) window.pywebview.api.move_window(pendingX, pendingY);
-        window.pywebview.api.resize_window(pendingW, pendingH);
-        window.pywebview.api.save_window_size(pendingW, pendingH);
-      }
+      dispatch();
+      const api = window.pywebview && window.pywebview.api;
+      if (api && api.save_window_size) api.save_window_size(pendingW, pendingH);
     });
   });
 })();

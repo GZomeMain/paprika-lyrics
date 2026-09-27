@@ -14,6 +14,15 @@ except ImportError:
     sys.exit(1)
 
 try:
+    from webview.window import FixPoint
+except ImportError:  # pragma: no cover - pre-5.x pywebview
+    FixPoint = None
+
+# pywebview's own resize default: keep the top-left corner. Used when a resize
+# is not driven by a handle (mini-player entry, geometry restore).
+_DEFAULT_FIX_POINT = (FixPoint.NORTH | FixPoint.WEST) if FixPoint is not None else None
+
+try:
     from config import (
         DEFAULT_WIDTH,
         DEFAULT_HEIGHT,
@@ -32,8 +41,19 @@ except ImportError as exc:
 SHUTDOWN_SIGNAL = threading.Event()
 SMTC_BRIDGE = SmtcBridge(SHUTDOWN_SIGNAL)
 HOTKEY_MANAGER = None
-WINDOW_REF = NoneWINDOW_API_REF = None
+WINDOW_REF = None
+WINDOW_API_REF = None
 CLICK_THROUGH_ENABLED = False
+
+# Window size bounds. The normal range is the windowed overlay; the mini range
+# is the lyrics-only mini player. Both are mirrored in ui/app.js (the resize
+# handles clamp against them before they ever reach this side) and enforced
+# here as well, because the UI is not the only thing that can ask for a size.
+NORMAL_MIN = (320, 380)
+NORMAL_MAX = (1400, 1600)
+MINI_MIN = (320, 380)
+MINI_MAX = (900, 1200)
+MINI_SIZE = (460, 560)
 
 
 def apply_native_rounded_corners(window):
@@ -80,11 +100,28 @@ class WindowApi:
     def minimize(self):
         self.window.minimize()
 
-    def resize_window(self, width: int, height: int):
+    def resize_window(self, width: int, height: int, anchor: str = 'e'):
+        """
+        Resizes the window, holding the edge opposite `anchor` still.
+
+        `anchor` is the direction of the resize handle the user grabbed ('e',
+        'w', 'n', 's', 'ne', 'nw', 'se', 'sw'), which determines the anchor:
+        dragging the west edge must keep the east edge where it is, or the
+        window appears to resize from the wrong side. pywebview's resize takes
+        the fix point and the winforms backend applies position and size in one
+        SetWindowPos, so the anchor is exact and atomic — no move/resize pair to
+        land in different frames.
+        """
         try:
-            w = max(320, min(1400, int(width)))
-            h = max(380, min(1600, int(height)))
-            self.window.resize(w, h)
+            min_w, min_h = MINI_MIN if getattr(self, '_mini', False) else NORMAL_MIN
+            max_w, max_h = MINI_MAX if getattr(self, '_mini', False) else NORMAL_MAX
+            w = max(min_w, min(max_w, int(width)))
+            h = max(min_h, min(max_h, int(height)))
+            fix_point = native_window.fix_point_for(anchor, FixPoint) if FixPoint is not None else None
+            if fix_point is None:
+                self.window.resize(w, h)
+            else:
+                self.window.resize(w, h, fix_point)
             # A resize while fullscreen would shrink the window out of monitor
             # coverage; put the monitor bounds back (no-op while windowed).
             if getattr(self, '_fullscreen', False):
@@ -92,21 +129,73 @@ class WindowApi:
         except Exception:
             pass
 
-    def move_window(self, x: int, y: int):
-        """Moves the window (used by edge-drag resizing that also moves the
-        opposite edge, and by any future drag-handle paths)."""
-        try:
-            self.window.move(int(x), int(y))
-        except Exception:
-            pass
-
     def save_window_size(self, width: int, height: int):
         try:
-            w = max(320, min(1400, int(width)))
-            h = max(380, min(1600, int(height)))
+            if getattr(self, '_mini', False):
+                min_w, min_h = MINI_MIN
+                max_w, max_h = MINI_MAX
+                CACHE.save_mini_size(
+                    max(min_w, min(max_w, int(width))),
+                    max(min_h, min(max_h, int(height))),
+                )
+                return
+            w = max(NORMAL_MIN[0], min(NORMAL_MAX[0], int(width)))
+            h = max(NORMAL_MIN[1], min(NORMAL_MAX[1], int(height)))
             CACHE.save_window_size(w, h)
         except Exception:
             pass
+
+    def set_mini_mode(self, enabled: bool) -> bool:
+        """
+        Shrinks the window to the lyrics-only mini player, or restores the
+        windowed geometry the user had before it. Returns the state applied,
+        which the UI mirrors back.
+
+        This is the same window, not a second one: the overlay exists to show
+        one audio source's lyrics, and a separate window would need a second
+        copy of the whole sync pipeline (SMTC pushes, playhead, latency) for no
+        gain. Mini is a mode of the surface, so it is a resize plus a layout
+        class, and the lyrics keep playing seamlessly through it.
+        """
+        enabled = bool(enabled)
+        if enabled == getattr(self, '_mini', False):
+            return enabled
+        try:
+            if enabled:
+                # Fullscreen owns the whole monitor: a mini window inside it is
+                # meaningless, so leave fullscreen first.
+                if getattr(self, '_fullscreen', False):
+                    self.toggle_fullscreen()
+                self._pre_mini_geometry = self._current_geometry()
+                saved = CACHE.get_mini_size()
+                w = int(saved.get('width') or MINI_SIZE[0])
+                h = int(saved.get('height') or MINI_SIZE[1])
+                w = max(MINI_MIN[0], min(MINI_MAX[0], w))
+                h = max(MINI_MIN[1], min(MINI_MAX[1], h))
+                self._mini = True
+                self.window.resize(w, h, _DEFAULT_FIX_POINT)
+            else:
+                self._mini = False
+                geometry = getattr(self, '_pre_mini_geometry', None)
+                self._pre_mini_geometry = None
+                if geometry:
+                    x, y, w, h = geometry
+                    self.window.move(x, y)
+                    self.window.resize(
+                        max(NORMAL_MIN[0], min(NORMAL_MAX[0], w)),
+                        max(NORMAL_MIN[1], min(NORMAL_MAX[1], h)),
+                        _DEFAULT_FIX_POINT,
+                    )
+        except Exception as exc:
+            print(f"[Spicy Lyrics] Mini player toggle failed: {exc}")
+            return getattr(self, '_mini', False)
+        return self._mini
+
+    def _current_geometry(self):
+        try:
+            return (self.window.x, self.window.y, self.window.width, self.window.height)
+        except Exception:
+            return None
 
     def toggle_fullscreen(self) -> bool:
         """
@@ -142,6 +231,17 @@ class WindowApi:
             return getattr(self, '_fullscreen', False)
 
     def _record_window_geometry(self):
+        # Closing while mini records the geometry the user left behind, not the
+        # stub the mini player happens to be: the next launch should open at the
+        # size they were actually working in.
+        if getattr(self, '_mini', False) and getattr(self, '_pre_mini_geometry', None):
+            x, y, w, h = self._pre_mini_geometry
+            try:
+                CACHE.save_window_position(x, y)
+                CACHE.save_window_size(w, h)
+            except Exception:
+                pass
+            return
         try:
             CACHE.save_window_position(getattr(self.window, "x", None), getattr(self.window, "y", None))
         except Exception:
@@ -272,8 +372,8 @@ if __name__ == '__main__':
         api.close,
         api.minimize,
         api.resize_window,
-        api.move_window,
         api.save_window_size,
+        api.set_mini_mode,
         api.toggle_playback,
         api.seek_position,
         api.skip_next,
