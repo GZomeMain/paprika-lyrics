@@ -173,10 +173,20 @@ async function main() {
     cdp = await Cdp.connect(target.webSocketDebuggerUrl);
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
-    // Deliberately NOT emulating prefers-reduced-motion: the app honors it by
-    // leaving the beat, the moments, the air and the tilt stock, which are
-    // precisely what the checks assert are live. Animations are suspended by the
-    // checks' own stylesheet instead.
+    // Pin prefers-reduced-motion: no-preference. The checks assert the beat,
+    // moments, air and tilt are LIVE, and the app honors reduced motion by
+    // leaving every one of them stock — which is exactly what a host with
+    // "show animations" disabled reports (Windows Server defaults, plus any
+    // accessibility setting). Without this pin the suite is green on a dev
+    // laptop and red on CI for reasons that have nothing to do with the code.
+    // The reduced-motion RULES are still asserted on their own, statically, from
+    // the stylesheets (dustReducedHidden / tiltReducedNeutral), so nothing about
+    // the opt-out goes untested. Animations themselves are suspended by the
+    // checks' own stylesheet, not by the media state.
+    await cdp.send('Emulation.setEmulatedMedia', {
+      media: '',
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+    });
 
     await cdp.send('Page.navigate', { url: `http://127.0.0.1:${port}/ui/index.html` });
     await new Promise((r) => setTimeout(r, 1500));

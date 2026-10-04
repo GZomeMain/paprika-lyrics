@@ -4,6 +4,8 @@ A high-performance, GPU-accelerated Windows desktop overlay that brings **Apple 
 
 Powered by a lightweight Python 3 host running **Edge WebView2 (Chromium)**, the overlay delivers studio-accurate syllable wipes, dynamic liquid glass backgrounds, spring physics scrolling, and cinematic depth of field—all with minimal CPU and GPU overhead.
 
+**⬇️ Get the app:** [Download the latest Windows build](https://github.com/GZomeMain/paprika-lyrics/releases/latest) — portable, no Python required. Prefer source? See *Installation & Setup* below.
+
 ---
 
 ## ✨ Features

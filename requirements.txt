@@ -2,4 +2,9 @@
 pywebview>=5.0
 winsdk>=1.0.0b10
 requests>=2.31.0
-spotify-scraper>=0.9.0
+# Optional: spotify-scraper>=0.9.0
+#   core/resolver.py imports it behind a guard (SPOTIFY_SCRAPER_AVAILABLE) and
+#   degrades to the other resolution tiers without it. It is not installed here
+#   because its `data-scraper` dependency currently has no installable release
+#   for our Python matrix (3.10-3.13), which would fail `pip install -r`.
+# spotify-scraper>=0.9.0
