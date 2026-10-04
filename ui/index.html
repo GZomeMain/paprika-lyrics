@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Paprika Lyrics — real-time lyric display for SimpMusic">
+  <title>Paprika Lyrics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-root">
+
+    <div class="ambient-backdrop">
+      <!-- Dynamic cover-art layers are created and cross-faded by app.js. The
+           artwork IS the background; the scrim over it is a ::after, and the
+           grain is the last layer. -->
+      <div class="noise-overlay"></div>
+    </div>
+
+    <!-- The song-moment grade: one veil between the backdrop and the card. One
+         element, one opacity, driven by --moment-strength and transitioned by its
+         own base rule so entering AND leaving a moment both ease.
+
+         There is deliberately no blend mode here. A soft-light pass tints every
+         glyph on screen and costs a full-window composite on each frame of the
+         beat pulse, and the room — not the type — is the thing that should take
+         the song's colour. It sits at z-index 2, under the card and the lyrics. -->
+    <div class="moment-veil" aria-hidden="true"></div>
+
+    <!-- Room air: the motes of the album's own light that drift through the room.
+         One layer above the veil and below the card and the lyrics, so air sits in
+         front of the grade but behind everything readable. It never takes a
+         pointer event: the card, the drag strip and the mini bar are grabbed
+         through it. The motes are built once by app.js (buildDustField). -->
+    <div class="dust-field" id="dust-field" aria-hidden="true"></div>
+
+    <!-- Top drag strip: hold anywhere along the top edge to move the window.
+         data-drag is the whole contract: a mousedown inside a marked surface is
+         handed to the operating system's own window move (see ui/app.js), unless
+         it came up through a data-no-drag element on the way. -->
+    <div class="top-drag-strip" data-drag aria-hidden="true"></div>
+
+    <!-- The track card: art, then the seekable progress row with its times, then
+         the title and artist. In compact it is a centred column (art on top, the
+         rest stacked beneath); fullscreen turns the same markup back into a row
+         with the art on the left. The card is a drag surface, so a mousedown on
+         the sleeve or the title moves the window — and everything that has to
+         keep its own gesture (the seek row, the transport, the on-art buttons)
+         opts out individually below with data-no-drag. -->
+    <div class="track-float" id="track-float" data-drag>
+      <div class="float-art-wrap" id="float-art-wrap">
+        <!-- The tilt stage: the sleeve and its lamp in one block, so the pointer
+             tilt has a layer of its own. It has to be its own element — the beat
+             animates .track-art's transform (art-beat-pulse) and the lamp's
+             (art-light-beat), so a tilt written onto either would be overwritten.
+             The control and transport rows are deliberately OUTSIDE it: chrome
+             that leans with the sleeve reads as broken, not as depth. -->
+        <div class="tilt-stage">
+          <!-- The beat's lamp: the sleeve's own light, in the artwork's colour (see
+               --art-accent), so a beat reads as something the art DOES rather than
+               as a window-wide brightness flicker. It sits behind the image at
+               z-index 0 and spreads a third of its size past the art on every side,
+               which is why neither this stage nor the wrapper may clip it. -->
+          <div class="art-light" aria-hidden="true"></div>
+          <img id="track-art" class="track-art" alt="" draggable="false">
+        </div>
+
+        <!-- Spicy-style on-art controls, revealed while hovered: layout and
+             settings always, plus the window-mode pair. The windowed pair is
+             fullscreen (enter) + mini player; in fullscreen it becomes the
+             single exit. data-when is what syncArtControls() gates on — the
+             exit button never appears while windowed, and the mini button is
+             meaningless in fullscreen (a mini window inside a fullscreen one
+             has nowhere to go). -->
+        <div class="art-controls" id="art-controls" data-no-drag>
+          <button class="art-btn" id="art-btn-layout" onclick="cycleLayout(); event.stopPropagation();"
+                  title="Cycle layout: Compact / Split" aria-label="Cycle layout">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="M9.5 4.5v15"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-settings" onclick="toggleSettings(event); event.stopPropagation();"
+                  title="Settings" aria-label="Open settings">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2"/>
+              <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-fs" data-when="windowed"
+                  onclick="toggleFullscreen(); event.stopPropagation();"
+                  title="Fullscreen (F11)" aria-label="Enter fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-pip" data-when="windowed"
+                  onclick="toggleMiniMode(); event.stopPropagation();"
+                  title="Mini player — lyrics only" aria-label="Open the lyrics-only mini player">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="5" width="17" height="14" rx="2.5"/>
+              <rect x="11.5" y="11.5" width="7" height="5.5" rx="1.4" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="art-btn-exit" data-when="fullscreen"
+                  onclick="toggleFullscreen(); event.stopPropagation();"
+                  title="Leave fullscreen (F11)" aria-label="Leave fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>
+            </svg>
+          </button>
+        </div>
+        <!-- On-art player: transport and seek both live on the hovered art
+             itself (Spotify-style). The progress row is the player's second
+             line, under the transport, because the times belong to the bar that
+             drives them rather than to the text column below the sleeve. -->
+        <div class="art-player" id="art-player" data-no-drag>
+          <div class="transport-row art-transport">
+            <button class="transport-btn" onclick="skipPrevious(); event.stopPropagation();" title="Previous track" aria-label="Previous track">
+              <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M7 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zm10.9-.74c.72-.43 1.63.09 1.63.94v12.4c0 .85-.91 1.37-1.63.94l-9.2-5.9a1.1 1.1 0 0 1 0-1.88l9.2-5.9z"/>
+              </svg>
+            </button>
+            <button class="transport-btn transport-play" id="art-tp-play" onclick="toggleSimpMusicPlay(); event.stopPropagation();" title="Play / Pause" aria-label="Play or pause">
+              <svg class="icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M8.2 5.4c0-.86.94-1.39 1.67-.94l9.1 5.6a1.1 1.1 0 0 1 0 1.88l-9.1 5.6c-.73.45-1.67-.08-1.67-.94V5.4z"/>
+              </svg>
+              <svg class="icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6.6" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+                <rect x="13.2" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+              </svg>
+            </button>
+            <button class="transport-btn" onclick="skipNext(); event.stopPropagation();" title="Next track" aria-label="Next track">
+              <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M16.8 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zM6.1 4.86c-.72-.43-1.63.09-1.63.94v12.4c0 .85.91 1.37 1.63.94l9.2-5.9a1.1 1.1 0 0 0 0-1.88l-9.2-5.9z"/>
+              </svg>
+            </button>
+          </div>
+          <!-- The card's one progress row: elapsed, the seekable bar with its
+               playhead dot, duration. seekFromFraction/applySeek drive it, and
+               the split panel keeps its own copy under #track-side-panel. It is
+               inside data-no-drag's parent, so a mousedown here seeks instead
+               of moving the window. -->
+          <div class="float-progress-row art-progress" data-no-drag>
+            <span class="art-time" id="art-timer-display">0:00</span>
+            <div class="float-progress" id="art-progress" title="Seek">
+              <div class="float-progress-fill" id="art-progress-fill"></div>
+              <div class="art-thumb" id="art-thumb"></div>
+            </div>
+            <span class="art-time" id="art-duration-display">0:00</span>
+          </div>
+        </div>
+      </div>
+      <div class="track-text">
+        <!-- Title and artist only: the seek row lives on the cover (see
+             #art-player), so this column is exactly what it says it is. -->
+        <div id="title">Waiting for SimpMusic...</div>
+        <div id="artist">Play any track to begin</div>
+      </div>
+    </div>
+
+    <!-- The header is NOT a drag surface, and data-no-drag makes that explicit:
+         its window controls have to stay clickable, and a drag surface that ever
+         wrapped them would swallow the click. Moving the window from the top band
+         is the top-drag-strip's job instead (see style.css); the header is
+         transparent and inert while windowed, so the strip behind it receives
+         those clicks. -->
+    <header id="app-header" data-no-drag>
+      <div class="track-meta">
+      </div>
+      <div class="window-controls">
+        <button class="btn" id="btn-minimize" onclick="window.pywebview.api.minimize()" title="Minimize" aria-label="Minimize">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M5 12h14"/>
+          </svg>
+        </button>
+        <button class="btn btn-danger" id="btn-close" onclick="window.pywebview.api.close()" title="Close" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mini player chrome: the only chrome a lyrics-only window keeps, and it
+         hides itself until the pointer reaches the top of the window — a mini
+         player should read as pure lyrics. The drag surface stays live while the
+         buttons are away, so the window can always be moved; and it is a SIBLING
+         of the buttons, never their ancestor, so a mousedown on a button is not
+         a mousedown inside a drag surface. -->
+    <div class="mini-bar" id="mini-bar">
+      <div class="mini-drag" data-drag aria-hidden="true"></div>
+      <div class="mini-buttons" id="mini-buttons">
+      <button class="mini-btn" onclick="toggleSettings(event); event.stopPropagation();"
+              title="Settings" aria-label="Open settings">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2"/>
+          <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+        </svg>
+      </button>
+      <button class="mini-btn" onclick="setMiniMode(false); event.stopPropagation();"
+              title="Back to the full player" aria-label="Leave the mini player">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+        </svg>
+      </button>
+      <button class="mini-btn mini-btn-danger" onclick="window.pywebview.api.close()"
+              title="Close" aria-label="Close">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+        </svg>
+      </button>
+      </div>
+    </div>
+
+    <div id="lyrics-container"></div>
+
+    <!-- Split layout: art fixed on the left with its own transport, fullscreen only -->
+    <aside class="track-side-panel" id="track-side-panel" aria-hidden="true">
+      <div class="side-art-wrap">
+        <!-- Same tilt stage as the compact float — see the note there. -->
+        <div class="tilt-stage">
+          <div class="art-light" aria-hidden="true"></div>
+          <img id="side-art" class="side-art" alt="" draggable="false">
+        </div>
+        <!-- Same hover controls as the compact float, so split is fully operable.
+             Split only ever renders in fullscreen, so its window-mode button is
+             the exit (the mini player and fullscreen entry are windowed states). -->
+        <div class="art-controls side-art-controls" data-no-drag>
+          <button class="art-btn" id="side-btn-layout" onclick="cycleLayout(); event.stopPropagation();" title="Cycle layout: Compact / Split" aria-label="Cycle layout">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="M9.5 4.5v15"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="side-btn-settings" onclick="toggleSettings(event); event.stopPropagation();" title="Settings" aria-label="Open settings">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2"/>
+              <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+            </svg>
+          </button>
+          <button class="art-btn" id="side-btn-exit" onclick="toggleFullscreen(); event.stopPropagation();" title="Leave fullscreen (F11)" aria-label="Leave fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>
+            </svg>
+          </button>
+        </div>
+        <!-- On-art transport, matching the compact float's art player: the
+             reference split shows prev/play/next on the art above the progress
+             row, which stays under the art with title/artist beneath. -->
+        <div class="art-player" data-no-drag>
+          <div class="transport-row art-transport">
+            <button class="transport-btn" onclick="skipPrevious(); event.stopPropagation();" title="Previous track" aria-label="Previous track">
+              <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M7 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zm10.9-.74c.72-.43 1.63.09 1.63.94v12.4c0 .85-.91 1.37-1.63.94l-9.2-5.9a1.1 1.1 0 0 1 0-1.88l9.2-5.9z"/>
+              </svg>
+            </button>
+            <button class="transport-btn transport-play" id="side-tp-play" onclick="toggleSimpMusicPlay(); event.stopPropagation();" title="Play / Pause" aria-label="Play or pause">
+              <svg class="icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M8.2 5.4c0-.86.94-1.39 1.67-.94l9.1 5.6a1.1 1.1 0 0 1 0 1.88l-9.1 5.6c-.73.45-1.67-.08-1.67-.94V5.4z"/>
+              </svg>
+              <svg class="icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6.6" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+                <rect x="13.2" y="5.2" width="4.2" height="13.6" rx="1.5"/>
+              </svg>
+            </button>
+            <button class="transport-btn" onclick="skipNext(); event.stopPropagation();" title="Next track" aria-label="Next track">
+              <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M16.8 5.6c0-.66.54-1.2 1.2-1.2.66 0 1.2.54 1.2 1.2v12.8c0 .66-.54 1.2-1.2 1.2-.66 0-1.2-.54-1.2-1.2V5.6zM6.1 4.86c-.72-.43-1.63.09-1.63.94v12.4c0 .85.91 1.37 1.63.94l9.2-5.9a1.1 1.1 0 0 0 0-1.88l-9.2-5.9z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="side-transport">
+        <div class="side-progress-row">
+          <span class="side-time" id="side-time-now">0:00</span>
+          <div class="side-progress-track"><div class="side-progress-fill" id="side-progress-fill"></div></div>
+          <span class="side-time" id="side-time-total">0:00</span>
+        </div>
+        <div class="side-title" id="side-title"></div>
+        <div class="side-artist" id="side-artist"></div>
+      </div>
+    </aside>
+
+    <!-- Latency rail: hidden at the right edge, slides in on approach.
+         A vertical sync slider with small +/- steppers. -->
+    <div class="latency-rail" id="latency-rail" aria-label="Sync latency" data-no-drag>
+      <div class="latency-rail-inner">
+        <span class="latency-rail-label">Sync</span>
+        <button class="latency-rail-btn" id="latency-rail-minus" title="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50 milliseconds">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M7 12h10"/></svg>
+        </button>
+        <div class="latency-slider" id="latency-slider" title="Drag to adjust sync" data-no-drag>
+          <div class="latency-slider-track"></div>
+          <div class="latency-slider-fill" id="latency-slider-fill"></div>
+          <div class="latency-slider-thumb" id="latency-slider-thumb"></div>
+        </div>
+        <button class="latency-rail-btn" id="latency-rail-plus" title="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50 milliseconds">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 7v10M7 12h10"/></svg>
+        </button>
+        <span class="latency-rail-value" id="latency-rail-value">+600ms</span>
+      </div>
+    </div>
+
+    <!-- Settings: a full-window sheet rather than a dropdown. Every option gets
+         a section, a real label and room to explain itself, which a 236px
+         popover could never do. It is four pages under one search field, so a
+         row is reached by the thing it changes or by its name. Same liquid
+         glass, over a near-black wash. -->
+    <section class="settings-page" id="quick-panel" role="dialog" aria-modal="true"
+             aria-label="Settings" aria-hidden="true" data-no-drag>
+      <div class="sp-sheet">
+        <header class="sp-head">
+          <div>
+            <div class="sp-title">Settings</div>
+            <div class="sp-sub">Paprika Lyrics</div>
+          </div>
+          <button class="sp-close" onclick="closeSettings()" title="Close (Esc)" aria-label="Close settings">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+            </svg>
+          </button>
+        </header>
+
+        <!-- One filter over every page below it. Four pages make a row reachable
+             if you know its page; this is how it is reached when the name is what
+             you have, and / is the whole interaction with it. -->
+        <div class="sp-search">
+          <label class="sp-search-field" for="qp-search">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>
+            </svg>
+            <input id="qp-search" type="search" placeholder="Search settings"
+                   aria-label="Search settings" autocomplete="off" spellcheck="false">
+            <button class="sp-search-clear" id="qp-search-clear" type="button"
+                    aria-label="Clear search">&#10005;</button>
+          </label>
+          <span class="sp-search-hint"><kbd>/</kbd></span>
+        </div>
+
+        <!-- Group-wise tabs: the same rows, on short pages, so the row you tune
+             mid-song is one click away instead of one scroll away. The strip
+             scrolls sideways rather than wrapping — a 320px window still has to
+             keep four readable labels. -->
+        <div class="sp-tabs" id="qp-tabs" role="tablist" aria-label="Settings sections">
+          <button class="sp-tab" role="tab" id="qp-tab-window" data-tab="window"
+                  aria-controls="qp-panel-window" aria-selected="true" tabindex="0">Window</button>
+          <button class="sp-tab" role="tab" id="qp-tab-lyrics" data-tab="lyrics"
+                  aria-controls="qp-panel-lyrics" aria-selected="false" tabindex="-1">Lyrics</button>
+          <button class="sp-tab" role="tab" id="qp-tab-visuals" data-tab="visuals"
+                  aria-controls="qp-panel-visuals" aria-selected="false" tabindex="-1">Visuals</button>
+          <button class="sp-tab" role="tab" id="qp-tab-diag" data-tab="diag"
+                  aria-controls="qp-panel-diag" aria-selected="false" tabindex="-1">Diagnostics</button>
+        </div>
+
+        <div class="sp-body" id="qp-body">
+          <div class="sp-empty" id="qp-empty" hidden></div>
+          <!-- Four pages, grouped by the thing each row changes rather than by how
+               often it is touched: the window's own behaviour is what you tune
+               while looking at the overlay, the two lyric pages are read while
+               listening, motion is how it moves, and the resolve report is the
+               set-once work last, still collapsed. The groups themselves are the
+               same rows they always were; only the page changed. -->
+          <div class="sp-panel" id="qp-panel-window" role="tabpanel" aria-labelledby="qp-tab-window">
+            <section class="sp-group">
+              <h2 class="sp-group-title">Window</h2>
+              <button class="qp-row qp-action" id="qp-opacity" onclick="cycleWindowOpacity()">
+                <span class="qp-label">Window opacity</span>
+                <span class="qp-state" id="qp-opacity-state">Off</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-hover-fade" onclick="cycleHoverFade()">
+                <span class="qp-label">Fade while hovered</span>
+                <span class="qp-state" id="qp-hover-fade-state">Off</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-layout" onclick="cycleLayout()">
+                <span class="qp-label">Layout</span>
+                <span class="qp-state" id="qp-layout-state">Compact</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-fullscreen" onclick="toggleFullscreen()">
+                <span class="qp-label">Fullscreen</span>
+                <span class="qp-state" id="qp-fs-state">Off</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-ontop" onclick="toggleAlwaysOnTop()">
+                <span class="qp-label">Always on top</span>
+                <span class="qp-state" id="qp-ontop-state">Off</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-clickthrough" onclick="toggleClickThrough()">
+                <span class="qp-label">Click-through</span>
+                <span class="qp-state">Off</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-card-position" onclick="cycleCardPosition()">
+                <span class="qp-label">Card position</span>
+                <span class="qp-state" id="qp-card-position-state">Left</span>
+              </button>
+              <p class="sp-hint">Opacity applies whenever the overlay is windowed — the hover
+                dip goes a little further while the pointer is over it, and <kbd
+                style="font-family:inherit;opacity:.6">Ctrl</kbd> holds it at your level. Fullscreen
+                always stays solid. With click-through on, <kbd
+                style="font-family:inherit;opacity:.6">Ctrl+Shift+M</kbd> hands the mouse back for a
+                few seconds so the window can still be moved.</p>
+            </section>
+          </div>
+
+          <div class="sp-panel" id="qp-panel-lyrics" role="tabpanel"
+               aria-labelledby="qp-tab-lyrics" hidden>
+            <section class="sp-group">
+              <h2 class="sp-group-title">Sync</h2>
+              <div class="qp-row qp-static">
+                <span class="qp-label">Latency</span>
+                <div class="qp-stepper">
+                  <button class="qp-btn" onclick="nudgeLatency(-50)" title="Later by 50ms" aria-label="Sync later by 50 milliseconds">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                      <path d="M7 12h10"/>
+                    </svg>
+                  </button>
+                  <span class="qp-value" id="qp-latency">+600ms</span>
+                  <button class="qp-btn" onclick="nudgeLatency(50)" title="Earlier by 50ms" aria-label="Sync earlier by 50 milliseconds">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                      <path d="M12 7v10M7 12h10"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <p class="sp-hint">Lyric timing against playback — a larger offset shows lyrics
+                earlier. Also on <kbd style="font-family:inherit;opacity:.6">Ctrl+[</kbd> later /
+                <kbd style="font-family:inherit;opacity:.6">Ctrl+]</kbd> earlier, saved per track.</p>
+            </section>
+
+            <section class="sp-group">
+              <h2 class="sp-group-title">Lyrics</h2>
+              <button class="qp-row qp-action" id="qp-trans" onclick="toggleTranslations()">
+                <span class="qp-label">Translations</span>
+                <span class="qp-state">On</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-font" onclick="cycleFont()">
+                <span class="qp-label">Font</span>
+                <span class="qp-state">Apple</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-align" onclick="cycleLyricAlign()">
+                <span class="qp-label">Alignment</span>
+                <span class="qp-state" id="qp-align-state">Left</span>
+              </button>
+            </section>
+
+            <!-- Local TTML library. The panel is rendered entirely from the
+                 snapshot the Python library returns (ui/app.js renderTtmlPanel):
+                 file list, per-file state and the current track's binding all come
+                 from one source of truth, so what is shown here is exactly what
+                 the lyric pipeline will use. -->
+            <section class="sp-group">
+              <h2 class="sp-group-title">Local lyrics</h2>
+              <div class="ttml-bar">
+                <button class="ttml-act" id="qp-ttml-import" onclick="importTtml()">Import files…</button>
+                <button class="ttml-act" id="qp-ttml-rescan" onclick="rescanTtml()">Rescan</button>
+                <button class="ttml-act" id="qp-ttml-reveal" onclick="revealTtml()">Open folder</button>
+              </div>
+              <div class="ttml-status" id="qp-ttml-status" role="status" aria-live="polite"></div>
+              <div class="ttml-current" id="qp-ttml-current"></div>
+              <div class="ttml-list" id="qp-ttml-list"></div>
+              <p class="sp-hint">Add Apple Music <code>.ttml</code> files for songs the online lookup
+                mis-times. A file is used when its own title and artist match the playing song;
+                anything else is one click away below. Removed files move to a <code>.trash</code>
+                folder inside the library.</p>
+            </section>
+          </div>
+
+          <div class="sp-panel" id="qp-panel-visuals" role="tabpanel"
+               aria-labelledby="qp-tab-visuals" hidden>
+            <section class="sp-group">
+              <h2 class="sp-group-title">Motion</h2>
+              <button class="qp-row qp-action" id="qp-motion" onclick="toggleMotion()">
+                <span class="qp-label">Motion</span>
+                <span class="qp-state">Full</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-motion-style" onclick="cycleMotionStyle()">
+                <span class="qp-label">Motion style</span>
+                <span class="qp-state" id="qp-motion-style-state">Auto</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-beat" onclick="cycleBeatMode()">
+                <span class="qp-label">Beat sync</span>
+                <span class="qp-state" id="qp-beat-state">Subtle</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-moments" onclick="cycleMoments()">
+                <span class="qp-label">Big moments</span>
+                <span class="qp-state" id="qp-moments-state">Subtle</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-ambient" onclick="cycleAmbient()">
+                <span class="qp-label">Room air</span>
+                <span class="qp-state" id="qp-ambient-state">Subtle</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-tilt" onclick="cycleTilt()">
+                <span class="qp-label">Cover tilt</span>
+                <span class="qp-state" id="qp-tilt-state">Subtle</span>
+              </button>
+              <p class="sp-hint">Big moments step the scene back and take the album's own
+                colour when a drop lands or a chorus hook arrives; the sleeve's light lifts and
+                the words themselves never move or tint. Room air drifts motes of that same
+                colour through the room, and a drop puffs them. Reduced motion, the mini player
+                and this row being Off all leave the track untouched.</p>
+            </section>
+          </div>
+
+          <div class="sp-panel" id="qp-panel-diag" role="tabpanel"
+               aria-labelledby="qp-tab-diag" hidden>
+            <section class="sp-group">
+              <h2 class="sp-group-title">Diagnostics</h2>
+              <button class="qp-row qp-action" id="qp-info-toggle" onclick="toggleDiagnostics()"
+                      aria-expanded="false" aria-controls="qp-info">
+                <span class="qp-label">Resolve report</span>
+                <span class="qp-state" id="qp-info-caret">Show</span>
+              </button>
+              <div class="qp-info" id="qp-info">
+                <div class="qp-info-body" id="qp-info-body"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <!-- Settings footer: version + close hint -->
+        <div style="flex-shrink:0;padding:10px 16px;border-top:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:10px;color:rgba(255,255,255,0.28);font-family:var(--ui-font);letter-spacing:.04em;">Paprika Lyrics</span>
+          <span style="font-size:10px;color:rgba(255,255,255,0.22);font-family:var(--ui-font);letter-spacing:.04em;">Esc to close</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Invisible resize grips: edges and corners -->
+    <div class="resize-handle resize-e" data-dir="e" title=""></div>
+    <div class="resize-handle resize-w" data-dir="w" title=""></div>
+    <div class="resize-handle resize-s" data-dir="s" title=""></div>
+    <div class="resize-handle resize-n" data-dir="n" title=""></div>
+    <div class="resize-handle resize-se" data-dir="se" title=""></div>
+    <div class="resize-handle resize-sw" data-dir="sw" title=""></div>
+    <div class="resize-handle resize-ne" data-dir="ne" title=""></div>
+    <div class="resize-handle resize-nw" data-dir="nw" title=""></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

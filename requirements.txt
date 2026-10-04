@@ -1,0 +1,5 @@
+# Core runtime dependencies for Paprika Lyrics
+pywebview>=5.0
+winsdk>=1.0.0b10
+requests>=2.31.0
+spotify-scraper>=0.9.0

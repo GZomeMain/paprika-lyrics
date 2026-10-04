@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Song moments — treatment mockups</title>
+<!--
+  Design artifact, not a runtime page: six treatments of the same three seconds
+  (a hook line landing), so the "effect for a song's big moments" can be chosen by
+  eye instead of by description. Opened in the brainstorming companion, where each
+  card is clickable; on its own it is just an animated gallery.
+
+  Everything in a stage that is NOT the effect is what the overlay already does:
+  dim lines, one hot line lifting, the blurred cover behind.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 28px clamp(16px, 4vw, 48px) 48px;
+    background: #0b0b0e; color: #f2f2f4;
+    font-family: -apple-system, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  }
+  h2 { font-size: 1.35rem; margin: 0 0 .35rem; letter-spacing: -.01em; }
+  h3 { font-size: .95rem; margin: 0 0 .15rem; }
+  .subtitle { color: #8d929c; font-size: .85rem; line-height: 1.55; max-width: 68ch; margin: 0 0 1.4rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+  .card {
+    border: 1px solid #23232b; border-radius: 12px; overflow: hidden;
+    background: #121218; cursor: pointer; transition: border-color .18s ease, transform .18s ease;
+  }
+  .card:hover { border-color: #4a4a5a; }
+  .card.selected { border-color: #0a84ff; box-shadow: 0 0 0 1px #0a84ff inset; }
+  .card-image { aspect-ratio: 16 / 10; position: relative; }
+  .card-body { padding: .7rem .85rem .9rem; }
+  .card-body p { margin: 0; color: #a2a7b1; font-size: .82rem; line-height: 1.5; }
+  .card-body .note { margin-top: .45rem; color: #7d828c; font-size: .76rem; }
+
+  /* ---- shared stage: the overlay's real look, shrunk to a card ------------- */
+  .stage {
+    position: relative; width: 100%; height: 100%; overflow: hidden;
+    background: #0e0e10; color: #fff; isolation: isolate;
+  }
+  .stage .cover {
+    position: absolute; inset: -18%; z-index: 0;
+    background:
+      radial-gradient(120% 90% at 20% 12%, #6d5bd0 0%, transparent 55%),
+      radial-gradient(110% 80% at 82% 78%, #1f6f8b 0%, transparent 60%),
+      linear-gradient(150deg, #7b5bd6, #12405a 60%, #0b1420);
+    filter: blur(22px) saturate(1.5) brightness(0.62);
+    transform: scale(1.05);
+  }
+  .stage .scrim {
+    position: absolute; inset: 0; z-index: 1;
+    background:
+      linear-gradient(180deg, rgba(6,6,10,.62), rgba(6,6,10,.18) 40%, rgba(6,6,10,.66)),
+      radial-gradient(120% 90% at 50% 45%, transparent 30%, rgba(6,6,10,.5) 100%);
+  }
+  .stage .lyrics {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 9px; padding: 10px 16px;
+    font-size: 13px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2;
+  }
+  .stage .ln { color: rgba(255,255,255,.30); white-space: nowrap; overflow: hidden; }
+  .stage .ln.alt { color: rgba(255,255,255,.22); font-size: 11px; font-style: italic; }
+  .stage .ln.hot { color: #fff; font-size: 16.5px; text-shadow: 0 1px 10px rgba(0,0,0,.5); }
+  .stage .fx { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+
+  /* The hot line catches the moment in every treatment: a brief lift, so the
+     comparison is about the *treatment*, not about the type moving around. */
+  .stage .ln.hot { animation: hot-lift 6s ease-in-out infinite; }
+  @keyframes hot-lift {
+    0%, 12%   { transform: translateY(0) scale(1); }
+    26%, 58%  { transform: translateY(-5px) scale(1.035); }
+    78%, 100% { transform: translateY(0) scale(1); }
+  }
+
+  /* ---- A · Beam: light crosses the whole surface --------------------------- */
+  .s-beam .fx {
+    background: linear-gradient(100deg, transparent 34%, rgba(255,255,255,.20) 50%, transparent 66%);
+    transform: translateX(-130%);
+    animation: beam 6s cubic-bezier(.4,0,.2,1) infinite;
+  }
+  @keyframes beam {
+    0%, 8%   { transform: translateX(-130%); opacity: 0; }
+    14%      { opacity: 1; }
+    34%      { transform: translateX(130%); opacity: 0; }
+    100%     { transform: translateX(130%); opacity: 0; }
+  }
+
+  /* ---- B · Commit: the whole room changes grade --------------------------- */
+  .s-commit .fx {
+    background: linear-gradient(160deg, rgba(255,196,142,.30), rgba(255,120,180,.18) 55%, transparent);
+    mix-blend-mode: soft-light;
+    animation: commit 6s ease-in-out infinite;
+  }
+  @keyframes commit {
+    0%, 14%   { opacity: 0; }
+    28%, 56%  { opacity: 1; }
+    80%, 100% { opacity: 0; }
+  }
+  .s-commit .cover { animation: commit-cover 6s ease-in-out infinite; }
+  @keyframes commit-cover {
+    0%, 14%   { filter: blur(22px) saturate(1.5) brightness(.62); }
+    28%, 56%  { filter: blur(20px) saturate(1.95) brightness(.86); }
+    80%, 100% { filter: blur(22px) saturate(1.5) brightness(.62); }
+  }
+
+  /* ---- C · Depth: the scene recedes, the line comes forward ---------------- */
+  .s-depth .cover { animation: depth-cover 6s ease-in-out infinite; }
+  @keyframes depth-cover {
+    0%, 14%   { transform: scale(1.05); filter: blur(22px) saturate(1.5) brightness(.62); }
+    28%, 56%  { transform: scale(1.16); filter: blur(30px) saturate(1.3) brightness(.5); }
+    80%, 100% { transform: scale(1.05); filter: blur(22px) saturate(1.5) brightness(.62); }
+  }
+  .s-depth .fx {
+    background: radial-gradient(90% 70% at 50% 52%, transparent 34%, rgba(4,4,8,.55) 100%);
+    animation: depth-vig 6s ease-in-out infinite;
+  }
+  @keyframes depth-vig {
+    0%, 14%   { opacity: .55; }
+    28%, 56%  { opacity: 1; }
+    80%, 100% { opacity: .55; }
+  }
+
+  /* ---- D · Bloom: the line itself blooms, the rest steps back -------------- */
+  .s-bloom .fx {
+    background: radial-gradient(42% 30% at 50% 52%, rgba(255,255,255,.22), transparent 70%);
+    filter: blur(10px);
+    animation: bloom 6s ease-in-out infinite;
+  }
+  @keyframes bloom {
+    0%, 14%   { opacity: 0; transform: scale(.85); }
+    30%, 56%  { opacity: 1; transform: scale(1.06); }
+    80%, 100% { opacity: 0; transform: scale(.9); }
+  }
+  .s-bloom .ln:not(.hot) { animation: bloom-dim 6s ease-in-out infinite; }
+  @keyframes bloom-dim {
+    0%, 14%   { opacity: 1; }
+    30%, 56%  { opacity: .42; }
+    80%, 100% { opacity: 1; }
+  }
+  .s-bloom .ln.hot { animation: hot-lift 6s ease-in-out infinite, hot-glow 6s ease-in-out infinite; }
+  @keyframes hot-glow {
+    0%, 14%   { text-shadow: 0 1px 10px rgba(0,0,0,.5); }
+    30%, 56%  { text-shadow: 0 0 18px rgba(255,255,255,.55), 0 1px 12px rgba(0,0,0,.45); }
+    80%, 100% { text-shadow: 0 1px 10px rgba(0,0,0,.5); }
+  }
+
+  /* ---- E · Embers: fine motes drift up through the scene ------------------- */
+  .s-embers .fx .mote {
+    position: absolute; bottom: -6%;
+    width: 3px; height: 3px; border-radius: 50%;
+    background: rgba(255,255,255,.85);
+    box-shadow: 0 0 8px rgba(255,255,255,.6);
+    opacity: 0;
+    animation: ember 6s linear infinite;
+  }
+  @keyframes ember {
+    0%       { transform: translateY(0) scale(.6); opacity: 0; }
+    16%      { opacity: 0; }
+    34%      { opacity: .85; }
+    70%      { opacity: .5; }
+    88%,100% { transform: translateY(-190px) scale(1.1); opacity: 0; }
+  }
+
+  /* ---- F · Ripple: rings expand from behind the line ---------------------- */
+  .s-ripple .fx .ring {
+    position: absolute; left: 50%; top: 52%;
+    width: 60px; height: 60px; margin: -30px 0 0 -30px;
+    border: 1px solid rgba(255,255,255,.4);
+    border-radius: 50%; opacity: 0;
+    animation: ripple 6s cubic-bezier(.16,.6,.3,1) infinite;
+  }
+  @keyframes ripple {
+    0%, 16%  { transform: scale(.5); opacity: 0; }
+    22%      { opacity: .7; }
+    58%      { transform: scale(4.4); opacity: 0; }
+    100%     { transform: scale(4.4); opacity: 0; }
+  }
+
+  .stage .tag {
+    position: absolute; left: 10px; bottom: 8px; z-index: 5;
+    font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+    color: rgba(255,255,255,.5);
+  }
+</style>
+</head>
+<body>
+  <h2>What should a big moment <em>look</em> like?</h2>
+  <p class="subtitle">Six treatments of the same three seconds — a hook line landing — looping side by side.
+    Everything here except the effect is what the overlay already does: dim lines, one hot line, the blurred
+    cover behind, and a small lift on the hot line. Click a card to mark it, then say what you think.</p>
+
+  <div class="cards" id="cards"></div>
+
+  <script>
+    const LINE = `
+      <div class="cover"></div>
+      <div class="scrim"></div>
+      <div class="lyrics">
+        <div class="ln">And if I told you that I</div>
+        <div class="ln alt">Couldn’t stay here tonight</div>
+        <div class="ln hot">’Bout to give it all away</div>
+        <div class="ln">Would you still be there?</div>
+        <div class="ln alt">Oka-a-a-ay</div>
+      </div>
+      <div class="fx"></div>
+    `;
+
+    const TREATMENTS = [
+      { id: 'beam', letter: 'A', name: 'Beam',
+        blurb: 'Light crosses the whole surface once, and the moment is over.',
+        note: 'Cheapest of the six — one moving gradient. Reads as “the song opened up” without the type changing at all.' },
+      { id: 'commit', letter: 'B', name: 'Commit',
+        blurb: 'The room changes grade: warmer, brighter, then back.',
+        note: 'The whole surface, cover included, commits for as long as the moment lasts. Strong, but it is a mood you sit inside.' },
+      { id: 'depth', letter: 'C', name: 'Depth',
+        blurb: 'The scene recedes and blurs; the line comes forward.',
+        note: 'Camera-move feel. Costs the most (a blurred layer scales), and the dimming has to stay gentle or the lyrics get hard to read.' },
+      { id: 'bloom', letter: 'D', name: 'Bloom',
+        blurb: 'The line itself glows and lifts; everything else steps back.',
+        note: 'Type-level, so it reads as the singing rather than the room. The safest to keep on for every hook.' },
+      { id: 'embers', letter: 'E', name: 'Embers',
+        blurb: 'Fine light motes drift up through the scene while it lasts.',
+        note: 'The most decorative. Fourteen tiny nodes on one animation — cheap, but the one that can read as a screensaver.' },
+      { id: 'ripple', letter: 'F', name: 'Ripple',
+        blurb: 'Concentric rings expand from behind the line.',
+        note: 'Geometric and calm. Best on a sparse line; on a busy cover the rings fight the artwork.' },
+    ];
+
+    const cards = document.getElementById('cards');
+    TREATMENTS.forEach((t) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.choice = t.id;
+      if (window.toggleSelect) card.onclick = function () { window.toggleSelect(this); };
+      else card.onclick = function () { this.classList.toggle('selected'); };
+
+      let extra = '';
+      if (t.id === 'embers') {
+        extra = Array.from({ length: 14 }, (_, i) => {
+          const left = 4 + i * 6.8;
+          return `<span class="mote" style="left:${left}%;animation-delay:${(i * 0.42).toFixed(2)}s;animation-duration:${5 + (i % 3)}s"></span>`;
+        }).join('');
+      }
+      if (t.id === 'ripple') {
+        extra = [0, 0.9, 1.8].map((d) => `<span class="ring" style="animation-delay:${d}s"></span>`).join('');
+      }
+
+      card.innerHTML = `
+        <div class="card-image">
+          <div class="stage s-${t.id}">
+            ${LINE}${extra}
+            <span class="tag">${t.letter} · ${t.name}</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <h3>${t.letter} · ${t.name}</h3>
+          <p>${t.blurb}</p>
+          <p class="note">${t.note}</p>
+        </div>`;
+      cards.appendChild(card);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+name: CI
+
+# The app is Windows-only (Win32 window management + SMTC transport), so the
+# suite is run on Windows: a Linux runner would pass while the code that matters
+# — the native window and media-session paths — was never exercised.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Runtime dependencies, not just test ones: importing the app is part of
+      # what has to work, so a broken dependency shows up here rather than on a
+      # user's machine.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Fails on a syntax error in a file no test imports (tools/, entry point),
+      # which is otherwise only discovered when the user runs it.
+      - name: Compile every module
+        run: python -m compileall -q core config.py storage.py paprika_app.py tools
+
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -v
+
+  ui:
+    name: UI syntax
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # app.js is the whole overlay; a parse error blanks the window, and no
+      # Python test would notice.
+      - name: Check JavaScript parses
+        run: |
+          node --check ui/app.js
+          node --check tools/ui-preview-regression.js
+          node --check tools/run-ui-preview-regression.mjs
+
+      # Runs the preview regression checks for real, in the Edge that is already
+      # on the runner image. Before this, the ~1,700 lines of UI assertions were
+      # only executed when somebody remembered to paste them into devtools, so
+      # "node --check" was the only thing standing between a broken invariant
+      # and master. The runner is dependency-free (raw CDP over Node's built-in
+      # WebSocket), so this needs no install step.
+      - name: Run the UI preview regression checks
+        run: node tools/run-ui-preview-regression.mjs

@@ -1,0 +1,3703 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Barriecito&display=swap');
+
+/* =========================================================
+   Apple Music / Paprika Lyrics Aesthetic — Complete Theme
+   ========================================================= */
+
+:root {
+  /* ---------- Base palette ---------- */
+  --bg: #09090b;
+  --surface: rgba(18, 18, 22, 0.75);
+  --text: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.65);
+  --text-muted: rgba(255, 255, 255, 0.38);
+  --border: rgba(255, 255, 255, 0.08);
+
+  /* ---------- Lyric typography ---------- */
+  --lyric-zoom: 30px;
+  --lyric-font-size: var(--lyric-zoom);
+  /* Inter for UI chrome; lyric face is overridden per-preference */
+  --ui-font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --lyric-font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --lyric-font-weight: 700;
+
+  /* ---------- Motion tokens ---------- */
+  --dur-1: 0.12s; /* press / micro feedback */
+  --dur-2: 0.20s; /* hover */
+  --dur-3: 0.32s; /* surfaces (panels, chips) */
+  --dur-4: 0.48s; /* layout & art growth */
+  --ease-fluid: cubic-bezier(0.33, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---------- Radius scale ---------- */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* ---------- Glass material (shared across all floating surfaces) ---------- */
+  --glass-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0.02));
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.48);
+  --glass-blur: blur(28px) saturate(175%);
+
+  /* ---------- Interaction surfaces ---------- */
+  --hover-surface: rgba(255, 255, 255, 0.09);
+  --active-surface: rgba(255, 255, 255, 0.15);
+  --focus-ring: 1.5px solid rgba(255, 255, 255, 0.48);
+  --icon-idle: rgba(255, 255, 255, 0.58);
+  --icon-hot: #ffffff;
+
+  /* ---------- Semantic danger ---------- */
+  --danger: #ff453a;
+  --danger-hover: rgba(255, 69, 58, 0.20);
+  --danger-text-hover: #ff8a80;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #0e0e10;
+  font-family: var(--ui-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+}
+
+.app-root {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: #09090b;
+  color: var(--text);
+  border-radius: 0; /* Let Windows 11 DWM round the window cleanly without gaps */
+  /* No border and no inset top highlight. A 1px light rectangle around the whole
+     app is the frame of a picture, not an edge a floating lyrics surface should
+     have; DWM's own border is off for the same reason — see
+     core.native_window.apply_window_frame. */
+  overflow: hidden;
+}
+
+/* =========================================================
+   Liquid Ambient Mesh, Dynamic Cover Art & Frosted Grain
+   ========================================================= */
+
+/* The backdrop is a stack of three things: a dark base, the artwork, and a
+   scrim. The artwork is the point of it — a recognisable but heavily blurred
+   version of the cover, so you can see where it is light and where it is dark
+   instead of two flat colour fields.
+
+   Two mistakes used to destroy that structure. This container carried its own
+   blur(80px) on top of the layer's blur(70px), and the layer was blown up to
+   250% (inset -75%), so only a ~40% crop of the cover was ever on screen and
+   both together left nothing but a gradient. Both are gone: the layer is a
+   near-1:1 cover of the window and carries the only blur in the stack.
+
+   --bg-blur scales with the window (3.4vmax, floored and capped) so the amount
+   of structure stays about the same at any size, and the layer overscans by
+   2x that radius so the blur never erodes the window's edges. */
+.ambient-backdrop {
+  --bg-blur: clamp(26px, 3.4vmax, 54px);
+  --bg-base-op: 0.88;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--bg-base-op);
+  background: radial-gradient(circle at 50% 18%, #191320 0%, #0a0a0d 80%);
+}
+
+/* Keeps lyric contrast steady whatever the cover does: the cover can be near
+   white (No Surprises) or near black, and the text has to stay legible on both.
+   Darker at the top and bottom where the chrome sits, lighter through the
+   middle band where the lyrics are. */
+.ambient-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg,
+      rgba(6, 6, 10, 0.54) 0%,
+      rgba(6, 6, 10, 0.10) 34%,
+      rgba(6, 6, 10, 0.20) 64%,
+      rgba(6, 6, 10, 0.60) 100%),
+    radial-gradient(125% 95% at 50% 42%, transparent 32%, rgba(6, 6, 10, 0.44) 100%);
+}
+
+/* Dynamic Album Cover Backdrop — the artwork itself, blurred hard and drifting.
+   Saturation is pushed and brightness pulled down so a pale cover still reads
+   as colour rather than washing the lyrics out. */
+.cover-art-blur {
+  position: absolute;
+  inset: calc(-2 * var(--bg-blur));
+  /* 100% 100% rather than cover. On a window that is much wider than it is tall,
+     cover scales a square cover to the width and then shows only the middle ~60%
+     of it — you lose the composition you were meant to recognise. Stretching is
+     the honest trade: the aspect distortion is invisible under a 40px blur, and
+     the WHOLE cover is on screen. */
+  background-size: 100% 100%;
+  background-position: center;
+  /* Contrast does the heavy lifting here. A pale cover (No Surprises) is almost
+     entirely 0.85-1.0 luminance, so brightness alone flattened it to grey; pushing
+     contrast expands that narrow band into visible regions while brightness keeps
+     the result dark enough for white lyrics. */
+  filter: blur(var(--bg-blur)) saturate(185%) brightness(0.74) contrast(1.24);
+  opacity: 0;
+  /* background-image is not animatable; cross-fade is driven by stacking layers in app.js */
+  transition: opacity 1.4s ease;
+  will-change: opacity, transform;
+  /* The room counter-moves against the sleeve's lean: a few pixels the opposite
+     way is enough to read as the sleeve standing proud of the wall behind it.
+     `translate` is a SEPARATE property from the drift's transform, so the 26s
+     cover-bloom-drift keeps owning the transform untouched — and no transition is
+     declared here because the lean already eases on the root. */
+  translate: calc(var(--tilt-x, 0) * -28px) calc(var(--tilt-y, 0) * -20px);
+  z-index: 1;
+  animation: cover-bloom-drift 26s ease-in-out infinite alternate;
+}
+
+.cover-art-blur.active {
+  opacity: 0.92;
+}
+
+/* The drift is a slow wander, not a loop: four waypoints keep it from retracing
+   the same path every cycle. The layer sits at a 2x zoom baseline — the window
+   shows the middle half of the artwork — so translate percentages move TWICE as
+   many on-screen pixels as they used to and the amplitudes are roughly halved to
+   keep the wander slight. Coverage is trivially safe at this zoom: the layer
+   overhangs every edge by half the window before the blur overscan is even
+   counted, so no drift waypoint can expose a bare edge. */
+@keyframes cover-bloom-drift {
+  0%   { transform: scale(calc(2.00 * var(--cover-zoom, 1))) translate3d(-1.6%, -1.0%, 0); }
+  25%  { transform: scale(calc(2.06 * var(--cover-zoom, 1))) translate3d(0.8%, 1.3%, 0); }
+  50%  { transform: scale(calc(1.97 * var(--cover-zoom, 1))) translate3d(1.7%, -0.6%, 0); }
+  75%  { transform: scale(calc(2.05 * var(--cover-zoom, 1))) translate3d(-0.5%, 1.4%, 0); }
+  100% { transform: scale(calc(2.01 * var(--cover-zoom, 1))) translate3d(-1.5%, 0.9%, 0); }
+}/* =========================================================
+   The artwork's own colour
+   One accent, taken from the cover, that every light in the app is tinted with:
+   the beat lamp around the sleeve and the moment veil over the room. A registered
+   <color> rather than a raw channel triple, so a track change CROSS-FADES the
+   light instead of snapping it to a new hue mid-song, and alphas are composed
+   where they are used (color-mix) so there is one number rather than a family of
+   near-duplicate variables. The default is the theme's own cool lamp: a grey,
+   black or blown-out cover contributes nothing and leaves this on.
+   Declared before anything reads it, because an unregistered custom property is
+   an un-animatable token.
+   ========================================================= */
+@property --art-accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #b9cdff;
+}
+
+/* The room-air level: one number (the setting), read by one opacity. Registered
+   so a mode change fades the whole field instead of flicking it on, and declared
+   here before the :root transition that names it. */
+@property --dust-op {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The sleeve's lean, in -1..1 from the pointer. Registered as numbers so the lean
+   EASES and releases through a transition on the root rather than snapping — the
+   same mechanism --art-accent and --beat-strength already use. */
+@property --tilt-x {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --tilt-y {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* --dur-2 rather than --dur-3 for the tilt: the value is published on every
+   pointer move, so it has to settle BEHIND the pointer rather than trail it. */
+:root {
+  transition: --art-accent 1.6s var(--ease-fluid),
+              --dust-op var(--dur-4) var(--ease-fluid),
+              --tilt-x var(--dur-2) var(--ease-out),
+              --tilt-y var(--dur-2) var(--ease-out);
+}
+
+/* =========================================================
+   Beat-Synced Art Pulse
+   app.js estimates the track's BPM from syllable onsets and publishes the beat
+   period as --beat-ms. The background stays COMPLETELY stock — identical to
+   beat-sync-off — so the only thing that moves is the album art itself, which
+   breathes (scale + soft shadow) once per beat. The pulse leads the beat by
+   --beat-lead-ms so the swell LANDS on the beat instead of dragging behind it
+   (animation-delay is negative: the cycle starts that much before the beat).
+   A slow random walk on --beat-ms (±8%, re-rolled every few beats in app.js)
+   keeps the pulse organic instead of metronome-robotic.
+   ========================================================= */
+
+/* The beat drives the NORMAL background: the ambient backdrop that is always
+   there (same layers, same colours — no separate glow element) brightens with
+   every beat, so the pulse is visible behind the lyrics rather than confined
+   to a 70px thumbnail. Only opacity animates: it composites on the GPU and
+   needs no re-blur of the large blurred backdrop each frame.
+
+   --beat-strength (0.4 - 1) is published per section by app.js from the rhythm
+   plan, and every amplitude below is scaled by it: a calm passage shimmers,
+   a driven one pulses. Subtle is deliberately a whisper — a full-screen opacity
+   flash reads far stronger than its number suggests. It moves the backdrop
+   ~6 points at full strength and ~2 at the floor, against 26 before. */
+@property --beat-strength {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.6;
+}
+
+/* --cover-zoom rides in this declaration on purpose: `transition` is a shorthand
+   that replaces the whole list, so declaring it in a rule of its own would drop
+   --beat-strength's transition the moment a track is driven (or be dropped by
+   it). See the song-moment block for what the zoom is for. */
+body.beat-on,
+body.beat-bold {
+  transition: --beat-strength var(--dur-4) var(--ease-fluid),
+              --cover-zoom var(--dur-4) var(--ease-fluid);
+}
+
+/* One number, one system. Every whole-line gesture below (the breath under a
+   growing word, the parting of its neighbours, the chorus halo's float, the
+   backing vocal's drift) is multiplied by --line-breath, which is derived from
+   the SAME strength envelope the backdrop and the sleeve breathe with. A driven
+   chorus therefore moves a little more than a quiet verse without any second
+   motion model, and the band stays narrow (0.9 - 1.25) so nothing reads as a
+   different animation. Resting stretches, and Beat sync Off, are exactly 1. */
+body { --line-breath: 1; }
+
+body.beat-live { --line-breath: calc(0.75 + 0.5 * var(--beat-strength, 0.6)); }
+
+body.beat-live .ambient-backdrop {
+  /* The ease does the "smooth, slow-then-fast" work: 0.2,0.9 accelerates hard
+     into the swell and then the long tail back to rest reads as slow. The
+     amplitude is set inside the keyframes; this only shapes time. */
+  animation: backdrop-beat-pulse var(--beat-ms, 520ms) cubic-bezier(0.2, 0.9, 0.35, 1) infinite;
+  animation-delay: var(--beat-lead-ms, -90ms);
+  transform-origin: 50% 42%;
+}
+
+body.beat-bold.beat-live .ambient-backdrop {
+  animation-name: backdrop-beat-pulse-bold;
+}
+
+body.beat-live .track-art,
+body.beat-bold.beat-live .track-art {
+  animation: art-beat-pulse var(--beat-ms, 520ms) cubic-bezier(0.2, 0.9, 0.35, 1) infinite;
+  animation-delay: var(--beat-lead-ms, -90ms);
+}
+
+body.beat-bold.beat-live .track-art {
+  animation-name: art-beat-pulse-bold;
+}
+
+/* The base level is the layer's own --bg-base-op rather than a hard-coded 0.60,
+   so the depth the artwork is drawn at and the depth the pulse swings around
+   stay one decision.   The deltas are unchanged and still calibrated: 6 points at full strength and
+   ~2 at the strength floor. Bold's own jump was pulled from 30 points to 16 once
+   the sleeve's lamp took over carrying the beat — a whole-window brightness flash
+   was the one amplitude here that read as a screen flicker rather than as music. */
+/* The pulse is opacity AND a whisper of scale. The scale rides on the backdrop
+   container (not the artwork layer, whose transform is owned by the drift), and
+   only ever grows — min 1.0 — so scaling can never expose an edge. The keyframe
+   shape is what gives the slow/fast feel: the cubic-bezier on the animation
+   makes the swell arrive fast and ease back slowly, one breath per beat, far
+   too small to be distracting (well under 1% at Subtle's full strength). */
+@keyframes backdrop-beat-pulse {
+  0%   { opacity: var(--bg-base-op); transform: scale(1); }
+  16%  { opacity: calc(var(--bg-base-op) + 0.06 * var(--beat-strength, 0.6));
+         transform: scale(calc(1 + 0.007 * var(--beat-strength, 0.6))); }
+  100% { opacity: var(--bg-base-op); transform: scale(1); }
+}
+
+@keyframes backdrop-beat-pulse-bold {
+  0%   { opacity: var(--bg-base-op); transform: scale(1); }
+  18%  { opacity: calc(var(--bg-base-op) + 0.16 * var(--beat-strength, 0.6));
+         transform: scale(calc(1 + 0.018 * var(--beat-strength, 0.6))); }
+  55%  { opacity: calc(var(--bg-base-op) + 0.05 * var(--beat-strength, 0.6));
+         transform: scale(calc(1 + 0.005 * var(--beat-strength, 0.6))); }
+  100% { opacity: var(--bg-base-op); transform: scale(1); }
+}
+
+/* The transform baseline stays scale(1) so the hover growth on .float-art-wrap
+   is unaffected — the pulse rides INSIDE the wrap's own transform context. */
+@keyframes art-beat-pulse {
+  0%   { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,0.45), 0 0 14px rgba(255,255,255,0.05); }
+  16%  { transform: scale(calc(1 + 0.012 * var(--beat-strength, 0.6)));
+         box-shadow: 0 2px 12px rgba(0,0,0,0.48), 0 0 17px rgba(255,255,255,0.08); }
+  100% { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,0.45), 0 0 14px rgba(255,255,255,0.05); }
+}
+
+@keyframes art-beat-pulse-bold {
+  0%   { transform: scale(1.005); box-shadow: 0 2px 12px rgba(0,0,0,0.48), 0 0 18px rgba(255,255,255,0.09); }
+  18%  { transform: scale(calc(1 + 0.045 * var(--beat-strength, 0.6)));
+         box-shadow: 0 3px 20px rgba(0,0,0,0.55), 0 0 34px rgba(255,255,255,0.2); }
+  55%  { transform: scale(0.998); }
+  100% { transform: scale(1); box-shadow: 0 2px 10px rgba(0,0,0,0.45), 0 0 14px rgba(255,255,255,0.05); }
+}
+
+/* ---------- The sleeve's lamp ----------
+   The lamp is where a beat is LOUDEST now. The window-wide opacity jump was the
+   one gesture here that read as a screen flicker, so Bold's room jump was pulled
+   back (0.30 -> 0.16) and the light moved onto the artwork, where the eye reads
+   it as music rather than as a display artefact.
+
+   Ownership, which is the whole reason this reads as one system:
+     * the BEAT owns this element's transform — one composited swell per beat,
+       resting at scale(1), so a section that stops being driven, a pause, or the
+       mode going Off all revert to exactly what the animation rests at and
+       nothing jumps;
+     * a MOMENT owns its opacity — a sustained lift, through a transition on the
+       base rule so both entering and leaving the moment ease;
+     * and the two compose with max(), so the lamp is as bright as its brightest
+       reason with neither rule needing to know about the other.
+   z-index 0, with the artwork itself lifted to 1 (see .float-art-wrap .track-art
+   and .side-art): a positioned box at z-index 0 paints ABOVE in-flow content, so
+   without that lift the lamp would wash the cover instead of lighting the room
+   around it. Neither wrapper may clip it. */
+.art-light {
+  position: absolute;
+  inset: -34%;
+  z-index: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: max(var(--lamp-beat, 0), var(--lamp-moment, 0));
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--art-accent) 62%, transparent) 0%,
+    color-mix(in srgb, var(--art-accent) 26%, transparent) 46%,
+    transparent 76%);
+  transition: opacity var(--dur-4) var(--ease-fluid);
+  will-change: transform, opacity;
+}
+
+/* The steady levels. The MODE classes carry them, not beat-live, so the lamp is
+   lit for as long as Beat sync is on — a soft backlight behind the sleeve — and
+   a passage the plan says is not driven simply stops swelling instead of the
+   light switching off at the section boundary. */
+body.beat-on   { --lamp-beat: 0.16; }
+body.beat-bold { --lamp-beat: 0.22; }
+body.beat-live { --lamp-beat: 0.30; }
+body.beat-bold.beat-live { --lamp-beat: 0.40; }
+
+body.beat-live .art-light {
+  animation-name: art-light-beat;
+  animation-duration: var(--beat-ms, 520ms);
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.35, 1);
+  animation-iteration-count: infinite;
+  animation-delay: var(--beat-lead-ms, -90ms);
+}
+
+body.beat-bold.beat-live .art-light {
+  animation-name: art-light-beat-bold;
+}
+
+/* Transform only: opacity belongs to a moment, and the amplitude comes from the
+   same envelope everything else does, so a calm passage's light barely moves
+   while a driven one's swells well past the sleeve. */
+@keyframes art-light-beat {
+  0%   { transform: scale(1); }
+  16%  { transform: scale(calc(1 + 0.055 * var(--beat-strength, 0.6))); }
+  100% { transform: scale(1); }
+}
+
+@keyframes art-light-beat-bold {
+  0%   { transform: scale(1); }
+  18%  { transform: scale(calc(1 + 0.16 * var(--beat-strength, 0.6))); }
+  55%  { transform: scale(calc(1 + 0.05 * var(--beat-strength, 0.6))); }
+  100% { transform: scale(1); }
+}
+
+/* Same rule and the same reason as the backdrop: a paused track rests, and a
+   section the plan says is not driven keeps its steady level. */
+body.beat-paused .art-light,
+body:not(.beat-live) .art-light {
+  animation: none;
+}
+
+/* Build and drop already differ in AMPLITUDE — that comes from --beat-strength,
+   which the macro envelope in core/beat.py ramps and lands. These two rules only
+   change the FEEL of the attack, which is a separate axis:
+
+   * a build holds the swell back and then snaps it out, so the pressure reads as
+     accumulating rather than simply getting louder;
+   * a drop attacks immediately and keeps a longer tail, so the hit lands on the
+     beat instead of behind it.
+
+   animation-timing-function eases each keyframe SEGMENT, so this shapes the
+   0%->peak ramp and the return independently of the amplitude. */
+body.beat-phase-build.beat-live .ambient-backdrop,
+body.beat-phase-build.beat-live .track-art {
+  animation-timing-function: cubic-bezier(0.62, 0.02, 0.86, 0.62);
+}
+
+body.beat-phase-drop.beat-live .ambient-backdrop,
+body.beat-phase-drop.beat-live .track-art {
+  animation-timing-function: cubic-bezier(0.08, 0.72, 0.22, 1);
+}
+
+/* Paused: the beat is a property of playback, so a paused track rests. */
+body.beat-paused .track-art,
+body.beat-paused .ambient-backdrop,
+body:not(.beat-live) .track-art,
+body:not(.beat-live) .ambient-backdrop {
+  animation: none;
+}
+
+/* =========================================================
+   Song moments: the grade
+   C · Depth and B · Commit, rebuilt on the system the app already has. The room
+   steps back and takes the SONG'S OWN colour (--art-accent), and the sleeve's
+   lamp lifts. The type never moves and never tints: words and syllables already
+   animate, and the line comes forward because the room recedes, not because the
+   glyphs glow.
+
+   ONE LAYER, ONE PROPERTY, ONE OWNER. The veil's opacity is the whole grade, and
+   it is the only thing a moment writes here:
+     * its transition lives on the BASE rule, never inside the moment class — a
+       transition declared inside a state class is removed by the same style
+       change that removes the value, so neither direction eases, which is the
+       flash-and-cut that made the old effect look like a bug;
+     * there is no animation on it for the same reason: an animation owns the
+       property it drives and its removal cannot transition. A moment's per-beat
+       life comes from the beat's own clock instead — the lamp's swell, already
+       running on --beat-ms — so the whole app breathes on one clock.
+   ========================================================= */
+@property --moment-strength {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The recession's push-in. The drift keeps its own transform and this only
+   supplies the scale it multiplies, so the layer has one transform and two
+   reasons for it. */
+@property --cover-zoom {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+/* The veil, and the whole grade. Three background layers, one opacity:
+     * the room dims — the same ink and the same shape language the backdrop's
+       own scrim already uses, so this reads as the app's lighting rather than as
+       a filter someone left switched on;
+     * the vignette deepens, which is what pulls the eye (and therefore the lyric
+       line) forward without moving a single glyph;
+     * and the room takes the album's colour, composed from the SAME accent the
+       sleeve's lamp is lit with, so a moment can never clash with what is
+       playing — a warm cover grades warm because that is what is playing, not
+       because amber was hard-coded here. */
+.moment-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  /* The release: a moment lets go slowly, which is what makes it read as the song
+     exhaling rather than the effect cutting out. Declared HERE, on the element,
+     so it survives the class being removed. */
+  transition: opacity var(--dur-4) var(--ease-fluid);
+  background:
+    linear-gradient(180deg,
+      rgba(4, 4, 8, 0.34) 0%,
+      rgba(4, 4, 8, 0.06) 42%,
+      rgba(4, 4, 8, 0.40) 100%),
+    radial-gradient(125% 95% at 50% 42%,
+      transparent 26%, rgba(4, 4, 8, 0.46) 100%),
+    radial-gradient(90% 70% at 50% 30%,
+      color-mix(in srgb, var(--art-accent) 18%, transparent),
+      transparent 72%);
+}
+
+/* A drop attacks immediately — it lands ON the beat, and an eased rise would
+   arrive behind it. Same rule the pulse uses for its own drop, same reason. The
+   release is untouched by this: a transition uses the AFTER-change style, and
+   this class is long gone by then. */
+body.moment-attack .moment-veil {
+  transition-duration: 90ms;
+}
+
+body.moment-live .moment-veil {
+  opacity: calc(0.9 * var(--moment-strength, 0));
+}
+
+/* The multiplier is declared on the body, the way --beat-strength is: the drift
+   inherits it, and the transition runs where the value changes (the beat rules
+   above carry it while a track is driven; this is the calm-track half). */
+body {
+  transition: --cover-zoom var(--dur-4) var(--ease-fluid);
+}
+
+/* The moment's brightness, published where the lamp already reads it: composed
+   with max() against the beat's own level in the .art-light rule, so the light is
+   as bright as its brightest reason and neither system knows about the other.
+   There is no box-shadow on the wrappers any more — the lamp IS the sleeve's
+   light, in the artwork's colour, and it lifts for both effects. */
+body.moment-live {
+  --lamp-moment: calc(0.18 + 0.55 * var(--moment-strength, 0));
+  --cover-zoom: calc(1 + 0.06 * var(--moment-strength, 0));
+}
+
+/* =========================================================
+   Room air
+   Motes of the album's own light drifting through the room. One layer, one
+   opacity (the setting's level); one transform and one opacity per mote (the
+   drift). The field itself owns `translate` (the beat's nudge) and `scale` (a
+   drop's puff), so those two gestures never write the same property and a mote's
+   own drift is never interrupted. Above the veil, below the card and the lyrics.
+   Nothing here takes a pointer event.
+   ========================================================= */
+.dust-field {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+  /* Registered and transitioned on the root, so a mode change fades rather than
+     snapping the whole field into existence. */
+  opacity: var(--dust-op, 0);
+}
+
+.mote {
+  position: absolute;
+  left: var(--mx, 50%);
+  top: var(--my, 50%);
+  width: var(--ms, 3px);
+  height: var(--ms, 3px);
+  border-radius: 50%;
+  pointer-events: none;
+  /* A two-stop core, not one long fade. At 2-7px across, a gradient that is
+     already 40% transparent at its own centre reads as nothing on a dark room;
+     a near-solid middle and a soft edge is what makes a mote a light. */
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--art-accent) 95%, transparent) 0%,
+    color-mix(in srgb, var(--art-accent) 55%, transparent) 45%,
+    transparent 100%);
+  /* Alternate, not one-way. A mote travelling straight up leaves the clipped
+     field for good and thins the room out over a long song; air drifts and comes
+     back, and the round trip is twice the motion for the same duration. */
+  animation: mote-drift var(--mt, 22s) ease-in-out infinite alternate;
+  animation-delay: var(--md, 0s);
+}
+
+/* Transform and opacity only: the field is on for the whole song, so a keyframe
+   that moved `left`/`top` would run layout on every frame of it. */
+@keyframes mote-drift {
+  0%   { transform: translate3d(0, 0, 0) scale(0.9); opacity: 0.34; }
+  50%  { opacity: 0.9; }
+  100% { transform: translate3d(var(--mw, 1rem), -4rem, 0) scale(1.12); opacity: 0.42; }
+}
+
+/* The beat nudges the WHOLE body of air, on the same grid and with the same
+   amplitude the pulse uses. `translate` and `scale` are standalone properties, so
+   this composes with each mote's own transform in the compositor instead of
+   replacing it — the drift is never interrupted by the beat. */
+body.beat-live .dust-field {
+  animation-name: dust-kick;
+  animation-duration: var(--beat-ms, 520ms);
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.35, 1);
+  animation-iteration-count: infinite;
+  animation-delay: var(--beat-lead-ms, -90ms);
+}
+
+/* A drop puffs the air on each of its beats. The amplitude is a constant because
+   the per-beat amplitude already scales with --beat-strength: a hard drop moves
+   the air further without a second reading of the phase level. */
+body.beat-phase-drop { --dust-surge: 1; }
+
+@keyframes dust-kick {
+  0%   { translate: 0 0; scale: 1; }
+  16%  { translate: 0 calc(-6px * var(--beat-strength, 0.6));
+         scale: calc(1 + 0.09 * var(--dust-surge, 0)); }
+  100% { translate: 0 0; scale: 1; }
+}
+
+/* Off, reduced motion and the mini player take the field out of the TREE, not
+   merely to zero opacity: sixteen blurred, composited layers still animating
+   behind nothing would be the whole song's worth of work for no picture at all.
+   There is no half-on state to explain. */
+body.ambient-off .dust-field,
+body.mini .dust-field,
+.reduce-motion .dust-field {
+  display: none;
+}
+
+/* =========================================================
+   Cover tilt
+   The sleeve leans toward the pointer; the room's blurred artwork counter-moves a
+   little behind it. The tilt lives on a stage of its own because every other
+   transform in this corner is spoken for (see the markup note). `--tilt-amp` is
+   the setting's multiplier, so Off is the same code path at zero rather than a
+   second set of rules.
+   ========================================================= */
+.tilt-stage {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* How far the pointer has pushed, as one number: max(|x|, |y|). Deriving it
+     from the two registered values is what lets the lift below scale with the
+     lean — no third published number, and no abs(), which this WebView2 may not
+     have. Nested max() inside a calc() is plain CSS math. */
+  --tilt-mag: max(
+    max(var(--tilt-x, 0), calc(-1 * var(--tilt-x, 0))),
+    max(var(--tilt-y, 0), calc(-1 * var(--tilt-y, 0)))
+  );
+  /* Six degrees at full amplitude, on a shallower perspective than the default,
+     plus a lift toward the pointer. The first pass shipped 2.4deg on a 760px
+     perspective: a 96px sleeve leaned that far moves its corners about two
+     pixels, which is why it read as nothing even in Bold. The lift is what makes
+     the sleeve feel like a physical card coming forward rather than a square
+     being rotated. */
+  transform: perspective(520px)
+             rotateX(calc(var(--tilt-y, 0) * -6deg * var(--tilt-amp, 1)))
+             rotateY(calc(var(--tilt-x, 0) * 6deg * var(--tilt-amp, 1)))
+             scale(calc(1 + 0.05 * var(--tilt-amp, 1) * var(--tilt-mag)));
+  will-change: transform;
+}
+
+/* The gloss: a highlight that slides across the sleeve as the pointer moves, at
+   z-index 2 so it paints over the artwork (1) and the lamp (0). This is the part
+   that makes the lean legible at a glance — light travelling across a surface is
+   something the eye catches, where a small rotation of a square of artwork is
+   not. At rest --tilt-mag is 0, so the sleeve is unglossed until it is touched. */
+.tilt-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(calc(70deg + var(--tilt-x, 0) * 26deg),
+    transparent 34%,
+    rgba(255, 255, 255, 0.34) 50%,
+    transparent 66%);
+  opacity: calc(0.85 * var(--tilt-amp, 1) * var(--tilt-mag));
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+
+/* Reduced motion gets an untransformed box outright, whatever the numbers say —
+   and no gloss, which would otherwise still slide with the pointer. */
+.reduce-motion .tilt-stage {
+  transform: none;
+  will-change: auto;
+}
+
+.reduce-motion .tilt-stage::after {
+  opacity: 0;
+}
+
+.reduce-motion .cover-art-blur {
+  translate: none;
+}
+
+/* Microscopic SVG Film Grain (Eliminates 8-bit color banding) */
+.noise-overlay {
+  position: absolute;
+  inset: -100px;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0.042;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  mix-blend-mode: overlay;
+}
+
+/* =========================================================
+   Header & Window Controls
+   ========================================================= */
+
+/* Scoped by id, not by tag: a bare `header` selector also matched the settings
+   sheet's own <header class="sp-head">, and the compact/split rules below then
+   handed the sheet's whole head `pointer-events: none` — which killed its
+   close button (and its sheen, and its cursor). The app header is the only
+   header these rules are about. */
+#app-header {
+  flex-shrink: 0;
+  min-height: 58px;
+  padding: 10px 12px 10px 16px;
+  background: rgba(14, 14, 18, 0.82);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  /* A hairline highlight along the top of the header gives it a glass edge */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 20;
+  transition: background var(--dur-3) var(--ease-fluid),
+              border-color var(--dur-3) var(--ease-fluid);
+}
+
+
+.track-meta {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  padding-right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+/* Album art beside the title/artist. In compact/split the float wrap owns the
+   size and hover growth; this base rule only handles appearance/visibility. */
+.track-art {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 255, 255, 0.05);
+  opacity: 0;
+  transform: scale(0.86);
+  transition: opacity var(--dur-4) var(--ease-fluid), transform var(--dur-4) var(--ease-fluid),
+              box-shadow var(--dur-3) var(--ease-fluid);
+}
+
+.track-art.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.track-text {
+  min-width: 0;
+  overflow: hidden;
+  /* Left-aligned with the art it hangs beneath, so the stack reads as one
+     column instead of drifting to the window's centre line. */
+  text-align: left;
+}
+
+#title {
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.28;
+  letter-spacing: -0.012em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#artist {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  margin-top: 2px;
+  letter-spacing: 0.004em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.window-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  /* Ensure controls never collapse under a long title */
+  flex-shrink: 0;
+}
+
+/* ---------- Drag surfaces are invisible ----------
+   The move affordance is the surface itself, exactly like a title bar: Windows
+   never changes the pointer over one, and `grab`/`grabbing` on a desktop overlay
+   read as a web page's palm rather than as a window. [data-drag] and
+   [data-no-drag] declare the surfaces and their opt-outs (see ui/app.js); nothing
+   here sets a cursor, which also leaves the buttons and the seek bar inside those
+   surfaces showing the pointer cursor they declare themselves. */
+
+/* Window controls share the on-art icon material: no box, a soft hover
+   surface, and the same press/timing tokens as every other control. */
+.btn {
+  min-width: 28px;
+  min-height: 28px;
+  background: transparent;
+  border: none;
+  color: var(--icon-idle);
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-family: var(--ui-font);
+  font-size: 11px;
+  font-weight: 500;
+  transition:
+    background var(--dur-2) var(--ease-fluid),
+    color var(--dur-2) var(--ease-fluid),
+    transform var(--dur-1) var(--ease-fluid);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn .icon {
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+}
+
+.btn:hover {
+  background: var(--hover-surface);
+  color: var(--icon-hot);
+}
+
+.btn:active {
+  transform: scale(0.93);
+  background: var(--active-surface);
+}
+
+.btn-danger:hover {
+  background: var(--danger-hover);
+  color: var(--danger-text-hover);
+}
+
+.btn-icon {
+  padding: 4px 7px;
+}
+
+/* =========================================================
+   Icon system
+   All controls draw crisp currentColor SVG glyphs. Text glyphs like ⏸ / ▶ / ✕
+   were avoided because Windows renders them with its blue emoji presentation.
+   ========================================================= */
+
+/* Icon scale, largest to smallest: primary transport (26px) → on-art options
+   (17px) → chrome/latency (14px) → panel steppers (12px). */
+.icon {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  /* Consistent rendering across DPI */
+  image-rendering: crisp-edges;
+}
+
+.btn .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.qp-btn .icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* Neutral focus ring instead of the browser's default blue outline.
+   Every interactive control gets the same ring, including the on-art and
+   latency-rail buttons (they had none before). */
+.btn:focus,
+.qp-btn:focus,
+.qp-action:focus,
+.art-btn:focus,
+.latency-rail-btn:focus,
+.latency-slider:focus {
+  outline: none;
+}
+
+.btn:focus-visible,
+.qp-btn:focus-visible,
+.qp-action:focus-visible,
+.art-btn:focus-visible,
+.latency-rail-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.latency-slider:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: var(--r-sm);
+}
+
+/* =========================================================
+   Lyrics Container & Depth of Field Architecture
+   ========================================================= */
+
+/* The viewport scrolls, but it shows no bar and it never gives sideways.
+   The auto-scroller already gives the list its motion, so a bar here was only a
+   position readout — and it cost the column 10px of its own padding box.
+
+   `overflow-y: scroll` leaves `overflow-x` computing to `auto`, which let the
+   ACTIVE LINE put a horizontal bar along the bottom of the window: the line is
+   scaled 2.5% on its own element (see applyLineFocus in app.js), and a
+   transformed descendant counts as scrollable overflow. `clip` removes the
+   mechanism rather than hiding it, so the viewport cannot be scrolled sideways
+   by any means.
+
+   The 32px right inset is what the column really had while the 10px bar was
+   taking space inside the padding box, so the type sits exactly where it did,
+   and the extra 10px is the room the scaled active line needs. */
+#lyrics-container {
+  /* How far down the list fades to nothing. The floating track card is painted
+     over the scroller, so this has to reach past it or lyric glyphs show through
+     the card. app.js measures the real card bottom and overrides the variable. */
+  --lyrics-fade-top: 70px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: scroll;
+  overflow-x: clip;
+  padding: 180px 32px 240px 28px;
+  scrollbar-width: none;
+  z-index: 10;
+  position: relative;
+  /* Song changes cross-fade instead of hard-replacing the tree behind a spinner. */
+  transition: opacity var(--dur-3) var(--ease-fluid),
+              padding-top var(--dur-4) var(--ease-fluid),
+              padding-left var(--dur-4) var(--ease-fluid);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--lyrics-fade-top),
+    black calc(100% - 60px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--lyrics-fade-top),
+    black calc(100% - 60px),
+    transparent 100%
+  );
+}
+
+/* There is no scroller-chrome block here on purpose: `scrollbar-width: none`
+   above removes the gutter in Chromium, so the ::-webkit-scrollbar rules that
+   used to draw a dim 4px pill in a 10px hit area had nothing left to style. The
+   wheel, trackpad and drag gestures all still scroll the list. */
+
+.intro-dots {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 34px;
+  padding-left: 2px;
+}
+
+.intro-dots .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  animation: pulse-dot 1.4s infinite ease-in-out both;
+}
+
+.intro-dots .dot:nth-child(1) { animation-delay: -0.32s; }
+.intro-dots .dot:nth-child(2) { animation-delay: -0.16s; }
+.intro-dots .dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes pulse-dot {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.4; }
+  40% { transform: scale(1.05); opacity: 0.95; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
+}
+
+/* =========================================================
+   Instrumental Break Countdown
+   Long instrumental sections previously looked like a frozen app. The chip
+   lives IN the lyric flow — inserted between the just-sung line and the next
+   one, at the next line's indent — so it reads as part of the song rather than
+   a widget parked over the sidebar.
+
+   It enters and leaves as a ROW, not as a display flip: on insert the row grows
+   from zero height (JS measures it, then hands it the target) while the pill
+   fades and lifts into place, so the upcoming lyric is pushed down rather than
+   jumped. When the countdown completes it pops, shrinks and fades.
+
+   The three dots are the meter for that countdown — app.js publishes
+   --gap-progress (0-1) every frame and every dot scales its own brightness,
+   size and glow from it — so the row is full at the same moment the value reads
+   0:00. They deliberately do NOT idle-pulse: a meter that also breathes is
+   noise, and it would fight the fill for the same properties.
+   ========================================================= */
+
+#lyrics-container > .gap-indicator {
+  --gap-scale: 1;
+  --gap-progress: 0;
+  --gap-exit: 460ms;   /* keep in sync with GAP_EXIT_MS in app.js */
+  box-sizing: border-box;  /* so the row can shrink to genuinely zero height */
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px 7px 12px;
+  margin: 2px 0 26px 2px;
+  align-self: flex-start;
+  border-radius: var(--r-pill);
+  pointer-events: none;
+  opacity: 0;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  animation: gap-enter var(--dur-4) var(--ease-fluid) both;
+}
+
+/* Left in place for the reduced-motion path, where the animations are dropped
+   and this is what makes the chip visible at all. */
+#lyrics-container > .gap-indicator.visible {
+  opacity: 1;
+}
+
+/* Only while the row is growing or shrinking: clipping the contents is the
+   whole trick, and the element's own box-shadow is not affected by it. */
+#lyrics-container > .gap-indicator.sizing {
+  overflow: hidden;
+  transition: height var(--dur-4) var(--ease-fluid);
+}
+
+#lyrics-container > .gap-indicator.leaving.sizing {
+  transition: height var(--gap-exit) var(--ease-fluid);
+}
+
+@keyframes gap-enter {
+  0%   { opacity: 0; transform: translateY(7px) scale(calc(var(--gap-scale) * 0.94)); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(var(--gap-scale)); }
+}
+
+/* The arrival: a small swell, then a quick shrink out of sight. Kept under 8%
+   of growth and well under half a second so it reads as a punctuation mark
+   rather than a performance. */
+#lyrics-container > .gap-indicator.arrived {
+  animation: gap-arrive var(--gap-exit) var(--ease-fluid) forwards;
+}
+
+@keyframes gap-arrive {
+  0%   { opacity: 1; transform: translateY(0) scale(var(--gap-scale)); }
+  32%  { opacity: 1; transform: translateY(0) scale(calc(var(--gap-scale) * 1.07)); }
+  100% { opacity: 0; transform: translateY(0) scale(calc(var(--gap-scale) * 0.68)); }
+}
+
+/* Interrupted instead of completed (pause, seek, moved next line): just leave. */
+#lyrics-container > .gap-indicator.leaving {
+  animation: gap-leave var(--gap-exit) var(--ease-fluid) forwards;
+}
+
+@keyframes gap-leave {
+  0%   { opacity: 1; transform: translateY(0) scale(var(--gap-scale)); }
+  100% { opacity: 0; transform: translateY(-4px) scale(calc(var(--gap-scale) * 0.95)); }
+}
+
+/* The three dots are a segmented meter, and each one fills CONTINUOUSLY across
+   its own third of the countdown (--fill ramps 0 -> 1) rather than switching on
+   at a boundary. That is what makes the row read as filling up and reaching the
+   value: with thirds-only lighting, the last dot switched on at 2/3 and then sat
+   there, so a 24-second break looked finished eight seconds early. */
+.gap-dot {
+  --fill: clamp(0, calc(var(--gap-progress) * 3), 1);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, calc(0.55 + 0.33 * var(--fill)));
+  opacity: calc(0.32 + 0.68 * var(--fill));
+  transform: scale(calc(0.7 + 0.3 * var(--fill)));
+  box-shadow: 0 0 calc(5px * var(--fill)) rgba(255, 255, 255, calc(0.55 * var(--fill)));
+}
+
+.gap-dot:nth-child(2) { --fill: clamp(0, calc((var(--gap-progress) - 0.3333) * 3), 1); }
+.gap-dot:nth-child(3) { --fill: clamp(0, calc((var(--gap-progress) - 0.6667) * 3), 1); }
+
+.gap-value {
+  margin-left: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  /* Lifts to full white as the countdown completes, so the number itself is part
+     of the fill rather than just a label next to it. */
+  color: rgba(255, 255, 255, calc(0.66 + 0.30 * var(--gap-progress)));
+}
+
+.loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60%;
+  gap: 14px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Empty state: previously an inline-styled grey line, which read as unstyled.
+   Now it shares the loading state's rhythm and the app's text scale. */
+.lyrics-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 42px;
+  padding-left: 2px;
+  animation: empty-in var(--dur-4) var(--ease-out) both;
+}
+
+.lyrics-empty-icon {
+  width: 26px;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.05));
+  margin-bottom: 6px;
+}
+
+.lyrics-empty-text {
+  color: rgba(255, 255, 255, 0.70);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.lyrics-empty-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+@keyframes empty-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================================
+   Lyric Lines & Typography
+   ========================================================= */
+
+.line {
+  font-family: var(--lyric-font-family, 'Barriecito', cursive, sans-serif);
+  font-weight: var(--lyric-font-weight, 400); /* 400 avoids synthetic blurring for Barriecito */
+  font-size: var(--lyric-font-size, 30px);
+  letter-spacing: 0.01em;
+  line-height: 1.44;
+  margin-bottom: 28px;
+  cursor: pointer;
+  color: #ffffff;
+  transform-origin: left center;
+  will-change: transform, opacity, filter;
+  transition:
+    filter 0.5s var(--ease-fluid),
+    opacity 0.5s var(--ease-fluid),
+    transform 0.5s var(--ease-fluid);
+}
+
+.line:hover {
+  opacity: 0.75 !important;
+  filter: blur(0.5px) !important;
+}
+
+/* Lines are roving-tabindex buttons (the active line is a tab stop so keyboard
+   users can seek), and Chromium's default ring turned a stray Tab press into a
+   box drawn around a lyric — it read as the line being selected. The focus
+   state itself is still announced; it just is not painted as a rectangle over
+   the artwork. */
+.line:focus,
+.line:focus-visible,
+#lyrics-container:focus,
+#lyrics-container:focus-visible {
+  outline: none;
+}
+
+/* ---------- Lyric alignment: left (default) / center / right ----------
+   The wipe transform-origin follows the alignment so the highlight always
+   sweeps in from the anchored edge. */
+body.align-center #lyrics-container .line,
+body.align-center #lyrics-container .line-secondary {
+  text-align: center;
+  transform-origin: center center;
+}
+
+body.align-right #lyrics-container .line,
+body.align-right #lyrics-container .line-secondary {
+  text-align: right;
+  transform-origin: right center;
+}
+
+.line.backing-vocal {
+  font-size: calc(var(--lyric-font-size, 30px) * 0.72);
+  font-style: italic;
+  margin-bottom: 20px;
+}
+
+/* Subordinate translation / transliteration layer */
+.line-secondary {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  font-size: calc(var(--lyric-font-size, 30px) * 0.42);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+}
+
+.hide-secondary .line-secondary {
+  display: none;
+}
+
+.word-group {
+  display: inline-flex;
+  white-space: pre;
+  position: relative;
+}
+
+.word-space {
+  display: inline;
+  white-space: pre;
+  opacity: 0.32;
+}
+
+/* =========================================================
+   Syllable & Character Glyph Architecture
+   ========================================================= */
+
+.syllable {
+  position: relative;
+  display: inline-block;
+  white-space: pre;
+  transform-origin: bottom center;
+  /* Eased settle used by the sung-word pop; per-frame sway is applied to the
+     inner text layers so it never fights this transition. */
+  transition: transform var(--dur-3) var(--ease-fluid);
+}
+
+/* Only lines near the viewport get a compositor hint. Applying will-change to
+   every syllable globally hinted thousands of never-visible nodes on a long
+   song — the layer churn the .char-glyph note warns against. */
+.line.is-active .syllable {
+  will-change: transform;
+}
+
+/* Letter glyphs: transition must be NONE so 60/120Hz JS transforms don't choke compositor.
+   NOTE: no `will-change` here — promoting every glyph to its own compositor layer
+   caused heavy layer churn and visible stutter on glyph-heavy lyrics. */
+.char-glyph {
+  display: inline-block;
+  white-space: pre;
+  transform-origin: bottom center;
+  transition: none !important;
+}
+
+/* Layer 1: Crisp dimmed base text */
+.syllable-base {
+  display: inline-block;
+  color: rgba(255, 255, 255, 0.30);
+  pointer-events: none;
+}
+
+/* Layer 2: Radiant letter luminescence with no horizontal scanlines */
+.syllable-highlight {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: -16px;
+  right: -16px;
+  padding: 8px 16px;
+  display: inline-block;
+  color: #ffffff;
+  pointer-events: none;
+
+  /*
+    The highlight box is padded 16px on each side so the glow is not clipped, so the
+    text occupies 16px .. (100% - 16px). --fill is a UNITLESS 0..1 fraction of the
+    syllable, so the edge must sweep that padded gap out. Using `16px + var(--fill)`
+    against the padded width made the reveal finish the word far too early
+    (roughly at fill = textWidth / (textWidth + 32px)).
+  */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0px,
+    #000 16px,
+    #000 calc(16px + (100% - 32px) * var(--fill, 0)),
+    rgba(0, 0, 0, 0.40) calc(16px + (100% - 32px) * var(--fill, 0) + 4px),
+    transparent calc(16px + (100% - 32px) * var(--fill, 0) + 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0px,
+    #000 16px,
+    #000 calc(16px + (100% - 32px) * var(--fill, 0)),
+    rgba(0, 0, 0, 0.40) calc(16px + (100% - 32px) * var(--fill, 0) + 4px),
+    transparent calc(16px + (100% - 32px) * var(--fill, 0) + 12px),
+    transparent 100%
+  );
+
+  /* CRITICAL: Prevents Chromium from repeating the mask in horizontal scanline stripes */
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+
+  text-shadow:
+    0 0 3px #ffffff,
+    0 0 8px rgba(255, 255, 255, 0.85);
+  transition: text-shadow 0.5s var(--ease-fluid);
+}
+
+/* Future syllables: strictly hidden to eliminate start-of-word leaks */
+.syllable.future .syllable-highlight {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* Actively singing syllable */
+.syllable.singing .syllable-highlight {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* =========================================================
+   Living Word Motion
+   Sung words on the live line ease up in size and bloom, and the word being
+   sung sways gently, so ordinary lines never sit dead and static.
+   ========================================================= */
+
+.line.is-active .syllable.passed {
+  transform: scale(1.045);
+}
+
+.line.is-active .syllable.singing {
+  transform: scale(1.065);
+}
+
+/* Unsung text on the live line stays readable instead of near-invisible. */
+.line.is-active .syllable.future .syllable-base {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* =========================================================
+   Type Specials (line-level, class-driven)
+   These are pure CSS keyframes on .word-group — the only element the JS motion
+   engine never writes to — so they compose with the per-frame variants instead
+   of fighting them.
+   ========================================================= */
+
+/* Chorus hooks: the words breathe with a warm halo while the line is live. */
+.line.is-chorus.is-active .word-group {
+  animation: chorus-breathe 2.4s var(--ease-fluid) infinite;
+}
+
+.line.is-chorus.is-active .syllable.passed .syllable-highlight {
+  text-shadow:
+    0 0 8px rgba(255, 255, 255, 0.42),
+    0 0 26px rgba(255, 255, 255, 0.2);
+}
+
+/* Backing vocals drift slightly out of phase, so duets read as two voices. */
+.line.backing-vocal.is-active .word-group {
+  animation: backing-float 3.6s ease-in-out infinite;
+}
+
+/* Ad-libs are an aside: they land softly and stay out of the way. */
+.line.is-adlib.is-active .syllable.singing {
+  transform: scale(1.04);
+}
+
+@keyframes chorus-breathe {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(0, calc(-0.8px * var(--line-breath, 1)), 0) scale(1.012); }
+}
+
+@keyframes backing-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(0, calc(-1px * var(--line-breath, 1)), 0); }
+}
+
+/* Reduced motion drops the type specials too (the class lives on <html>). */
+.reduce-motion .line.is-chorus.is-active .word-group,
+.reduce-motion .line.backing-vocal.is-active .word-group {
+  animation: none;
+}
+
+/* Settled bloom for words already sung on the live line. */
+.line.is-active .syllable.passed .syllable-highlight {
+  text-shadow:
+    0 0 6px rgba(255, 255, 255, 0.32),
+    0 0 20px rgba(255, 255, 255, 0.15);
+}
+
+/* Full bloom on the syllable being sung right now. */
+.syllable.singing .syllable-highlight {
+  text-shadow:
+    0 0 4px #ffffff,
+    0 0 12px rgba(255, 255, 255, 0.78),
+    0 0 30px rgba(255, 255, 255, 0.32);
+}
+
+/* Passed syllable: the intense glow gracefully decays into this soft settle */
+.syllable.passed .syllable-highlight {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  -webkit-mask-image: none;
+  mask-image: none;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.15);
+}
+
+/* =========================================================
+   Per-Letter Timing Reveal
+   When the payload provides letter timings, each glyph reveals on its own clock,
+   so the syllable-wide mask is disabled and glyph masks take over.
+   ========================================================= */
+.syllable.has-letters .syllable-highlight {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.char-glyph.letter-fill {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0,
+    #000 var(--lfill, 0%),
+    rgba(0, 0, 0, 0.35) calc(var(--lfill, 0%) + 2px),
+    transparent calc(var(--lfill, 0%) + 9px)
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0,
+    #000 var(--lfill, 0%),
+    rgba(0, 0, 0, 0.35) calc(var(--lfill, 0%) + 2px),
+    transparent calc(var(--lfill, 0%) + 9px)
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+/* =========================================================
+   Vertical Transport Rail (liquid glass, right middle)
+   ========================================================= */
+
+/* =========================================================
+   Latency Rail (right edge, hover-revealed)
+   ========================================================= */
+
+.latency-rail {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translate(100%, -50%);
+  z-index: 30;
+  transition: transform var(--dur-3) var(--ease-fluid);
+}
+
+body.latency-rail-hot .latency-rail,
+.latency-rail:hover {
+  transform: translate(0, -50%);
+}
+
+.latency-rail-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: 54px;
+  margin: 0 10px 0 6px;
+  padding: 14px 4px;
+  border-radius: 18px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+}
+
+.latency-rail-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: var(--ui-font);
+}
+
+/* Same material as the on-art options: borderless glyph, white on hover. */
+.latency-rail-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--icon-idle);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+.latency-rail-btn:hover {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.latency-rail-btn:active {
+  transform: scale(0.9);
+}
+
+.latency-rail-btn .icon {
+  width: 14px;
+  height: 14px;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+}
+
+/* ---------- Vertical sync slider ----------
+   Range −3000..+3000 ms. The zero point sits at the middle; the fill grows
+   upward from there for positive offsets and downward for negative ones. */
+.latency-slider {
+  position: relative;
+  width: 26px;
+  height: 130px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.latency-slider:active {
+  cursor: grabbing;
+}
+
+.latency-slider-track {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: visible;
+}
+
+.latency-slider-fill {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.95));
+  /* top/height set from JS; eases toward the target for a fluid feel */
+  transition: top var(--dur-2) var(--ease-out), height var(--dur-2) var(--ease-out);
+}
+
+.latency-slider-thumb {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.45), 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: top var(--dur-2) var(--ease-out);
+  pointer-events: none;
+}
+
+.latency-slider.dragging .latency-slider-thumb,
+.latency-slider.dragging .latency-slider-fill {
+  transition: none; /* 1:1 while dragging */
+}
+
+.latency-slider.zero .latency-slider-thumb {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+}
+
+.latency-rail-value {
+  font-size: 9px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.80);
+  writing-mode: vertical-rl;
+  letter-spacing: 0.5px;
+  padding: 2px 0;
+  font-family: var(--ui-font);
+}
+
+/* ---------- Card transport: the seek row under the art ---------- */
+/* A progress bar flanked by its times. The card's row (see .art-progress) and
+   the split panel's #track-side-panel both use it, so both read the same. */
+.float-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 7px;
+  pointer-events: auto;
+}
+
+/* Transport controls: prev / play / next. The hovered art carries them
+   (art-player), in every layout that shows the card. */
+.transport-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+  pointer-events: auto;
+}
+
+.transport-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--dur-2) var(--ease-fluid), color var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+.transport-btn .icon { width: 16px; height: 16px; }
+.transport-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.transport-btn:active { transform: scale(0.92); }
+
+.transport-play .icon { width: 20px; height: 20px; }
+.transport-play .icon-pause { display: none; }
+.transport-play.is-playing .icon-play { display: none; }
+.transport-play.is-playing .icon-pause { display: block; }
+.transport-play {
+  background: rgba(255, 255, 255, 0.16);
+}
+.transport-play:hover { background: rgba(255, 255, 255, 0.24); }
+
+.float-progress {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+  /* Hover affordance: the bar lifts and brightens so it reads as draggable. */
+  transition: height var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), box-shadow var(--dur-2) var(--ease-fluid);
+}
+
+.float-progress:hover {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.22);
+}
+
+.float-progress::before {
+  content: '';
+  position: absolute;
+  top: -6px; bottom: -6px; left: -6px; right: -6px;
+}
+
+.float-progress-fill {
+  height: 100%;
+  position: relative;
+  width: 0%;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  transition: width 0.25s linear;
+}
+
+/* ---------- On-art player (Spotify-style): transport + progress on the hovered art ----------
+   The art becomes the player: a bottom scrim carries the transport row and the
+   seekable progress row with times. It reuses the text column's component
+   classes (transport-btn / float-progress) with art- prefixed ids, so this is
+   now the only place a track's own transport is drawn; it carries data-no-drag
+   so a mousedown on a transport button never becomes a window move. The centred
+   glass play dot that used to hover over the art is
+   gone: the row's play/pause is the art's single play control. */
+.art-player {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 26px 14px 12px;
+  border-radius: inherit;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--dur-3) var(--ease-fluid), transform var(--dur-3) var(--ease-fluid);
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(8, 8, 10, 0.66), rgba(8, 8, 10, 0.3) 55%, transparent);
+}
+
+.float-art-wrap:hover .art-player,
+.side-art-wrap:hover .art-player {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* On-art transport: tighter gaps than the text column's row so three buttons
+   fit a 220px art card without crowding the progress row above. */
+.art-transport {
+  gap: 10px;
+  margin-top: 0;
+}
+
+.art-transport .transport-btn {
+  width: 34px;
+  height: 34px;
+}
+
+.art-transport .transport-btn .icon { width: 18px; height: 18px; }
+
+/* The centre play/pause glyph sits in the transport row only — the big centre
+   dot would collide with it, and the reference draws the transport as bare
+   glyphs: no ring behind play, just a larger white triangle. */
+.art-player .transport-play {
+  background: transparent;
+  color: #fff;
+}
+
+.art-player .transport-play:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* The one "primary" glyph, so it out-reads prev/next. Sized again after the
+   fullscreen block, which only sizes the ring buttons. */
+.art-player .transport-play .icon { width: 26px; height: 26px; }
+
+/* On-art progress: same seek behaviour as the split panel's, times flank it,
+   but the reference stacks TWO bars on one baseline — a hairline track spanning
+   the whole song and a heavier white capsule for the played part. Reading the
+   progress twice (line + capsule) is what keeps it legible over busy artwork. */
+.art-progress {
+  width: 100%;
+  /* Fullscreen lays this row out beside the art, where the text column can be
+     over a metre wide; the bar keeps a readable length instead of spanning it. */
+  max-width: 420px;
+  gap: 9px;
+}
+
+/* On the art the row is the player's second line rather than a row of the text
+   column: the player's own gap spaces it, and .art-player already stretches it
+   to the card's inner width. */
+.art-player .art-progress {
+  margin: 0;
+}
+
+/* The rail: one hairline at the same weight as the played portion, so the pair
+   reads as a single line with a dot travelling along it (the Spicy/Spotify
+   shape) rather than a track plus a capsule. `overflow: visible` is what lets
+   the dot overhang both ends of the bar. */
+#art-progress {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  overflow: visible;
+  display: flex;
+  align-items: center;
+}
+
+#art-progress:hover {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* No published duration (see setTrackDuration): a fraction of an unknown total is
+   meaningless, so the rail stops offering to seek and stops pretending to hold a
+   playhead. The elapsed time keeps counting — that still comes from the clock. */
+body.duration-unknown #art-progress,
+body.duration-unknown .side-progress-track {
+  pointer-events: none;
+  cursor: default;
+}
+
+body.duration-unknown #art-progress:hover {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+body.duration-unknown .side-progress-track:hover {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* The played portion: same 3px as the rail, in white. */
+#art-progress .float-progress-fill {
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+/* The playhead dot. updateArtProgress() writes its `left` once a second and the
+   1 s linear transition below is what turns those steps into one continuous
+   sweep; a seek drops the transition so the dot lands instead of gliding. */
+.art-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55), 0 0 7px rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  transition: left 1s linear, width var(--dur-2) var(--ease-fluid), height var(--dur-2) var(--ease-fluid);
+}
+
+.art-progress:hover .art-thumb,
+body.seeking .art-thumb {
+  width: 13px;
+  height: 13px;
+}
+
+/* Seeking (drag or click) is 1:1 with the pointer, so the dot must not chase it. */
+body.seeking .art-thumb,
+.art-progress.no-thumb-slide .art-thumb {
+  transition: left 0s, width var(--dur-2) var(--ease-fluid), height var(--dur-2) var(--ease-fluid);
+}
+
+.art-time {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  min-width: 26px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+.art-time#art-timer-display { text-align: right; }
+.art-time#art-duration-display { text-align: left; }
+
+/* In fullscreen the hover-grown art (300px) hosts the same on-art player; the
+   larger card gets roomier spacing and slightly larger glyphs. */
+body.is-fullscreen .art-player {
+  padding: 30px 18px 14px;
+  gap: 9px;
+}
+
+/* The split panel's art is permanently large: same player, scaled to it. */
+.side-art-wrap .art-player {
+  padding: 34px 20px 18px;
+  gap: 10px;
+}
+
+.side-art-wrap .art-transport .transport-btn {
+  width: 46px;
+  height: 46px;
+}
+
+.side-art-wrap .art-transport .transport-btn .icon { width: 22px; height: 22px; }
+
+.side-art-wrap .art-transport .transport-play .icon { width: 26px; height: 26px; }
+
+body.is-fullscreen .art-transport .transport-btn {
+  width: 40px;
+  height: 40px;
+}
+
+body.is-fullscreen .art-transport .transport-btn .icon { width: 20px; height: 20px; }
+
+/* The fullscreen block above sizes every ring button's glyph; the play
+   triangle keeps its lead on the bigger card too. */
+body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px; }
+
+#source-badge {
+  font-size: 9px;
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 95px;
+}
+
+.latency-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.latency-box label {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 9.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.65px;
+}
+
+/* =========================================================
+   Settings Page
+   A full-window sheet rather than a dropdown. Everything tunable lives here,
+   so it is a page: a header, grouped sections, and rows with room to say what
+   they do. The material is the app's liquid glass, but laid over a near-black
+   wash instead of the lyrics — the lyrics are still there behind it, dimmed
+   right down, which is what keeps the glass feeling liquid rather than flat.
+   ========================================================= */
+
+.settings-page {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background:
+    radial-gradient(120% 85% at 8% 0%, rgba(72, 68, 112, 0.10), transparent 58%),
+    radial-gradient(110% 75% at 100% 100%, rgba(36, 48, 82, 0.10), transparent 55%),
+    rgba(4, 4, 7, 0.55);
+  backdrop-filter: blur(28px) saturate(115%);
+  -webkit-backdrop-filter: blur(28px) saturate(115%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* visibility is stepped, not faded: it waits out the fade on the way out, and
+     flips the instant the class is added on the way in. Fading it in both
+     directions left the sheet hidden for the frame it was opened on, and focus()
+     on a visibility:hidden subtree is dropped — which is how the dialog used to
+     open with focus still on the page behind it. */
+  transition: opacity var(--dur-3) var(--ease-fluid), visibility 0s linear var(--dur-3);
+}
+
+.settings-page.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity var(--dur-3) var(--ease-fluid), visibility 0s;
+}
+
+.sp-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  /* Shorter than the window and centred: a sheet stretched edge to edge read as
+     a page rather than a panel, so it now has a height ceiling of its own and
+     scrolls internally past it. */
+  max-height: min(760px, 100%);
+  /* Row density is one token so a small window can compact the sheet without
+     a parallel set of rules per element. */
+  --sp-row-min-h: 40px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
+  background: linear-gradient(160deg, rgba(24, 24, 32, 0.82), rgba(10, 10, 16, 0.80));
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow:
+    var(--glass-shadow),
+    var(--glass-edge),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  overflow: hidden;
+}
+
+/* One deliberate arrival for the sheet, instead of the old per-row cascade. */
+.settings-page.open .sp-sheet {
+  animation: settings-in var(--dur-4) var(--ease-spring) both;
+}
+
+@keyframes settings-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.reduce-motion .settings-page.open .sp-sheet {
+  animation: none;
+}
+
+.sp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 13px 11px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent);
+  /* Subtle inner sheen — same glass language as the header */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  flex-shrink: 0;
+}
+
+.sp-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+.sp-sub {
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.sp-close {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--icon-idle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+.sp-close .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.sp-close:hover {
+  color: #ffffff;
+  background: var(--hover-surface);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.sp-close:active {
+  transform: scale(0.92);
+}
+
+/* The search field is the sheet's other map: a row whose page you have forgotten
+   is still one word away. It sits above the strip, and the strip steps aside
+   while a query is up — results are a different view, not a fifth page. */
+.sp-search {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.sp-search-field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.04);
+  transition: border-color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid);
+}
+
+.sp-search-field:focus-within {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.sp-search-field .icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  opacity: 0.45;
+}
+
+.sp-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #ffffff;
+  font-family: var(--ui-font);
+  font-size: 12px;
+}
+
+.sp-search input::placeholder {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.sp-search-clear {
+  display: none;
+  border: none;
+  background: transparent;
+  color: var(--icon-idle);
+  cursor: pointer;
+  padding: 0 2px;
+  font-family: var(--ui-font);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.sp-search.has-query .sp-search-clear {
+  display: block;
+}
+
+.sp-search-hint {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.sp-search-hint kbd {
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+}
+
+/* The mark says WHY a row is on screen: a row that only matched through its own
+   prose shows that sentence with the word lifted out of it. */
+.qp-mark {
+  background: rgba(255, 200, 120, 0.22);
+  color: #ffffff;
+  border-radius: var(--r-xs);
+  padding: 0 2px;
+}
+
+.sp-empty {
+  padding: 22px 12px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.sp-empty p {
+  margin: 0;
+}
+
+.sp-empty[hidden] {
+  display: none;
+}
+
+/* The tab strip is the sheet's own map: four short pages instead of one long
+   scroll, so the row you tune mid-song is one click away. It scrolls sideways
+   rather than wrapping, so a 320px window keeps readable labels instead of two
+   rows of squeezed ones — a scrollable strip is still four reachable tabs. */
+.sp-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sp-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.sp-tab {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background var(--dur-2) var(--ease-fluid), color var(--dur-2) var(--ease-fluid),
+              border-color var(--dur-2) var(--ease-fluid);
+}
+
+.sp-tab:hover {
+  background: var(--hover-surface);
+  color: #ffffff;
+}
+
+.sp-tab[aria-selected="true"] {
+  background: var(--active-surface);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.sp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sp-panel[hidden] {
+  display: none;
+}
+
+.sp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Thin, tasteful scrollbar so the user knows the panel scrolls */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.14) transparent;
+  padding: 10px 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sp-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sp-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sp-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-pill);
+}
+
+.sp-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.sp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sp-group-title {
+  /* 12px, not 10: a row's label is inset by its 11px padding plus its 1px border,
+     so the group heading sits on the same column the labels under it do. */
+  padding: 0 12px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: var(--ui-font);
+}
+
+.sp-hint {
+  /* Same inset as the group title, so the prose lines up with the labels too. */
+  padding: 4px 12px 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.qp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--sp-row-min-h, 36px);
+  padding: 0 11px;
+  border-radius: var(--r-md);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  font-family: var(--ui-font);
+  /* Rows are <button>s, and a button centres its text by default — the label
+     span inherits that, so action rows floated their labels to the middle while
+     the static rows and the group titles above them stayed left. This sheet is a
+     column: label on the left edge, value on the right, every row the same. */
+  text-align: left;
+}
+
+.qp-static {
+  cursor: default;
+  /* The same transparent border the action rows carry for their hover edge, so a
+     static row's content starts on the same pixel as every other row's: without
+     it the Sync row's label sat 1px to the left of the column it belongs to. */
+  border: 1px solid transparent;
+}
+
+.qp-action {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: var(--ui-font);
+  transition:
+    background var(--dur-2) var(--ease-fluid),
+    border-color var(--dur-2) var(--ease-fluid),
+    transform var(--dur-1) var(--ease-fluid),
+    box-shadow var(--dur-2) var(--ease-fluid);
+}
+
+.qp-action:hover {
+  background: var(--hover-surface);
+  border-color: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Press feedback so rows feel physical, like the icon buttons. */
+.qp-action:active {
+  transform: scale(0.983);
+  background: var(--active-surface);
+}
+
+.qp-label {
+  opacity: 0.62;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keyboard hint shown alongside the label — same dimness as the label */
+.qp-hint {
+  opacity: 0.32;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.qp-state {
+  color: rgba(255, 255, 255, 0.92);
+  display: inline-block;
+  transform-origin: right center;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* One-shot pulse for a value that just changed. */
+.value-flash {
+  animation: value-flash var(--dur-3) var(--ease-out);
+}
+
+@keyframes value-flash {
+  0%   { transform: scale(1.14); opacity: 0.55; }
+  60%  { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ---------- Small-window density for the settings sheet ----------
+   The sheet already fits any window (max-height + internal scroll); what read
+   as "broken" at small sizes was density: the full-size paddings and 36px rows
+   filled nearly the whole window. Below 420 px of height the sheet compacts —
+   tighter page padding, shorter rows, smaller headings and hints — through the
+   same token the full-size rules consume. Below 340 px of width it also drops
+   the horizontal page padding so rows keep their label/state gap. */
+@media (max-height: 420px) {
+  .sp-sheet {
+    --sp-row-min-h: 28px;
+    max-height: 100%;
+  }
+
+  .settings-page {
+    padding: 6px 10px;
+  }
+
+  .sp-head {
+    padding: 8px 10px 7px 12px;
+  }
+
+  .sp-title { font-size: 13px; }
+  .sp-sub { margin-top: 1px; font-size: 9px; }
+
+  .sp-tabs { padding: 7px 9px 6px; }
+
+  .sp-search { padding: 7px 10px 0; }
+  .sp-search-field { min-height: 26px; }
+  .sp-search-hint { display: none; }
+
+  .sp-tab {
+    min-height: 26px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .sp-group-title {
+    padding: 0 10px 3px;
+    font-size: 8px;
+  }
+
+  .sp-hint {
+    padding: 2px 10px 0;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .qp-row {
+    padding: 0 9px;
+    font-size: 11px;
+  }
+
+  .sp-close {
+    width: 26px;
+    height: 26px;
+  }
+}
+
+@media (max-width: 340px) {
+  .settings-page {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}
+
+/* Below 520px of width the comfortable ceiling is the window itself, so the
+   sheet keeps the full-width feel the small layouts always had. */
+@media (max-width: 520px) {
+  .sp-sheet {
+    max-height: 100%;
+  }
+}
+
+.reduce-motion .value-flash {
+  animation: none;
+}
+
+.qp-stepper {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+/* Steppers share the icon-button material (no box, hover surface). */
+.qp-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--icon-idle);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: var(--ui-font);
+  transition:
+    background var(--dur-2) var(--ease-fluid),
+    color var(--dur-2) var(--ease-fluid),
+    transform var(--dur-1) var(--ease-fluid);
+}
+
+.qp-btn:hover {
+  background: var(--hover-surface);
+  color: var(--icon-hot);
+}
+
+.qp-btn:active {
+  transform: scale(0.90);
+  background: var(--active-surface);
+}
+
+.qp-value {
+  min-width: 52px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  display: inline-block;
+  transform-origin: right center;
+  font-family: var(--ui-font);
+}
+
+/* =========================================================
+   Diagnostics readout
+   Collapsed by default: the panel stays a settings panel first, and only
+   unfolds into a resolve/timing report when it is actually wanted.
+   ========================================================= */
+
+.qp-info {
+  display: none;
+  margin-top: 4px;
+  padding: 7px 9px 8px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.qp-info.open {
+  display: block;
+  animation: qp-info-in var(--dur-3) var(--ease-out) both;
+}
+
+@keyframes qp-info-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.qp-info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  line-height: 1.7;
+  padding: 1px 0;
+  font-family: var(--ui-font);
+}
+
+.qp-info-key {
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  flex: none;
+}
+
+.qp-info-val {
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   Local TTML library
+   The management surface for the user's own lyric files: the same glass and
+   row language as the rest of the sheet, with a list dense enough to hold a
+   folder of files without turning the panel into a file manager.
+   ========================================================= */
+
+.ttml-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 0;
+}
+
+.ttml-act {
+  flex: 1 1 auto;
+  height: 26px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.86);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-2) var(--ease-fluid),
+    border-color var(--dur-2) var(--ease-fluid),
+    color var(--dur-2) var(--ease-fluid),
+    transform var(--dur-1) var(--ease-fluid);
+}
+
+.ttml-act:hover:not(:disabled) {
+  background: var(--hover-surface);
+  border-color: rgba(255, 255, 255, 0.20);
+}
+
+.ttml-act:active:not(:disabled) {
+  transform: scale(0.97);
+  background: var(--active-surface);
+}
+
+.ttml-act:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.ttml-act-danger:hover:not(:disabled) {
+  border-color: rgba(255, 130, 130, 0.45);
+  color: #ffd8d8;
+}
+
+.ttml-status {
+  padding: 5px 10px 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.74);
+  font-family: var(--ui-font);
+}
+
+.ttml-status:empty {
+  display: none;
+}
+
+.ttml-current {
+  margin: 7px 10px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ttml-current-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ttml-current-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: var(--ui-font);
+}
+
+.ttml-current-value {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font);
+}
+
+.ttml-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 5px;
+  max-height: 190px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.ttml-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ttml-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-pill);
+}
+
+.ttml-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: var(--r-md);
+}
+
+.ttml-row:hover {
+  background: var(--hover-surface);
+}
+
+.ttml-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ttml-row-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font);
+}
+
+.ttml-row-sub {
+  margin-top: 1px;
+  font-size: 9.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font);
+}
+
+.ttml-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.ttml-row-actions .ttml-act {
+  flex: 0 0 auto;
+  height: 23px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
+.ttml-chip {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.80);
+  font-family: var(--ui-font);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ttml-chip.is-active {
+  background: rgba(120, 200, 140, 0.20);
+  color: #cdf5d8;
+}
+
+.ttml-chip.is-warn {
+  background: rgba(255, 190, 120, 0.18);
+  color: #ffe2bd;
+}
+
+.ttml-empty {
+  padding: 7px 10px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-family: var(--ui-font);
+}
+
+.sp-hint code {
+  padding: 0 3px;
+  border-radius: var(--r-xs);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.95em;
+}
+
+.reduce-motion .ttml-act,
+.reduce-motion .ttml-row {
+  transition: none;
+}
+
+@media (max-height: 420px) {
+  .ttml-list {
+    max-height: 120px;
+  }
+
+  .ttml-current {
+    margin-top: 5px;
+    padding: 6px 8px;
+  }
+
+  .ttml-act {
+    height: 23px;
+    font-size: 10px;
+  }
+}
+
+/* =========================================================
+   Invisible Resize Handles (edges + corners)
+   ========================================================= */
+
+.resize-handle {
+  position: absolute;
+  z-index: 100;
+  user-select: none;
+  background: transparent !important;
+}
+
+.resize-handle svg,
+.resize-handle * {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* A fullscreen window is a fixed surface: no edge drags. The host would only
+   have to reassert the monitor bounds after every one of them anyway, which
+   reads as the window fighting the pointer. */
+body.is-fullscreen .resize-handle {
+  display: none;
+}
+
+/* Slightly wider hit targets feel more native — 8px edges are easier to grab */
+.resize-e   { right: 0;   top: 16px;  bottom: 16px; width: 8px;  cursor: ew-resize; }
+.resize-w   { left: 0;    top: 16px;  bottom: 16px; width: 8px;  cursor: ew-resize; }
+.resize-s   { bottom: 0;  left: 16px; right: 16px; height: 8px; cursor: ns-resize; }
+.resize-n   { top: 0;     left: 16px; right: 16px; height: 8px; cursor: ns-resize; }
+.resize-se  { right: 0;   bottom: 0;  width: 22px;  height: 22px; cursor: nwse-resize; }
+.resize-sw  { left: 0;    bottom: 0;  width: 22px;  height: 22px; cursor: nesw-resize; }
+.resize-ne  { right: 0;   top: 0;     width: 22px;  height: 22px; cursor: nesw-resize; }
+.resize-nw  { left: 0;    top: 0;     width: 22px;  height: 22px; cursor: nwse-resize; }
+
+body.resizing {
+  user-select: none;
+}
+
+body.resizing-e, body.resizing-w { cursor: ew-resize !important; }
+body.resizing-s, body.resizing-n { cursor: ns-resize !important; }
+body.resizing-se, body.resizing-nw { cursor: nwse-resize !important; }
+body.resizing-sw, body.resizing-ne { cursor: nesw-resize !important; }
+
+/* =========================================================
+   Reduced Motion
+   Honours the OS preference by default and is also toggleable in the settings
+   page. Decorative motion (the drifting backdrop, pulsing dots, word
+   pop/sway) is dropped; the lyric fill is information, so it is always kept.
+   ========================================================= */
+
+.reduce-motion .moment-veil,
+.reduce-motion .art-light,
+.reduce-motion .cover-art-blur,
+.reduce-motion .intro-dots .dot,
+.reduce-motion .gap-indicator,
+.reduce-motion .gap-indicator .gap-dot,
+.reduce-motion .ambient-backdrop,
+.reduce-motion .track-art {
+  animation: none !important;
+}
+
+.reduce-motion .line.is-active .syllable.passed,
+.reduce-motion .line.is-active .syllable.singing {
+  transform: none;
+}
+
+.reduce-motion .syllable,
+.reduce-motion .line {
+  transition: none;
+}
+
+.reduce-motion .line.has-growing,
+.reduce-motion .line.part-up,
+.reduce-motion .line.part-down {
+  animation: none;
+}
+
+/* Full-line parting gesture: when the active line contains a size-changing
+   variant, the whole line breathes gently and its neighbours part vertically a
+   few pixels — a whole-line response that reads as one motion instead of a
+   word colliding into static text. Runs on the standalone `translate` property
+   so the depth-of-field inline transform (scale/translateX) is never fought
+   over, and the two compose in the compositor. */
+.line.is-active.has-growing {
+  animation: line-breathe 2.8s var(--ease-fluid) infinite;
+}
+
+@keyframes line-breathe {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 calc(-1.5px * var(--line-breath, 1)); }
+}
+
+.line.part-up {
+  animation: part-up 2.8s var(--ease-fluid) infinite;
+}
+
+@keyframes part-up {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 calc(-3px * var(--line-breath, 1)); }
+}
+
+.line.part-down {
+  animation: part-down 2.8s var(--ease-fluid) infinite;
+}
+
+@keyframes part-down {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 calc(3px * var(--line-breath, 1)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-art-blur,
+  .intro-dots .dot,
+  .gap-indicator,
+  .gap-dot,
+  .track-art {
+    animation: none !important;
+  }
+  .line.has-growing,
+  .line.part-up,
+  .line.part-down {
+    animation: none !important;
+  }
+  .art-controls {
+    transition: none !important;
+  }
+}
+/* =========================================================
+   Fullscreen & Layout Modes
+   body.layout-compact  -> compact: lyrics pinned toward the top
+   body.layout-split    -> fullscreen-only: art panel fixed on the left
+   body.is-fullscreen   -> global scale-up of header, lyrics, gap indicator
+   ========================================================= */
+
+/* ---------- Fullscreen scaling ----------
+   Base lyric size comes from the user's Ctrl+Wheel zoom; fullscreen applies a
+   multiplier so zooming keeps working inside fullscreen. */
+body.is-fullscreen {
+  --lyric-font-size: calc(var(--lyric-zoom, 30px) * 1.7);
+}
+
+body.is-fullscreen #title {
+  font-size: 19px;
+}
+
+body.is-fullscreen #artist {
+  font-size: 14px;
+}
+
+body.is-fullscreen #app-header {
+  min-height: 76px;
+  padding: 16px 18px 14px 24px;
+}
+
+/* A watched surface should not keep a parked arrow on it. The class is added by
+   scheduleCursorHide() after two still seconds in fullscreen, and taken off by
+   the first movement. */
+body.is-fullscreen.cursor-hidden,
+body.is-fullscreen.cursor-hidden * {
+  cursor: none !important;
+}
+
+/* Fullscreen scales the chip through --gap-scale rather than a transform, so it
+   composes with the enter/arrive/leave animations instead of fighting them for
+   the same property. */
+body.is-fullscreen .gap-indicator {
+  --gap-scale: 1.2;
+  margin: 16px 0 30px 2px;
+}
+
+body.is-fullscreen .gap-indicator .gap-dot {
+  width: 9px;
+  height: 9px;
+}
+
+/* ---------- Compact layout: lyrics anchored to the top ---------- */
+body.layout-compact #lyrics-container {
+  padding-top: 96px;
+  padding-bottom: 70vh;
+}
+
+/* ---------- Split layout (fullscreen only): art panel on the left ---------- */
+.track-side-panel {
+  position: absolute;
+  top: 96px;
+  bottom: 96px;
+  left: 4.5%;
+  width: min(34%, 460px);
+  display: none;
+  flex-direction: column;
+  justify-content: flex-end;
+  z-index: 15;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-4) var(--ease-fluid);
+}
+
+body.layout-split.is-fullscreen .track-side-panel {
+  display: flex;
+  opacity: 1;
+}
+
+.side-art-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55), 0 0 40px rgba(255, 255, 255, 0.05);
+  /* Deliberately NOT `overflow: hidden`: the beat lamp has to spread past the
+     sleeve, and nothing here needed clipping anyway — the image takes the
+     wrapper's radius for itself below, and the two overlay rows (controls,
+     player) sit at opacity 0 until the art is hovered, which is the only state
+     where either of them is flush with the box. */
+}
+
+.side-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  position: relative;
+  z-index: 1; /* above the beat lamp behind it — see .float-art-wrap .track-art */
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--dur-4) var(--ease-fluid);
+}
+
+.side-art.visible {
+  opacity: 1;
+}
+
+.side-art-wrap {
+  pointer-events: auto; /* hover controls on the split art */
+}
+
+.side-transport {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* On-art controls for the split panel share the compact float's styling;
+   the scrim needs a little more padding on the larger art. */
+.side-art-controls {
+  border-radius: 18px;
+}
+
+.side-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.side-time {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+
+.side-progress-track {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+  cursor: pointer;
+  transition: height var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid);
+}
+
+.side-progress-track:hover {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.side-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.9);
+  transition: width 0.25s linear;
+}
+
+.side-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font);
+}
+
+.side-artist {
+  font-size: 14px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-font);
+}
+
+body.layout-compact #app-header .track-meta,
+body.layout-split #app-header .track-meta {
+  visibility: hidden;
+}
+
+/* In split layout the header shrinks to just the window buttons; the left panel
+   owns the track info. */
+body.layout-split.is-fullscreen #app-header .track-meta {
+  visibility: hidden;
+}
+
+/* Lyrics shift right and DOWN in split/compact: the hover-grown art overlaps them,
+   so they part to keep the title readable (Paprika Lyrics behaviour). */
+body.layout-split.is-fullscreen #lyrics-container {
+  margin-left: 42%;
+}
+
+/* ---------- Fullscreen scaling of the float ---------- */
+/* Fullscreen: back to a row — art on the left, the seek row and the name beside
+   it — anchored where the type has room to scale. */
+body.is-fullscreen .track-float {
+  top: 40px;
+  left: 84px;
+  right: 200px;
+  width: auto;
+  max-width: none;
+  transform: none;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+body.is-fullscreen .float-art-wrap {
+  width: 96px;
+  height: 96px;
+  aspect-ratio: auto;
+}
+
+body.is-fullscreen .float-art-wrap:hover {
+  width: 300px;
+  height: 300px;
+}
+
+body.is-fullscreen .track-float #title {
+  font-size: 30px;
+}
+
+body.is-fullscreen .track-float #artist {
+  font-size: 19px;
+}
+
+/* The lyric column belongs to the same block as the card: the card row is pinned
+   at 84px, so the type moves out to meet it — 68px puts a line's left edge 16px
+   outside the sleeve's, which makes the card the head of the column instead of an
+   overlay parked on top of it. Windowed layouts keep the 28px gutter they were
+   composed against, and the container's own padding-left transition eases the
+   move in both directions. */
+body.is-fullscreen #lyrics-container {
+  padding-left: 68px;
+}
+
+/* ---------- Lyrics part downward while the art is hovered ----------
+   Fullscreen/split only: that is where the art still grows (96px -> 300px) and
+   would otherwise cover the lyrics it sits above. In the windowed card the art
+   is already its full size and does not move anything but itself, so the lyrics
+   stay where they are. */
+body.is-fullscreen.art-hover #lyrics-container {
+  padding-top: 380px;
+  transition: padding-top var(--dur-4) var(--ease-fluid);
+}
+
+body.layout-compact #lyrics-container,
+body.layout-split #lyrics-container {
+  transition: padding-top var(--dur-4) var(--ease-fluid), padding-left var(--dur-4) var(--ease-fluid), opacity var(--dur-3) var(--ease-fluid);
+}
+
+/* The countdown chip needs its gutter to animate in this layout too. */
+body.layout-compact #lyrics-container {
+  transition: padding-top var(--dur-4) var(--ease-fluid), padding-left 0.45s var(--ease-fluid), opacity var(--dur-3) var(--ease-fluid);
+}
+
+/* =========================================================
+   The track card (compact & split)
+   Art, the seek row and the track's name, stacked in one block. It is pinned to
+   the LEFT gutter by default — the same 28px the lyrics start at, so the card
+   reads as part of the same column — and `body.card-center` floats it over the
+   middle instead (Settings > Window > Card position). The art is the card's full
+   width and the text hangs beneath it, left-aligned inside the card. Fullscreen
+   flips the same markup back into a row with the art on the left (see the
+   fullscreen block below).
+
+   --card-w scales with the window and is capped by its height as well as its
+   width: a 320x380 window still has to leave room for lyrics, and the card is
+   the only thing in that top strip. max-width keeps a very narrow window from
+   pushing the card past its own margins.
+   ========================================================= */
+.track-float {
+  --card-w: min(clamp(180px, 34%, 320px), 40vh);
+  position: absolute;
+  top: 26px;
+  left: 28px;
+  right: auto;
+  width: var(--card-w);
+  max-width: calc(100% - 56px);
+  z-index: 25;
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  pointer-events: none;
+}
+
+/* Centred card: the opt-in half of the Card position setting. Windowed only —
+   fullscreen turns the card back into the left-handed row below, and has to win
+   outright rather than depend on source order. The transform is only used here,
+   so the default position never pays for a composited layer. */
+body.layout-compact.card-center:not(.is-fullscreen) .track-float {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+body.layout-compact .track-float {
+  display: flex;
+}
+
+/* Split mode: the left panel owns art + title + artist; the compact float retires. */
+body.layout-split .track-float {
+  display: none;
+}
+
+.track-float .float-art-wrap,
+.track-float .track-text,
+.track-float .float-progress-row,
+.track-float .transport-row {
+  pointer-events: auto;
+}
+
+/* A mousedown on the sleeve or on the title moves the window (the card is a
+   drag surface); the transport row and the seek row carry data-no-drag, so they
+   keep their own gestures. */
+
+.float-art-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  transition: width var(--dur-4) var(--ease-fluid), height var(--dur-4) var(--ease-fluid),
+              transform var(--dur-4) var(--ease-fluid);
+  z-index: 26;
+  pointer-events: auto;
+}
+
+/* The art IS the card now, so hover no longer grows it into the widget — it
+   lifts a hair instead. The width/height transition above stays for fullscreen,
+   where the art really does grow (96px -> 300px); a transform growth here would
+   only have pushed the text below it around. */
+body.layout-compact:not(.is-fullscreen) .float-art-wrap:hover {
+  transform: scale(1.015);
+}
+
+/* ---------- Hover/click hotspot, as wide as the art is about to become ----------
+   Fullscreen only. There the art is 96px while the on-art control row is laid
+   out across the 300px it grows into, so hover was only recognised on the small
+   square: reaching a control meant leaving the art before it had grown, the row
+   never appeared, and the click fell through to the lyric line behind the card —
+   which seeks the track instead of opening settings. This invisible hotspot
+   keeps the art hovered across the width it is about to occupy, at the art's own
+   height, so the space *below* it stays real lyrics. */
+body.is-fullscreen .float-art-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 300px;
+  height: 100%;
+  pointer-events: inherit;
+}
+
+/* `display: block` matters: an inline replaced element sits on a text baseline,
+   so the line box adds a few pixels under the image and an exactly square card
+   measured 4px taller than it was wide.
+
+   `position: relative; z-index: 1` lifts the sleeve above the beat lamp behind
+   it: an absolutely positioned box at z-index 0 paints above in-flow content, so
+   an unpositioned image would be washed by its own light instead of lit by it. */
+.float-art-wrap .track-art {
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: inherit;
+  cursor: default;
+}
+
+/* ---------- Top drag surface: move the window from the top edge ----------
+   The whole header band belongs to it: windowed, the header is transparent and
+   inert, so this strip is what makes "grab the top of the window" work at all.
+   The resize grips sit above it (z-index 100) and keep the first few pixels of
+   each edge for resizing, and the window controls are excluded so minimise and
+   close stay clickable. */
+.top-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 110px; /* leave the window controls clickable */
+  height: 52px;
+  z-index: 24;
+}
+
+/* ---------- Fullscreen: the window is a fixed surface ----------
+   A fullscreen overlay must not be movable. The gesture is refused in JS (see
+   syncWindowDrag in ui/app.js), and the strips stop intercepting clicks meant
+   for what is underneath. Window controls stay interactive. */
+body.is-fullscreen .top-drag-strip {
+  display: none;   /* nothing to drag; stop it eating clicks at the top edge */
+}
+
+body.is-fullscreen header#app-header .track-meta {
+  pointer-events: none;
+}
+
+/* ---------- Compact: the floating card shields the lyrics behind it ----------
+   The track-float overlaps the top of the scroller, so clicks meant for the
+   card's art/progress/text could land on a lyric line behind it instead. The
+   card itself already paints its background; give the whole float footprint
+   the clicks, while its own interactive children keep working. */
+body.layout-compact .track-float {
+  pointer-events: auto;
+}
+
+body.layout-compact .track-float .track-text,
+body.layout-compact .track-float #title,
+body.layout-compact .track-float #artist {
+  pointer-events: auto;
+}
+
+/* ---------- Header disappears in compact/split: the top is clean ---------- */
+body.layout-compact #app-header,
+body.layout-split #app-header {
+  background: transparent;
+  border-bottom-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  min-height: 0;
+  height: 56px;
+  pointer-events: none;
+}
+
+body.layout-compact #app-header .window-controls,
+body.layout-split #app-header .window-controls {
+  pointer-events: auto;
+}
+
+body.layout-compact #app-header .track-meta,
+body.layout-split #app-header .track-meta {
+  visibility: hidden;
+}
+
+/* ---------- On-art controls: borderless, seamless, scrim-backed ----------
+   No circles, no borders. The art itself carries the affordance; a single soft
+   top scrim keeps white strokes legible without boxing anything in. */
+.art-controls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  /* Spread across the art instead of a fixed gap: the same row has to sit on a
+     180px card and on a 300px fullscreen sleeve, and a 18px gap overflows the
+     small one. */
+  justify-content: space-evenly;
+  gap: 0;
+  padding: 13px 8px 22px;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity var(--dur-3) var(--ease-fluid), transform var(--dur-3) var(--ease-fluid);
+  pointer-events: none;
+  z-index: 3;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, rgba(8, 8, 10, 0.62), rgba(8, 8, 10, 0.28) 55%, transparent);
+}
+
+.float-art-wrap:hover .art-controls,
+.side-art-wrap:hover .art-controls {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* ---------- Uniform darken on hover ----------
+   The two gradient scrims are a vignette: they protect the top and bottom edges
+   but leave the midtones as bright as the sleeve, so a white cover still beat
+   the glyphs in the middle. This flattens the whole picture by one constant
+   amount instead — the same value over a black or a white cover — and the
+   scrims then layer on top of it for the edges. It sits at z-index 2, under the
+   control layers at z-index 3. */
+.float-art-wrap::after,
+.side-art-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.34);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-fluid);
+}
+
+.float-art-wrap:hover::after,
+.side-art-wrap:hover::after,
+body.art-hover .float-art-wrap::after {
+  opacity: 1;
+}
+
+/* The gated window-mode controls: the exit exists only in fullscreen, the
+   fullscreen/mini pair only while windowed (see syncArtControls). */
+.art-btn.is-hidden {
+  display: none;
+}
+
+.art-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--icon-idle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  border-radius: var(--r-sm);
+  transition: color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+/* Bolder glyphs: these sit on a photograph, and a 1.9px stroke at 17px washed
+   out over a light cover. The stroke weight is set here rather than per-SVG so
+   every on-art icon in the app shares one weight. */
+.art-btn .icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.15;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.7));
+  transition: filter var(--dur-2) var(--ease-fluid);
+}
+
+.art-btn:hover {
+  color: var(--icon-hot);
+  transform: translateY(-1px) scale(1.08);
+}
+
+.art-btn:hover .icon {
+  filter: drop-shadow(0 1px 5px rgba(0, 0, 0, 0.7));
+}
+
+.art-btn:active {
+  transform: scale(0.92);
+}
+
+/* Active toggle (e.g. fullscreen on): solid glyph plus a faint pill so the
+   state is legible without adding a visible border. */
+.art-btn.is-on {
+  color: var(--icon-hot);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.art-btn.is-on .icon {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
+}
+
+/* The danger tint retired with the on-art close button (close lives on the
+   header window controls); the rule is kept out of the HTML-critical path. */
+.art-btn-danger:hover {
+  color: var(--danger-text-hover);
+}
+
+body.is-fullscreen .art-btn {
+  width: 42px;
+  height: 42px;
+}
+
+body.is-fullscreen .art-btn .icon {
+  width: 19px;
+  height: 19px;
+}
+
+/* Float text scale-up in fullscreen */
+body.is-fullscreen .track-float #title {
+  font-size: 30px;
+}
+
+body.is-fullscreen .track-float #artist {
+  font-size: 19px;
+}
+
+/* =========================================================
+   Mini player — the windowed alternative to fullscreen
+   The same window at a small size, carrying the lyrics and nothing else. Every
+   surface that only makes sense on a big window retires (the card, the header,
+   the split panel, the sync rail) and the lyrics take the whole window; the
+   window is pinned on top by the host so it floats over the work it is
+   describing. Its bar is hidden until the pointer reaches the top of the window,
+   which is what keeps the promise of "lyrics and nothing else" — and the drag
+   strip inside it stays live while the buttons are away, so the window can still
+   be moved. Sizing is enforced by WindowApi (320x380 .. 900x1200).
+   ========================================================= */
+
+body.mini .top-drag-strip,
+body.mini header#app-header,
+body.mini .track-float,
+body.mini .track-side-panel,
+body.mini .latency-rail {
+  display: none;
+}
+
+.mini-bar {
+  display: none;
+}
+
+body.mini .mini-bar {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 34px;
+  /* The bar itself never eats a click: only its drag strip and (while revealed)
+     its buttons are interactive, so lyrics under it stay reachable. */
+  pointer-events: none;
+  /* Below the settings sheet (z-index 60) so an open sheet is never covered,
+     above the lyrics (10). The grips that would fight it for the same strip are
+     hidden in mini mode instead (see below). */
+  z-index: 45;
+}
+
+/* The scrim fades in with the buttons: a permanent dark band at the top of a
+   lyrics-only window would be its own kind of chrome. */
+.mini-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(9, 9, 11, 0.82), rgba(9, 9, 11, 0));
+  opacity: 0;
+  transition: opacity var(--dur-3) var(--ease-fluid);
+}
+
+body.mini.bar-revealed .mini-bar::before {
+  opacity: 1;
+}
+
+/* The mini bar owns the top edge, so the grips that would resize from that same
+   strip stand down; the sides and bottom still resize. */
+body.mini .resize-n,
+body.mini .resize-nw,
+body.mini .resize-ne {
+  display: none;
+}
+
+/* The drag handle is a strip rather than the bar itself: a mousedown starts a
+   window move inside a marked surface, so a bar that carried the marker would
+   move the window instead of clicking its own buttons. It also stays put while
+   the buttons slide away, so the window is always movable. */
+.mini-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;   /* clear of the lyrics' own 46px top gutter */
+  pointer-events: auto;
+}
+
+/* The buttons slide in from above when the pointer reaches the top band. */
+.mini-buttons {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(-140%);
+  transition: opacity var(--dur-3) var(--ease-fluid), transform var(--dur-3) var(--ease-fluid);
+}
+
+body.mini.bar-revealed .mini-buttons {
+  opacity: 1;
+  transform: none;
+}
+
+.mini-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--icon-idle);
+  cursor: pointer;
+  transition: color var(--dur-2) var(--ease-fluid), background var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+.mini-btn .icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.1;
+}
+
+.mini-btn:hover {
+  color: var(--icon-hot);
+  background: var(--hover-surface);
+}
+
+.mini-btn:active {
+  transform: scale(0.92);
+}
+
+.mini-btn:focus {
+  outline: none;
+}
+
+.mini-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mini-btn-danger:hover {
+  color: var(--danger-text-hover);
+  background: var(--danger-hover);
+}
+
+/* Tighter gutter, and the mask's fade shortened to match the smaller top gap so
+   the first line is not half-erased by it. */
+body.mini #lyrics-container {
+  --lyrics-fade-top: 48px;
+  padding: 46px 18px 90px 20px;
+}
+
+.reduce-motion .float-art-wrap::after,
+.reduce-motion .side-art-wrap::after,
+.reduce-motion .mini-bar::before,
+.reduce-motion .mini-buttons {
+  transition: none;
+}
+
+.reduce-motion .art-thumb {
+  transition: none;
+}
+
+
+
