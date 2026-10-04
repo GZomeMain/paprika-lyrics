@@ -9,7 +9,7 @@
 1. **Drag regions are implemented in JavaScript, not by `-webkit-app-region`.** pywebview injects a `document.body` mousedown listener (`webview/js/customize.js`) that walks up from `event.target` looking for an element that literally *is* one of the `pywebview-drag-region` elements; on a match it installs a mousemove loop that calls `pywebviewMoveWindow`. CSS `-webkit-app-region: no-drag` therefore never stopped a drag, which is why fullscreen (bug 1) was still movable. Disabling dragging is a DOM question: strip the marker class from the regions while fullscreen, restore it when windowed. The existing CSS stays as belt-and-braces (WebView2 may also honour app-region on some builds).
 2. **pywebview already implements anchored resizing.** `Window.resize(width, height, fix_point)` takes a `FixPoint` and the winforms backend applies the whole change in a single `SetWindowPos` (`x = x + Width - newWidth` for `EAST`, same for `SOUTH`). Our `initResizeHandles` instead dispatched `move_window` + `resize_window` as two separate async bridge calls, with the move only sent when the size had changed by ≥4 px — and `resize_window` called `window.resize(w, h)` with the default `NORTH|WEST`, i.e. always growing from the top-left. Fix: pass the anchor edge down and let pywebview do it atomically. `move_window` then has no callers and is deleted (API + JS + docs), per this repo's no-dead-code convention.
 
-**Tech Stack:** Python 3.13 stdlib (`unittest`, no pytest), pywebview/Edge WebView2, vanilla JS + CSS in `ui/`. `core/native_window.py` stays pure/injectable; `WindowApi` in `spicy_app.py` stays a thin adapter.
+**Tech Stack:** Python 3.13 stdlib (`unittest`, no pytest), pywebview/Edge WebView2, vanilla JS + CSS in `ui/`. `core/native_window.py` stays pure/injectable; `WindowApi` in `paprika_app.py` stays a thin adapter.
 
 ## Global Constraints
 
@@ -26,7 +26,7 @@
 - Modify: `ui/index.html` — art-controls rows (compact + split): add `art-btn-fs`, `art-btn-exit`, `art-btn-pip`/`side-btn-*`; add the mini bar markup.
 - Modify: `ui/style.css` — fullscreen drag/handle neutralisation, art darken layer, control row reveal rules, progress dot thumb, lyric scrollbar, settings sheet geometry, mini-mode layout.
 - Modify: `ui/app.js` — drag-region marker sync, click shield, mini mode + persistence, art-control sync for the new buttons, anchored resize, progress dot drive.
-- Modify: `spicy_app.py` — `resize_window(width, height, anchor)`, `set_mini_mode(enabled)`, mini-aware clamping/persistence, delete `move_window`.
+- Modify: `paprika_app.py` — `resize_window(width, height, anchor)`, `set_mini_mode(enabled)`, mini-aware clamping/persistence, delete `move_window`.
 - Modify: `storage.py` — mini-window geometry helpers.
 - Modify: `tests/test_storage.py` (or `test_native_window.py`) — coverage for any new pure logic.
 - Modify: `tools/ui-preview-regression.js` — new invariants (4 art slots, drag marker count, sheet geometry).
@@ -99,7 +99,7 @@ Steps:
 
 ### Task 5: Lyrics-only mini player replaces the windowed exit slot (improvement 5)
 
-**Files:** `ui/index.html`, `ui/style.css`, `ui/app.js`, `spicy_app.py`, `storage.py`, `tests/test_storage.py`
+**Files:** `ui/index.html`, `ui/style.css`, `ui/app.js`, `paprika_app.py`, `storage.py`, `tests/test_storage.py`
 
 **Interfaces:**
 - Python: `WindowApi.set_mini_mode(enabled: bool) -> bool`; mini clamps `MINI_MIN = (320, 380)`, `MINI_MAX = (900, 1200)`, default `MINI_SIZE = (460, 560)`; `resize_window`/`save_window_size` clamp against the mini range while mini is on; `_record_window_geometry` keeps the pre-mini geometry when closing in mini.
@@ -118,7 +118,7 @@ Steps:
 
 ### Task 6: Resize anchors at the edge being dragged (bug 5)
 
-**Files:** `ui/app.js`, `spicy_app.py`, `ui/index.html` (nothing), `core/native_window.py` (mapping helper)
+**Files:** `ui/app.js`, `paprika_app.py`, `ui/index.html` (nothing), `core/native_window.py` (mapping helper)
 
 **Interfaces:**
 - Implemented: `WindowApi.resize_window(width: int, height: int, anchor: str = 'e')` where `anchor` names the *fixed* point: one of `nw` (no shift), `n` (south edge fixed), `w` (east edge fixed), `ne`, `sw`, `se`, plus the two-edge combos the handles need.

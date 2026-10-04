@@ -25,7 +25,7 @@ from core.vlc_meta import (
 
 # One shared session; VLC's interface is single-threaded per client.
 _SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "SpicyLyricsOverlay/1.0"})
+_SESSION.headers.update({"User-Agent": "PaprikaLyrics/1.0"})
 
 
 class VlcSource:

@@ -14,6 +14,7 @@ class CacheManager:
     MAX_LYRICS_ENTRIES = 250      # Rich syllable timing trees (~1-2MB total)
     MAX_TRACK_ENTRIES = 800       # Spotify ID string mappings
     MAX_LATENCY_ENTRIES = 800     # Track latency offsets
+    MAX_TTML_BINDINGS = 500       # Track -> local TTML file choices
 
     def __init__(self, filepath: Path = CACHE_FILE):
         self.filepath = filepath
@@ -24,7 +25,13 @@ class CacheManager:
         self._data = self._load()
 
     def _load(self) -> dict:
-        default_structure = {"tracks": {}, "lyrics": {}, "latency_ms": {}, "window": {}}
+        default_structure = {
+            "tracks": {}, "lyrics": {}, "latency_ms": {}, "window": {},
+            # Local TTML library: the index of the files on disk and the user's
+            # per-track choice of file. Kept apart from `lyrics` because a local
+            # file is authoritative and re-read from disk, never cached.
+            "ttml": {"files": {}, "bindings": {}},
+        }
         if not self.filepath.exists():
             return default_structure
         try:
@@ -65,6 +72,29 @@ class CacheManager:
             # Drop anything that aged out while the app was running.
             self._prune_expired_lyrics(self._data)
             self._save_atomic()
+
+    def flush_sync(self) -> bool:
+        """
+        Flush for process shutdown, and the one call that cannot be debounced.
+
+        Every write in this class is scheduled through a `threading.Timer` so a
+        burst of updates lands as one disk write. That is right while the app is
+        running and wrong at the end of it: a timer that has not fired yet is
+        lost when the process exits, and the state most likely to be pending is
+        the state the user just changed by hand — a local TTML binding, or the
+        "online lyrics for this song" marker that stops an auto-match from taking
+        the song back. So this cancels the pending timer and writes NOW.
+
+        Returns whether the write succeeded. It never raises: it is called from
+        the window's close handler, where an exception would replace a clean exit
+        with a crash.
+        """
+        try:
+            self.flush()
+            return True
+        except Exception as exc:
+            print(f"⚠️ [Storage] Final cache flush failed: {exc}")
+            return False
 
     # =========================================================================
     # Track ID Resolution Cache (Bounded LRU)
@@ -201,6 +231,95 @@ class CacheManager:
 
             latencies[track_key] = clamped
             self._schedule_save(delay=0.4)
+
+    # =========================================================================
+    # Local TTML Library (index + per-track bindings)
+    # =========================================================================
+    def _ttml(self) -> dict:
+        section = self._data.get("ttml")
+        if not isinstance(section, dict):
+            section = {"files": {}, "bindings": {}}
+            self._data["ttml"] = section
+        section.setdefault("files", {})
+        section.setdefault("bindings", {})
+        return section
+
+    def get_ttml_files(self) -> dict:
+        """Copy of the library index (entries are copied too, so callers may
+        annotate them for the UI without touching persisted state)."""
+        with self._lock:
+            files = self._ttml().get("files") or {}
+            return {k: dict(v) for k, v in files.items() if isinstance(v, dict)}
+
+    def set_ttml_files(self, files: dict):
+        """Replaces the whole index. The library owns it and always writes the
+        complete, reconciled set — a merge would let deleted files linger."""
+        with self._lock:
+            self._ttml()["files"] = {
+                k: dict(v) for k, v in (files or {}).items() if isinstance(v, dict)
+            }
+            self._schedule_save(delay=0.6)
+
+    def drop_ttml_file(self, key: str) -> bool:
+        with self._lock:
+            files = self._ttml().get("files") or {}
+            if key in files:
+                del files[key]
+                self._schedule_save(delay=0.4)
+                return True
+            return False
+
+    def ttml_bindings(self) -> dict:
+        with self._lock:
+            bindings = self._ttml().get("bindings") or {}
+            return {
+                k: (dict(v) if isinstance(v, dict) else v)
+                for k, v in bindings.items()
+            }
+
+    def set_ttml_binding(self, track_key: str, file: str, enabled: bool = True):
+        """
+        Records which local TTML file a track uses.
+
+        `enabled=False` is a real state, not the absence of one: it is how a
+        user says "online lyrics for this song" and keeps the auto-match from
+        quietly taking the song back on the next launch.
+        """
+        with self._lock:
+            bindings = self._ttml()["bindings"]
+            if track_key in bindings:
+                del bindings[track_key]
+            elif len(bindings) >= self.MAX_TTML_BINDINGS:
+                oldest = next(iter(bindings))
+                del bindings[oldest]
+            bindings[track_key] = {"file": str(file or ""), "enabled": bool(enabled)}
+            self._schedule_save(delay=0.4)
+
+    def drop_ttml_binding(self, track_key: str) -> bool:
+        with self._lock:
+            bindings = self._ttml().get("bindings") or {}
+            if track_key in bindings:
+                del bindings[track_key]
+                self._schedule_save(delay=0.4)
+                return True
+            return False
+
+    def prune_ttml_bindings(self, valid_files) -> int:
+        """Drops bindings whose file is gone. Marker-only (disabled) entries are
+        kept: they name no file, and forgetting them would restore a match the
+        user explicitly turned off."""
+        valid = {str(f) for f in (valid_files or ())}
+        with self._lock:
+            bindings = self._ttml().get("bindings") or {}
+            stale = [
+                key for key, value in bindings.items()
+                if isinstance(value, dict) and value.get("file") and value["file"] not in valid
+            ]
+            for key in stale:
+                del bindings[key]
+            if stale:
+                self._schedule_save(delay=0.6)
+            return len(stale)
 
     # =========================================================================
     # Window Geometry Persistence

@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
+import config
 from core.lyrics import (
     _build_diagnostics,
     _count_syllables,
@@ -93,6 +94,19 @@ class DiagnosticsTest(unittest.TestCase):
         self.assertFalse(diag["track_id"])
         # The UI also surfaces whether the API key was present at all.
         self.assertIn("api_key", diag)
+
+    def test_report_names_the_build_and_the_payload_format(self):
+        """
+        A resolve report is what a user pastes into a bug report, so it has to
+        name the build it came from — and the payload format separately, because
+        that one versions the cache and moves on its own schedule. Both are read
+        from config.py rather than restated as literals here, so this test cannot
+        drift away from the source of truth it is checking.
+        """
+        diag = _build_diagnostics("Spicy (Apple Music)", "hit", [{"words": []}], 0)
+        self.assertEqual(diag["app_version"], config.APP_VERSION)
+        self.assertEqual(diag["parser_version"], config.PARSER_VERSION)
+        self.assertTrue(diag["app_version"], "the app version must not be blank")
 
 
 class PipelineLatencyTest(unittest.TestCase):
@@ -248,6 +262,140 @@ class AlbumAwareLookupTest(unittest.TestCase):
             (L.CACHE.get_lyrics, L.fetch_lrclib, L.fetch_spicy_with_id) = orig
 
         self.assertEqual(seen["album"], "Album A")
+
+
+class LocalTtmlPipelineTest(unittest.TestCase):
+    """
+    A local .ttml file outranks every online source AND the disk cache.
+
+    It is the one lyric source the user put there on purpose, so the pipeline
+    must reach it before it spends a network round trip — and must not read or
+    write the lyrics cache on the way, because the file itself stays the source
+    of truth and can be edited between plays.
+    """
+
+    LOCAL_LINES = [{
+        "startTimeMs": 1000, "endTimeMs": 3000, "text": "Gold jewelry",
+        "isBackground": False,
+        "words": [{"text": "Gold", "startTimeMs": 1000, "endTimeMs": 2000,
+                   "syllables": [{"text": "Gold", "startTimeMs": 1000,
+                                  "endTimeMs": 2000, "isExtended": False}]}],
+    }]
+
+    def setUp(self):
+        import core.lyrics as L
+        self.L = L
+        self.originals = {
+            "library": L.TTML_LIBRARY,
+            "get_lyrics": L.CACHE.get_lyrics,
+            "set_lyrics": L.CACHE.set_lyrics,
+            "fetch_lrclib": L.fetch_lrclib,
+            "fetch_spicy": L.fetch_spicy_with_id,
+            "resolve": L.resolve_spotify_track_id,
+        }
+        self.network_calls = []
+
+        def _network_used(*a, **k):
+            self.network_calls.append(a)
+            return []
+
+        self.network_calls.clear()
+        L.fetch_lrclib = _network_used
+        L.resolve_spotify_track_id = lambda *a, **k: ""
+        L.fetch_spicy_with_id = lambda *a, **k: ([], None)
+
+    def tearDown(self):
+        L = self.L
+        L.TTML_LIBRARY = self.originals["library"]
+        L.CACHE.get_lyrics = self.originals["get_lyrics"]
+        L.CACHE.set_lyrics = self.originals["set_lyrics"]
+        L.fetch_lrclib = self.originals["fetch_lrclib"]
+        L.fetch_spicy_with_id = self.originals["fetch_spicy"]
+        L.resolve_spotify_track_id = self.originals["resolve"]
+
+    def _library(self, result, calls=None):
+        class FakeLibrary:
+            directory = "ttml"
+
+            def resolve(self, title, artist, album=None, duration_ms=None):
+                if calls is not None:
+                    calls.append((title, artist, album, duration_ms))
+                return result
+
+        self.L.TTML_LIBRARY = FakeLibrary()
+
+    def test_a_bound_file_is_returned_with_its_own_diagnostics(self):
+        calls = []
+        self._library({"kind": "bound", "file": "ode.ttml", "name": "ode.ttml",
+                       "lines": self.LOCAL_LINES}, calls)
+        self.L.CACHE.get_lyrics = lambda *a, **k: self.fail("cache read for a local file")
+        self.L.CACHE.set_lyrics = lambda *a, **k: self.fail("cache write for a local file")
+
+        lines, source, track_id, diag = self.L.fetch_lyrics("Ode To The Mets", "The Strokes", 200_000)
+
+        self.assertEqual(lines, self.LOCAL_LINES)
+        self.assertEqual(source, "Local TTML (ode.ttml)")
+        self.assertIsNone(track_id)
+        self.assertEqual(diag["cache"], "local")
+        self.assertEqual(diag["source"], "Local TTML (ode.ttml)")
+        self.assertEqual(diag["ttml"], "ode.ttml")
+        self.assertEqual(diag["ttml_match"], "bound")
+        self.assertEqual(diag["timing"], "Syllable")
+        self.assertEqual(self.network_calls, [])
+        # The library is asked about the CLEANED metadata the rest of the
+        # pipeline searches with, not the raw broadcast title.
+        self.assertEqual(calls, [("Ode To The Mets", "The Strokes", None, 200_000)])
+
+    def test_a_local_file_beats_an_already_cached_payload(self):
+        self._library({"kind": "match", "file": "ode.ttml", "name": "ode.ttml",
+                       "lines": self.LOCAL_LINES})
+        self.L.CACHE.get_lyrics = lambda *a, **k: {
+            "source": "Spicy (Apple Music)",
+            "lines": [{"text": "stale", "startTimeMs": 1, "endTimeMs": 2, "words": []}],
+        }
+        self.L.CACHE.set_lyrics = lambda *a, **k: None
+
+        lines, source, _tid, diag = self.L.fetch_lyrics("Ode To The Mets", "The Strokes", 200_000)
+
+        self.assertEqual(lines, self.LOCAL_LINES)
+        self.assertEqual(diag["ttml_match"], "match")
+
+    def test_without_a_local_file_the_pipeline_runs_as_before(self):
+        self._library(None)
+        self.L.CACHE.get_lyrics = lambda *a, **k: None
+        self.L.CACHE.set_lyrics = lambda *a, **k: None
+
+        lines, source, _tid, diag = self.L.fetch_lyrics("Ode To The Mets", "The Strokes", 200_000)
+
+        self.assertEqual(source, "None")
+        self.assertEqual(diag["cache"], "miss")
+        self.assertEqual(diag["ttml"], "")
+        self.assertNotEqual(self.network_calls, [])
+
+    def test_a_broken_library_never_costs_the_user_their_lyrics(self):
+        class Exploding:
+            directory = "ttml"
+
+            def resolve(self, *a, **k):
+                raise OSError("library on a disconnected drive")
+
+        self.L.TTML_LIBRARY = Exploding()
+        self.L.CACHE.get_lyrics = lambda *a, **k: None
+        self.L.CACHE.set_lyrics = lambda *a, **k: None
+
+        lines, source, _tid, diag = self.L.fetch_lyrics("Ode To The Mets", "The Strokes", 200_000)
+
+        self.assertEqual(lines, [])
+        self.assertEqual(diag["cache"], "miss")
+
+    def test_an_unusable_local_payload_is_ignored(self):
+        self._library({"kind": "bound", "file": "empty.ttml", "name": "empty.ttml",
+                       "lines": []})
+        self.L.CACHE.get_lyrics = lambda *a, **k: None
+        self.L.CACHE.set_lyrics = lambda *a, **k: None
+        _lines, source, _tid, diag = self.L.fetch_lyrics("Song", "Artist", 200_000)
+        self.assertEqual(diag["cache"], "miss")
+        self.assertNotIn("Local TTML", source)
 
 
 class MetadataSourceDiagnosticsTest(unittest.TestCase):

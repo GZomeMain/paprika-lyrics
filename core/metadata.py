@@ -72,6 +72,29 @@ def split_track_number_prefix(text: str) -> tuple[int | None, str]:
     return int(m.group(1)), m.group(2).strip()
 
 
+def track_cache_key(title: str, artist: str, duration_ms: float | None = None,
+                    album: str | None = None) -> str:
+    """
+    The stable identity of one recording, shared by every store that keys
+    something to a track: the lyrics cache, the per-track sync offset, and the
+    local-TTML bindings.
+
+    A coarse duration bucket and (when present) the album keep two different
+    recordings that share a title/artist from colliding — remasters, live
+    versions, same-name singles. Omitting the album keeps the legacy key shape,
+    so entries written before it existed remain reachable.
+    """
+    # str() because these arrive over the JS bridge, where a numeric album tag
+    # (or a missing one) is entirely possible.
+    base = f"{str(title or '').strip()}___{str(artist or '').strip()}".lower()
+    album = str(album or "").strip()
+    if album:
+        base = f"{base}___{album.lower()}"
+    if duration_ms and duration_ms > 0:
+        return f"{base}___{int(round(duration_ms / 1000.0))}s"
+    return base
+
+
 def normalize_weak_title(title: str, artist: str) -> tuple[str, str, str]:
     """
     Repairs weak local-file metadata (players that broadcast filename stems).

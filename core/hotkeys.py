@@ -35,26 +35,35 @@ def _vk_for_char(ch: str) -> int | None:
 HOTKEY_DEC_ID = 1
 HOTKEY_INC_ID = 2
 HOTKEY_CLICKTHROUGH_ID = 3
+HOTKEY_PEEK_ID = 4
 
 MOD_SHIFT = 0x0004
 VK_T = 0x54  # 'T' is on the same physical key on essentially every layout
+VK_M = 0x4D  # 'M', same reasoning
 
 class GlobalHotkeyManager:
     """
-    Listens for system-wide shortcuts (Ctrl + [ , Ctrl + ] , Ctrl + Shift + T) using
-    Windows user32 APIs. Runs on an independent daemon thread without blocking the
-    GUI or event loops.
+    Listens for system-wide shortcuts (Ctrl + [ , Ctrl + ] , Ctrl + Shift + T and
+    Ctrl + Shift + M) using Windows user32 APIs. Runs on an independent daemon
+    thread without blocking the GUI or event loops.
 
     Ctrl + Shift + T is the escape hatch for click-through mode: once the window
     ignores mouse input, a global shortcut is the only way back out.
+    Ctrl + Shift + M is the peek: it hands the mouse back to a click-through
+    overlay for a few seconds, which is the only way to move a window that is
+    deliberately ignoring the pointer.
     """
 
-    def __init__(self, on_adjust_callback, on_toggle_click_through=None):
+    def __init__(self, on_adjust_callback, on_toggle_click_through=None, on_toggle_peek=None):
         self.on_adjust_callback = on_adjust_callback
         self.on_toggle_click_through = on_toggle_click_through
+        self.on_toggle_peek = on_toggle_peek
         # Set once the OS confirms the binding. Click-through is refused while
         # this is False, so the window can never become mouse-proof with no exit.
         self.click_through_bound = False
+        # Reported to the UI so the settings hint can say when the peek is taken
+        # by another app instead of leaving the shortcut a silent no-op.
+        self.peek_bound = False
         # Whether Ctrl+[ / Ctrl+] bound globally. The UI reads this (via the
         # bridge) to decide whether it must also handle those keys itself:
         # RegisterHotKey does not consume the keystroke, so handling them in
@@ -97,7 +106,11 @@ class GlobalHotkeyManager:
         ok3 = user32.RegisterHotKey(
             None, HOTKEY_CLICKTHROUGH_ID, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_T
         )
+        ok4 = user32.RegisterHotKey(
+            None, HOTKEY_PEEK_ID, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_M
+        )
         self.click_through_bound = bool(ok3)
+        self.peek_bound = bool(ok4)
         self.sync_bound = bool(ok1 and ok2)
         self._ready.set()
 
@@ -106,6 +119,9 @@ class GlobalHotkeyManager:
         if not ok3:
             print("ℹ️ [Hotkeys] Ctrl+Shift+T is unavailable, so click-through mode stays disabled "
                   "(it would leave no way to hand the mouse back).")
+        if not ok4:
+            print("ℹ️ [Hotkeys] Ctrl+Shift+M is unavailable, so a click-through overlay cannot be "
+                  "peeked at; leave click-through with Ctrl+Shift+T to move the window.")
 
         msg = wintypes.MSG()
         while not self._stop_event.is_set():
@@ -121,7 +137,10 @@ class GlobalHotkeyManager:
                     self.on_adjust_callback(50)
                 elif msg.wParam == HOTKEY_CLICKTHROUGH_ID and self.on_toggle_click_through:
                     self.on_toggle_click_through()
+                elif msg.wParam == HOTKEY_PEEK_ID and self.on_toggle_peek:
+                    self.on_toggle_peek()
 
         user32.UnregisterHotKey(None, HOTKEY_DEC_ID)
         user32.UnregisterHotKey(None, HOTKEY_INC_ID)
         user32.UnregisterHotKey(None, HOTKEY_CLICKTHROUGH_ID)
+        user32.UnregisterHotKey(None, HOTKEY_PEEK_ID)
