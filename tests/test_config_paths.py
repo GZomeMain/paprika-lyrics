@@ -209,7 +209,13 @@ class CredentialGuardTests(unittest.TestCase):
     def test_scratch_dirs_are_ignored(self):
         self.test_the_repo_is_available_to_check()
         for name in self.SCRATCH_DIRS:
-            proc = self._git("check-ignore", "-q", name)
+            # The trailing slash is load-bearing: the rules are directory-only,
+            # and on a fresh checkout neither directory exists — git can only
+            # tell a path is a directory from the query itself. Without it a
+            # correct .gitignore reads as "not covered" exactly where CI runs
+            # this guard (verified: `check-ignore -q dir` fails for a missing
+            # dir-only match, `dir/` succeeds in every case).
+            proc = self._git("check-ignore", "-q", name + "/")
             self.assertEqual(proc.returncode, 0,
                              f"{name}/ is not covered by .gitignore")
 

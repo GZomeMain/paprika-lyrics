@@ -3,6 +3,18 @@ import sys
 import threading
 import time
 
+# A redirected stdout on Windows keeps the ANSI codepage (cp1252 on most
+# installs), where every emoji this app prints raises UnicodeEncodeError and
+# takes the process down mid-log. The console itself handles UTF-8 fine, so pin
+# both streams to UTF-8 with replacement as the first act. Guarded: a windowed
+# (pythonw / frozen) process has stdout = None, and a closed stream raises.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 DEPENDENCY_HINT = (
     "Missing a required dependency. Install everything with:\n"
     "    pip install -r requirements.txt"
