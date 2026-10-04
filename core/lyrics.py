@@ -1,9 +1,11 @@
 import concurrent.futures
-from config import SPICY_API_KEY, BASE_URL, PARSER_VERSION, debug_log, warn_missing_api_key
+from config import (SPICY_API_KEY, BASE_URL, APP_VERSION, PARSER_VERSION,
+                    debug_log, warn_missing_api_key)
 from storage import CACHE
-from core.metadata import extract_clean_metadata
+from core.metadata import extract_clean_metadata, track_cache_key
 from core.resolver import http_get, resolve_spotify_track_id
-from core.parser import parse_spicy_body, parse_lrc
+from core.parser import count_syllables, parse_spicy_body, parse_lrc
+from core.ttml_library import TTML_LIBRARY
 
 ASYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
@@ -25,13 +27,12 @@ def _lyrics_cache_key(title: str, artist: str, duration_ms: float | None = None,
     so two different tracks sharing a title/artist (remasters, live vs studio,
     same-name singles) never collide. Omitting the album keeps the legacy key
     shape so existing cache entries remain reachable.
+
+    The single implementation lives in `core.metadata`: the same identity keys
+    the local-TTML bindings, and two sources of truth for "which recording is
+    this" would drift apart exactly where it matters.
     """
-    base = f"{title}___{artist}".lower()
-    if album:
-        base = f"{base}___{album.lower()}"
-    if duration_ms and duration_ms > 0:
-        return f"{base}___{int(round(duration_ms / 1000.0))}s"
-    return base
+    return track_cache_key(title, artist, duration_ms, album)
 
 
 def fetch_lrclib(title: str, artist: str, duration_ms: float | None = None,
@@ -172,16 +173,13 @@ def _lines_look_corrupt(lines: list[dict] | None) -> bool:
 
 def _count_syllables(lines: list[dict]) -> int:
     """Counts timed syllables across a payload; 0 means line-level timing only."""
-    total = 0
-    for line in lines or []:
-        for word in (line.get("words") or []):
-            total += len(word.get("syllables") or [])
-    return total
+    return count_syllables(lines)
 
 
 def _build_diagnostics(source: str, cache: str, lines: list[dict],
                        syllables: int | None = None, track_id: str | None = None,
-                       album: str = "", metadata_source: str = "smtc") -> dict:
+                       album: str = "", metadata_source: str = "smtc",
+                       ttml: str = "", ttml_match: str = "") -> dict:
     """
     Small, user-facing report of how this track's lyrics were obtained. Surfaced
     in the UI so a fallback to line-synced lyrics is explainable without stdout.
@@ -204,9 +202,31 @@ def _build_diagnostics(source: str, cache: str, lines: list[dict],
         "track_id": track_id or "",
         "album": album,
         "metadata": metadata_source,
+        # The build that produced this report, next to the version of the payload
+        # format it speaks. A user pasting their resolve report has named both.
+        "app_version": APP_VERSION,
         "parser_version": PARSER_VERSION,
         "api_key": bool(SPICY_API_KEY),
+        # Which local file served this track, and whether the user bound it or
+        # its own metadata matched. Empty when no local file was involved.
+        "ttml": ttml,
+        "ttml_match": ttml_match,
     }
+
+
+def _local_ttml(title: str, artist: str, duration_ms: float | None, album: str | None):
+    """
+    The local TTML override for a track, if the library has one.
+
+    Isolated (and defensive) because it sits in front of every other lyric
+    source: a broken library folder must cost the user nothing more than the
+    fallback to the online pipeline.
+    """
+    try:
+        return TTML_LIBRARY.resolve(title, artist, album, duration_ms)
+    except Exception as exc:
+        debug_log("Local TTML lookup failed:", exc)
+        return None
 
 
 def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
@@ -214,6 +234,26 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
                  metadata_source: str = "smtc") -> tuple[list[dict], str, str | None, dict]:
     c_title, primary_artist, _ = extract_clean_metadata(title, artist)
     lyrics_cache_key = _lyrics_cache_key(c_title, primary_artist, duration_ms, album)
+
+    # A local file wins over BOTH the network and the disk cache. It is a
+    # deliberate choice the user made about this song, so re-parsing it costs a
+    # few milliseconds and returning anything else would ignore them. It is also
+    # never written into the lyrics cache: the file stays the source of truth,
+    # editable between plays.
+    local = _local_ttml(c_title, primary_artist, duration_ms, album)
+    if local and local.get("lines"):
+        # `lines` is checked, not assumed: a bound file that has since gone
+        # empty or unreadable must fall through to the online pipeline rather
+        # than blank the lyric view.
+        lines = local["lines"]
+        syl = _count_syllables(lines)
+        source = f"Local TTML ({local['name']})"
+        print(f"📁 [Local TTML] '{c_title}' <- {local['name']} "
+              f"({len(lines)} lines, {syl} syllables, {local['kind']})")
+        return lines, source, None, _build_diagnostics(
+            source, "local", lines, syl, None, album=album or "",
+            metadata_source=metadata_source,
+            ttml=local["file"], ttml_match=local["kind"])
 
     cached_payload = CACHE.get_lyrics(lyrics_cache_key, PARSER_VERSION)
     if cached_payload and _lines_look_corrupt(cached_payload.get("lines")):

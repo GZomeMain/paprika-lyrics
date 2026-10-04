@@ -6,7 +6,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import config
 import storage
+from config import default_latency_for
 
 
 class CacheManagerTest(unittest.TestCase):
@@ -145,6 +147,193 @@ class CacheManagerTest(unittest.TestCase):
         self.assertEqual(reloaded._data["lyrics"], {})
         self.assertEqual(reloaded._data["tracks"], {})
         reloaded.flush()
+
+
+class LatencyDefaultTest(unittest.TestCase):
+    """A fresh fetch starts wider than a cached one, and a tuned value wins."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.path = Path(self.tmp_dir) / "cache.json"
+        self.store = storage.CacheManager(filepath=self.path)
+
+    def tearDown(self):
+        try:
+            self.store.flush()
+        except Exception:
+            pass
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_cache_state_picks_the_starting_offset(self):
+        self.assertEqual(default_latency_for("hit"), config.DEFAULT_LATENCY_MS)
+        self.assertEqual(default_latency_for("miss"), config.UNCACHED_LATENCY_MS)
+        # Unknown / absent diagnostics must not silently land on the small value.
+        self.assertEqual(default_latency_for(None), config.UNCACHED_LATENCY_MS)
+        self.assertEqual(config.UNCACHED_LATENCY_MS, 1500)
+
+    def test_a_local_ttml_file_opens_at_the_tuned_baseline(self):
+        # Nothing was fetched, so there is no network latency to compensate for.
+        self.assertEqual(default_latency_for("local"), config.DEFAULT_LATENCY_MS)
+
+    def test_a_tuned_offset_survives_the_new_default(self):
+        self.store.set_latency("track", 250)
+        self.assertEqual(self.store.get_latency("track", default_latency_for("miss")), 250)
+        self.assertEqual(self.store.get_latency("other", default_latency_for("miss")), 1500)
+
+
+class TtmlStoreTest(unittest.TestCase):
+    """The local-TTML index and per-track bindings, which are user choices and
+    must survive a restart exactly as made."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.path = Path(self.tmp_dir) / "cache.json"
+        self.store = storage.CacheManager(filepath=self.path)
+
+    def tearDown(self):
+        try:
+            self.store.flush()
+        except Exception:
+            pass
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_index_roundtrips(self):
+        self.store.set_ttml_files({"a.ttml": {"title": "A", "line_count": 4}})
+        self.store.flush()
+        reloaded = storage.CacheManager(filepath=self.path)
+        self.assertEqual(reloaded.get_ttml_files()["a.ttml"]["title"], "A")
+
+    def test_index_reads_are_copies(self):
+        # Callers annotate entries for the UI; that must not reach the disk.
+        self.store.set_ttml_files({"a.ttml": {"title": "A"}})
+        files = self.store.get_ttml_files()
+        files["a.ttml"]["state"] = "bound"
+        self.assertNotIn("state", self.store.get_ttml_files()["a.ttml"])
+
+    def test_replacing_the_index_forgets_removed_files(self):
+        self.store.set_ttml_files({"a.ttml": {"title": "A"}, "b.ttml": {"title": "B"}})
+        self.store.set_ttml_files({"b.ttml": {"title": "B"}})
+        self.assertEqual(list(self.store.get_ttml_files()), ["b.ttml"])
+
+    def test_binding_keeps_its_enabled_flag(self):
+        self.store.set_ttml_binding("song___artist", "a.ttml", enabled=False)
+        self.assertEqual(self.store.ttml_bindings()["song___artist"],
+                         {"file": "a.ttml", "enabled": False})
+
+    def test_bindings_roundtrip_through_disk(self):
+        self.store.set_ttml_binding("song___artist", "a.ttml", enabled=False)
+        self.store.flush()
+        reloaded = storage.CacheManager(filepath=self.path)
+        self.assertEqual(reloaded.ttml_bindings()["song___artist"]["enabled"], False)
+
+    def test_prune_drops_bindings_to_missing_files_but_keeps_markers(self):
+        self.store.set_ttml_binding("gone___artist", "gone.ttml")
+        self.store.set_ttml_binding("off___artist", "", enabled=False)
+        self.store.set_ttml_binding("kept___artist", "kept.ttml")
+
+        removed = self.store.prune_ttml_bindings({"kept.ttml"})
+
+        self.assertEqual(removed, 1)
+        bindings = self.store.ttml_bindings()
+        self.assertNotIn("gone___artist", bindings)
+        self.assertIn("kept___artist", bindings)
+        # The "no local lyrics here" marker names no file: forgetting it would
+        # let the auto-match quietly take the song back.
+        self.assertIn("off___artist", bindings)
+
+    def test_binding_map_is_bounded(self):
+        self.store.MAX_TTML_BINDINGS = 3
+        for i in range(5):
+            self.store.set_ttml_binding(f"k{i}", "a.ttml")
+        self.assertEqual(len(self.store.ttml_bindings()), 3)
+        self.assertNotIn("k0", self.store.ttml_bindings())
+
+    def test_dropping_a_file_leaves_bindings_alone(self):
+        # The library prunes bindings itself; a naked index drop must not take
+        # the user's choices with it.
+        self.store.set_ttml_files({"a.ttml": {"title": "A"}})
+        self.store.set_ttml_binding("song___artist", "a.ttml")
+        self.assertTrue(self.store.drop_ttml_file("a.ttml"))
+        self.assertFalse(self.store.drop_ttml_file("a.ttml"))
+        self.assertEqual(list(self.store.get_ttml_files()), [])
+
+    def test_a_cache_without_the_ttml_section_gains_one(self):
+        self.path.write_text(json.dumps({"tracks": {}, "lyrics": {}}), encoding="utf-8")
+        reloaded = storage.CacheManager(filepath=self.path)
+        self.assertEqual(reloaded.get_ttml_files(), {})
+        self.assertEqual(reloaded.ttml_bindings(), {})
+
+
+class ShutdownFlushTest(unittest.TestCase):
+    """Writes are debounced; the exit path must not be.
+
+    Every mutation schedules a `threading.Timer`, so a process that exits inside
+    the debounce window loses whatever it just wrote. The state most likely to be
+    pending is the state the user changed by hand a second before closing — a
+    local TTML binding, or the marker that says "online lyrics for this song".
+    """
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.path = Path(self.tmp_dir) / "cache.json"
+        self.store = storage.CacheManager(filepath=self.path)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_a_pending_write_is_not_on_disk_yet(self):
+        # The premise of the test below: without the debounce this would already
+        # be saved, and there would be no race to fix.
+        self.store.set_ttml_binding("song___artist", "a.ttml", enabled=False)
+        self.assertFalse(self.path.exists())
+
+    def test_flush_sync_persists_a_pending_binding(self):
+        self.store.set_ttml_binding("song___artist", "a.ttml", enabled=False)
+        self.assertTrue(self.store.flush_sync())
+
+        reloaded = storage.CacheManager(filepath=self.path)
+        self.assertEqual(reloaded.ttml_bindings()["song___artist"],
+                         {"file": "a.ttml", "enabled": False})
+
+    def test_flush_sync_persists_a_pending_index_and_marker(self):
+        self.store.set_ttml_files({"a.ttml": {"title": "A"}})
+        self.store.set_ttml_binding("off___artist", "", enabled=False)
+        self.assertTrue(self.store.flush_sync())
+
+        reloaded = storage.CacheManager(filepath=self.path)
+        self.assertEqual(reloaded.get_ttml_files()["a.ttml"]["title"], "A")
+        # The "no local lyrics here" marker survives an exit too: losing it
+        # would let the auto-match take the song back on the next launch.
+        self.assertEqual(reloaded.ttml_bindings()["off___artist"]["enabled"], False)
+
+    def test_flush_sync_cancels_the_pending_timer(self):
+        self.store.set_ttml_binding("song___artist", "a.ttml")
+        timer = self.store._save_timer
+        self.assertIsNotNone(timer)
+        self.store.flush_sync()
+        self.assertIsNone(self.store._save_timer)
+        self.assertFalse(timer.is_alive())
+
+    def test_flush_sync_reports_a_write_that_cannot_happen(self):
+        # Called from the window's close handler: it must report, never raise,
+        # or a cache problem replaces a clean exit with a crash.
+        self.store.set_ttml_binding("song___artist", "a.ttml")
+        with mock.patch.object(self.store, "_save_atomic",
+                               side_effect=OSError("disk full")):
+            self.assertFalse(self.store.flush_sync())
+
+    def test_flush_sync_is_safe_on_a_cache_with_nothing_pending(self):
+        self.assertTrue(self.store.flush_sync())
+        self.assertTrue(self.store.flush_sync())
+
+    def test_the_close_handler_uses_the_synchronous_flush(self):
+        # The method only helps if the exit path calls it. Wiring that cannot be
+        # executed headlessly (pywebview owns the close event), so it is asserted
+        # against the source the way the WebView2 profile wiring is.
+        src = (Path(__file__).resolve().parent.parent / "paprika_app.py").read_text(
+            encoding="utf-8")
+        self.assertIn("CACHE.flush_sync()", src)
+        self.assertNotIn("CACHE.flush()\n", src)
 
 
 class WindowGeometryTest(unittest.TestCase):

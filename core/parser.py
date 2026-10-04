@@ -123,6 +123,23 @@ def is_backing_vocal_text(text: str) -> bool:
     return (t.startswith("(") and t.endswith(")")) or (t.startswith("（") and t.endswith("）"))
 
 
+def count_syllables(lines: list[dict]) -> int:
+    """Counts timed syllables across a payload; 0 means line-level timing only.
+
+    Lives here (rather than beside the fetch pipeline) because every source of
+    lines needs it: the API payload, the LRCLIB fallback and local TTML files.
+    """
+    total = 0
+    for line in lines or []:
+        if not isinstance(line, dict):
+            continue
+        for word in (line.get("words") or []):
+            if not isinstance(word, dict):
+                continue
+            total += len(word.get("syllables") or [])
+    return total
+
+
 def align_syllables_to_reference(syllables: list[dict], ref_text: str, offset_ms: float = 0.0) -> list[dict]:
     """
     Groups raw syllables into words using the line's plain text as the guide.

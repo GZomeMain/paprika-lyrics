@@ -6,7 +6,7 @@ interfaces: "Web", plus a password under Lua HTTP), VLC serves
 ``/requests/status.json`` with the playing file's tags, position and length.
 
 This module is pure (no I/O) so the payload parsing is unit-testable; the
-polling and command dispatch live in core/vlc_source.py and spicy_app.py.
+polling and command dispatch live in core/vlc_source.py and paprika_app.py.
 """
 from __future__ import annotations
 

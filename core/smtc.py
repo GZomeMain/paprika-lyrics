@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import datetime
 import json
 import os
 import threading
@@ -11,7 +10,7 @@ from winsdk.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 )
 
-from config import DEFAULT_LATENCY_MS, debug_log
+from config import default_latency_for, debug_log
 from storage import CACHE
 from core.beat import build_beat_plan
 from core.lyrics import fetch_lyrics
@@ -21,6 +20,7 @@ from core.media_meta import (
     media_meta_from_smtc,
 )
 from core.metadata import normalize_weak_title
+from core.timeline import PositionClock, clamp_rate, normalize_timeline
 from core.vlc_source import VlcSource
 from core.resolver import resolve_artwork_url
 from core.session import select_session
@@ -62,11 +62,30 @@ class SmtcBridge:
     # it is allowed to take it back (seconds).
     HANDOVER_QUIET_S = 4.0
 
+    # How long after a command we sent a contradicting status read is treated as
+    # a pre-command echo rather than a real change. SimpMusic reports PLAYING for
+    # up to a second after it has paused (measured with tools/smtc_diagnose.py),
+    # which made the overlay flip its play button back to "playing".
+    COMMAND_SETTLE_S = 1.5
+
     def __init__(self, shutdown_event: threading.Event):
         self.shutdown_event = shutdown_event
         self.current_session = None
         self.event_loop: asyncio.AbstractEventLoop | None = None
         self.request_generation = 0
+        # The pywebview window, kept so a command can reconcile the UI with its
+        # actual outcome instead of waiting for the next poll tick.
+        self.window = None
+        # Monotonic playhead clock: anchored to our own clock, reset on session
+        # change and after a seek (see core.timeline).
+        self.clock = PositionClock()
+        # Whether the selected player publishes a usable timeline at all, and a
+        # signature of the last shape we logged/pushed so neither happens per tick.
+        self._timeline_published: bool | None = None
+        self._timeline_signature = None
+        # The playback state a command of ours should have produced, and when.
+        self._expect_playing: bool | None = None
+        self._expect_at = 0.0
         # The app id the overlay is currently following, and since when another
         # app has been the only candidate to replace it.
         self.pinned_app_id = ""
@@ -79,141 +98,308 @@ class SmtcBridge:
             host=os.getenv("VLC_HTTP_HOST", "127.0.0.1"),
             port=int(os.getenv("VLC_HTTP_PORT", "8080")),
         )
-        self._vlc_track_sig = "" 
+        self._vlc_track_sig = ""
+        # Also initialized here: a local-TTML change can arrive before the
+        # listener loop has started, and it must not be lost.
+        self.reload_requested = False
 
     # =========================================================================
     # Media Control Actions (Called from UI Buttons / Seeking)
     # =========================================================================
+    #
+    # Every command goes through `_dispatch`, and every outcome is reported:
+    # a `try_*_async` call that returns False, or a session whose loop is not
+    # running, used to be indistinguishable from success — the click vanished and
+    # the user was left guessing whether the player or the overlay was broken.
     def toggle_playback(self):
-        if self.current_session and self.event_loop and self.event_loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._do_toggle(), self.event_loop)
-        elif self.vlc.configured:
-            self.vlc.command("pl_pause")
+        self._dispatch(self._do_toggle(), "pl_pause")
 
     def seek_position(self, target_ms: float):
-        if self.current_session and self.event_loop and self.event_loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._do_seek(target_ms), self.event_loop)
-        elif self.vlc.configured:
-            self.vlc.command("seek", val=f"{int(target_ms / 1000)}")
+        self._dispatch(self._do_seek(target_ms), "seek",
+                       val=f"{int(target_ms / 1000)}")
 
     def skip_next(self):
-        if self.current_session and self.event_loop and self.event_loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._do_skip_next(), self.event_loop)
-        elif self.vlc.configured:
-            self.vlc.command("pl_next")
+        self._dispatch(self._do_skip_next(), "pl_next")
 
     def skip_previous(self):
-        if self.current_session and self.event_loop and self.event_loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._do_skip_previous(), self.event_loop)
-        elif self.vlc.configured:
-            self.vlc.command("pl_previous")
+        self._dispatch(self._do_skip_previous(), "pl_previous")
+
+    def _dispatch(self, coro, vlc_command: str, **vlc_params):
+        """Runs a transport coroutine on the loop that owns the session.
+
+        The command must target the same session the metadata came from; when
+        there is no session at all, VLC (which never appears in GSMTC) is the
+        only fallback. A session with a dead loop is a bug in this process, so it
+        is reported rather than silently dropping the user's click.
+        """
+        if self.current_session is not None:
+            loop = self.event_loop
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, loop)
+            else:
+                coro.close()
+                debug_log("[SMTC] command dropped: event loop not running")
+                self._report("transport", False, "event loop not running")
+            return
+
+        coro.close()
+        if self.vlc.configured:
+            self.vlc.command(vlc_command, **vlc_params)
+        else:
+            debug_log("[SMTC] command dropped: no media session and VLC is not configured")
+            self._report("transport", False, "no media session")
+
+    def _report(self, action: str, ok: bool, detail: str = "", verified=None):
+        """Logs a command's outcome and pushes it to the UI.
+
+        Nothing about this is per-frame: transport commands are user-initiated.
+        """
+        debug_log(f"[SMTC] {action}: ok={bool(ok)} {detail}")
+        payload = {"action": action, "ok": bool(ok), "detail": detail}
+        if verified is not None:
+            payload["verified"] = bool(verified)
+        self._push_js(f"window.transportResult({json.dumps(payload)});")
+
+    def _push_js(self, script: str):
+        """Best-effort evaluate_js: the UI may not have loaded yet."""
+        if self.window is None:
+            return
+        try:
+            self.window.evaluate_js(script)
+        except Exception as exc:
+            debug_log("[SMTC] evaluate_js failed:", exc)
+
+    def _is_playing(self, session) -> bool:
+        try:
+            playback = session.get_playback_info()
+            return bool(playback) and playback.playback_status == PlaybackStatus.PLAYING
+        except Exception:
+            return False
+
+    def _playback_state(self):
+        """(is_playing, playback_rate) for the current session, safely."""
+        try:
+            playback = self.current_session.get_playback_info() if self.current_session else None
+        except Exception as exc:
+            debug_log("[SMTC] playback info read failed:", exc)
+            playback = None
+        if not playback:
+            return False, 1.0
+        status = getattr(playback, "playback_status", None)
+        return (status == PlaybackStatus.PLAYING,
+                clamp_rate(getattr(playback, "playback_rate", None)))
+
+    def _effective_playing(self, is_playing: bool) -> bool:
+        """The playback state to show, ignoring a stale post-command echo.
+
+        When a player keeps reporting the PRE-command status for a moment after
+        accepting our command, obeying it flips the play button back and then
+        forward again. Within the settle window the commanded state wins.
+        """
+        if (self._expect_playing is not None
+                and bool(is_playing) != self._expect_playing
+                and time.monotonic() - self._expect_at < self.COMMAND_SETTLE_S):
+            return self._expect_playing
+        self._expect_playing = None
+        return bool(is_playing)
+
+    def _reconcile_playback(self, playing: bool):
+        """Reflect a command's outcome immediately instead of a tick later."""
+        self._expect_playing = bool(playing)
+        self._expect_at = time.monotonic()
+        self._push_js(f"window.setPlaybackState({str(bool(playing)).lower()});")
 
     async def _do_skip_next(self):
-        try:
-            if self.current_session:
-                await self.current_session.try_skip_next_async()
-        except Exception:
-            pass  # Session may have closed or changed
+        await self._do_skip("next", "try_skip_next_async")
 
     async def _do_skip_previous(self):
+        await self._do_skip("previous", "try_skip_previous_async")
+
+    async def _do_skip(self, label: str, method: str):
+        session = self.current_session
+        if not session:
+            return
         try:
-            if self.current_session:
-                await self.current_session.try_skip_previous_async()
-        except Exception:
-            pass  # Session may have closed or changed
+            ok = bool(await getattr(session, method)())
+        except Exception as exc:
+            debug_log(f"[SMTC] skip {label} failed:", exc)
+            self._report(f"skip_{label}", False, repr(exc))
+            return
+        if ok:
+            # A different track: nothing about the old timeline carries over.
+            self.clock.reset()
+        self._report(f"skip_{label}", ok, "accepted" if ok else "player refused")
 
     async def _do_toggle(self):
+        session = self.current_session
+        if not session:
+            return
+        playing_before = self._is_playing(session)
         try:
-            if not self.current_session:
-                return
-            playback = self.current_session.get_playback_info()
-            if playback:
-                if playback.playback_status == PlaybackStatus.PLAYING:
-                    await self.current_session.try_pause_async()
-                else:
-                    await self.current_session.try_play_async()
-        except Exception:
-            pass  # Session may have closed or changed
+            # The combined toggle is what Windows' own media controls use, and
+            # the action players advertise for it (SimpMusic reports
+            # is_play_pause_toggle_enabled=True). Picking play-vs-pause from a
+            # status read instead races the player: SimpMusic's reported status
+            # flaps back to PLAYING for about a second after a state change
+            # (measured), which sent a pause to an already-paused player — a
+            # click that visibly did nothing.
+            ok = bool(await session.try_toggle_play_pause_async())
+            if not ok:
+                ok = await self._fallback_play_pause(session)
+        except Exception as exc:
+            debug_log("[SMTC] toggle failed:", exc)
+            self._report("toggle", False, repr(exc))
+            return
+        if ok:
+            self._reconcile_playback(not playing_before)
+        self._report("toggle", ok, "accepted" if ok else "player refused")
+
+    async def _fallback_play_pause(self, session) -> bool:
+        """Status-directed play/pause, only when the combined toggle is refused."""
+        try:
+            playback = session.get_playback_info()
+            if playback and playback.playback_status == PlaybackStatus.PLAYING:
+                return bool(await session.try_pause_async())
+            return bool(await session.try_play_async())
+        except Exception as exc:
+            debug_log("[SMTC] play/pause fallback failed:", exc)
+            return False
 
     async def _do_seek(self, target_ms: float):
+        session = self.current_session
+        if not session:
+            return
+        target_ms = float(target_ms)
         try:
-            if not self.current_session:
-                return
-            # Windows Media expects 100-nanosecond units (1ms = 10,000 units)
+            # WinRT TimeSpan is in 100-nanosecond units: 1 ms = 10,000 units.
+            # Verified against the installed bindings with tools/smtc_diagnose.py
+            # (a seek lands on the requested position for players that publish a
+            # timeline, so the argument form is not the bug here).
             time_span = int(target_ms * 10_000)
-            was_playing = False
-            playback = self.current_session.get_playback_info()
-            if playback:
-                was_playing = playback.playback_status == PlaybackStatus.PLAYING
-            await self.current_session.try_change_playback_position_async(time_span)
-            # Only nudge playback if it was already playing — seeking while
-            # paused must never start the track.
+            was_playing = self._is_playing(session)
+            ok = bool(await session.try_change_playback_position_async(time_span))
             if was_playing:
-                await self.current_session.try_play_async()
-        except Exception:
-            pass
+                # Only nudge playback if it was already playing — seeking while
+                # paused must never start the track. Some players flip to paused
+                # on a seek inside the current item, so re-assert play.
+                await session.try_play_async()
+            # Our clock is no longer authoritative; the player's next sample is.
+            self.clock.invalidate()
+            self._report("seek", ok, f"target={int(target_ms)}ms",
+                         verified=bool(self._timeline_published))
+        except Exception as exc:
+            debug_log("[SMTC] seek failed:", exc)
+            self._report("seek", False, f"target={int(target_ms)}ms {exc!r}")
+
+    # =========================================================================
+    # Timeline Reads
+    # =========================================================================
+    def _read_timeline(self):
+        """One normalized timeline reading, or None when it cannot be read.
+
+        Single read point for position, duration and seek bounds, so the UI can
+        never be fed values that came from different snapshots of a moving
+        timeline.
+        """
+        if not self.current_session:
+            return None
+        try:
+            timeline = self.current_session.get_timeline_properties()
+        except Exception as exc:
+            debug_log("[SMTC] timeline read failed:", exc)
+            return None
+        if timeline is None:
+            return None
+        return normalize_timeline(
+            start=getattr(timeline, "start_time", None),
+            end=getattr(timeline, "end_time", None),
+            position=getattr(timeline, "position", None),
+            updated=getattr(timeline, "last_updated_time", None),
+            min_seek=getattr(timeline, "min_seek_time", None),
+            max_seek=getattr(timeline, "max_seek_time", None),
+        )
+
+    def _note_timeline(self, sample):
+        """Log the timeline's shape when it changes, and tell the UI about it.
+
+        Deliberately not per tick: the interesting event is a player that starts
+        or stops publishing a timeline, not the number itself.
+        """
+        self._timeline_published = sample.published
+        signature = (sample.published, sample.duration_ms, sample.max_seek_ms,
+                     sample.start_ms is not None)
+        if signature == self._timeline_signature:
+            return
+        self._timeline_signature = signature
+        debug_log(
+            f"[SMTC] timeline: published={sample.published} "
+            f"start_ms={sample.start_ms} position_ms={sample.position_ms} "
+            f"duration_ms={sample.duration_ms} max_seek_ms={sample.max_seek_ms}"
+        )
+        # The pin is only set once an app has held the overlay; report the
+        # session's own app id until then, so the UI is never told "no player".
+        self._push_transport_state(
+            self.pinned_app_id or self._session_app_id(self.current_session),
+            sample.published, sample.duration_ms)
+
+    def _push_transport_state(self, app_id: str, timeline_ok: bool,
+                              duration_ms: float | None):
+        """Tells the UI what this player's transport can actually do.
+
+        The overlay can only be honest about a missing duration or a missing
+        timeline if it says so; the diagnostics panel shows these three facts.
+        """
+        state = {
+            "app": app_id or "",
+            "timeline": bool(timeline_ok),
+            "duration": bool(duration_ms and duration_ms > 0),
+        }
+        self._push_js(f"window.setTransportState({json.dumps(state)});")
 
     def _get_position_ms(self) -> float | None:
         """
-        Real-time playback position, or None when it cannot be read.
+        Real-time playback position, or None when there is none to report.
 
         Returning None rather than 0.0 matters: 0.0 is a valid position and the
         UI has a guard that swallows a spurious zero, so a failed read used to
         present itself as a legitimate "at the start" and silently disable all
         playhead corrections. None lets the caller skip the sync instead.
 
-        WinRT's `timeline.position` is the position AT `last_updated_time` — a
-        snapshot some players only refresh every few seconds. Sent raw to the UI
-        once a second, the playhead kept snapping BACK to the stale snapshot and
-        then jumping forward again. Adding the time elapsed since that snapshot
-        turns it into the interpolated position the listener expects.
+        A player that publishes no timeline (every field zero, `last_updated_time`
+        left at WinRT's sentinel) also answers None here — nothing is invented to
+        fill the gap. Extrapolation between real samples is the monotonic clock's
+        job; see core.timeline.PositionClock.
         """
-        try:
-            if not self.current_session:
-                return None
-            timeline = self.current_session.get_timeline_properties()
-            if timeline and timeline.position:
-                pos_ms = timeline.position.total_seconds() * 1000.0
-                updated = getattr(timeline, "last_updated_time", None)
-                if updated:
-                    # `last_updated_time` is normally a naive UTC datetime, but a
-                    # timezone-aware value would raise on subtraction. Match
-                    # awareness so the extrapolation never silently stops.
-                    if getattr(updated, "tzinfo", None) is not None:
-                        now = datetime.datetime.now(datetime.timezone.utc)
-                    else:
-                        now = datetime.datetime.now()
-                    elapsed_ms = (now - updated).total_seconds() * 1000.0
-                    # Clamp: a suspended player (or a paused one) leaves the
-                    # snapshot ageing while the position does not advance. Only
-                    # extrapolate while the elapsed time is plausible for a
-                    # snapshot lag, not for an hour-old reading.
-                    if 0 <= elapsed_ms <= 10_000:
-                        pos_ms += elapsed_ms
-                return pos_ms
-        except Exception as exc:
-            debug_log("Could not read playback position:", exc)
-        return None
+        sample = self._read_timeline()
+        if sample is None:
+            return None
+        self._note_timeline(sample)
+        if not sample.published:
+            return None
+        playing, rate = self._playback_state()
+        return self.clock.observe(sample.position_ms, time.monotonic(),
+                                  playing=playing, session=self.current_session,
+                                  rate=rate, duration_ms=sample.duration_ms)
 
     def _get_duration_ms(self) -> float | None:
-        """Total track length, used to disambiguate lyrics cache keys."""
-        try:
-            if not self.current_session:
-                return None
-            timeline = self.current_session.get_timeline_properties()
-            if timeline and timeline.end_time:
-                total = timeline.end_time.total_seconds() * 1000.0
-                if total > 0:
-                    return total
-        except Exception:
-            pass
-        return None
+        """Total track length in ms, or None when the player does not publish one.
+
+        Duration is `end_time - start_time` (the timeline's own origin), not the
+        raw `end_time`: it used to be right by accident for players that keep the
+        origin at zero and wrong for anyone who does not.
+        """
+        sample = self._read_timeline()
+        if sample is None:
+            return None
+        return sample.duration_ms
 
     # =========================================================================
     # Background Listener Loop
     # =========================================================================
     async def run(self, window):
         self.event_loop = asyncio.get_running_loop()
+        # Kept so a transport command can reconcile the UI with its outcome.
+        self.window = window
 
         try:
             manager = await MediaManager.request_async()
@@ -227,6 +413,11 @@ class SmtcBridge:
         self._vlc_track_sig = ""
         self._vlc_last_pos_ms = 0.0
         last_periodic_sync = 0.0
+        # Set when something outside the audio source invalidates the lyrics
+        # currently on screen (the user just bound a local TTML file, or cleared
+        # one). The loop treats it exactly like a track change: refetch, reload,
+        # re-render — without waiting for the song to end.
+        self.reload_requested = False
 
         while not self.shutdown_event.is_set():
             sleep_duration = 0.6  # Default checking rate
@@ -250,10 +441,16 @@ class SmtcBridge:
 
                 playback = session.get_playback_info()
                 is_playing = (playback.playback_status == PlaybackStatus.PLAYING) if playback else False
+                # A status read taken within the settle window of our own command
+                # may still be the pre-command value (measured on SimpMusic).
+                is_playing = self._effective_playing(is_playing)
 
-                # Read track metadata safely
+                # Read track metadata safely. The duration is one read used for
+                # everything downstream: the signature, the lyrics lookup and the
+                # UI's total, so they can never disagree.
                 info = await session.try_get_media_properties_async()
-                meta = media_meta_from_smtc(info, duration_ms=self._get_duration_ms())
+                duration_ms = self._get_duration_ms()
+                meta = media_meta_from_smtc(info, duration_ms=duration_ms)
                 title, artist, metadata_source = normalize_weak_title(
                     meta.raw_title, meta.raw_artist)
                 meta = dc_replace(meta, raw_title=title, raw_artist=artist)
@@ -277,7 +474,12 @@ class SmtcBridge:
                     window.evaluate_js(f"window.setPlaybackState({str(is_playing).lower()});")
 
                 # 2. Track Change Detected: Fetch new lyrics & stream album cover
-                if title and track_sig != last_track_sig:
+                if title and (track_sig != last_track_sig or self.reload_requested):
+                    # Consumed here rather than at the end of the block: the
+                    # signature is only committed on success below, so a failed
+                    # fetch already retries on its own and re-arming this flag
+                    # would just replay the same failure.
+                    self.reload_requested = False
                     # NOTE: last_track_sig is committed only AFTER the fetch
                     # succeeds (below). Committing it here meant any throw in
                     # between — a malformed API payload, an evaluate_js before
@@ -333,7 +535,12 @@ class SmtcBridge:
                     if initial_elapsed_ms is None:
                         initial_elapsed_ms = 0.0
                     track_key = track_id or track_sig
-                    saved_offset = CACHE.get_latency(track_key, DEFAULT_LATENCY_MS)
+                    # Starting offset depends on where the lyrics came from: a
+                    # cached payload opens at the tuned baseline, a fresh fetch
+                    # at the wider one. The stored per-track value (if the user
+                    # has nudged this song before) still wins.
+                    saved_offset = CACHE.get_latency(
+                        track_key, default_latency_for(diagnostics.get("cache")))
 
                     lines_json = json.dumps(lines)
                     # Bridge payloads are serialized into a JS string; flag unusually large ones.
@@ -370,8 +577,15 @@ class SmtcBridge:
                     # Explains in the UI why these lyrics are syllable- or line-synced.
                     window.evaluate_js(f"window.setDiagnostics({json.dumps(diagnostics)});")
                     # Feeds the split-layout transport (elapsed / total / progress bar).
-                    window.evaluate_js(f"window.setTrackDuration({self._get_duration_ms() or 0});")
+                    # `null` means "this player publishes no duration" — the UI clears
+                    # the labels and disables the seek bar instead of showing the
+                    # previous track's length or a fabricated 0:00.
+                    window.evaluate_js(f"window.setTrackDuration({json.dumps(duration_ms)});")
                     window.evaluate_js(f"window.setPlaybackState({str(is_playing).lower()});")
+                    # What this player's transport can actually do, for the
+                    # diagnostics panel.
+                    self._push_transport_state(app_id, bool(self._timeline_published),
+                                               duration_ms)
 
                     # Commit only once the track is actually on screen. A throw
                     # in any bridge call above (e.g. before app.js has defined
@@ -398,6 +612,17 @@ class SmtcBridge:
 
             await asyncio.sleep(sleep_duration)
 
+    def request_reload(self):
+        """
+        Asks the loop to reload the current track's lyrics.
+
+        Used when something other than the audio source changes what the lyrics
+        should be — binding or clearing a local TTML file, or removing one from
+        the library — so the change is visible immediately instead of on the
+        next song.
+        """
+        self.reload_requested = True
+
     def _session_app_id(self, session) -> str:
         try:
             return session.source_app_user_model_id or ""
@@ -423,6 +648,11 @@ class SmtcBridge:
             return state  # radio/untitled stream: nothing to look up
 
         track_sig = f"vlc:::{state.title}:::{state.artist}:::{state.album}:::{int(state.length_ms or 0)}"
+        if self.reload_requested:
+            # Same invalidation as the SMTC path: drop the remembered signature so
+            # the current track is refetched with the new local file in play.
+            self.reload_requested = False
+            self._vlc_track_sig = ""
         if track_sig != self._vlc_track_sig:
             self._vlc_track_sig = track_sig
             window.evaluate_js(f"window.showLoading({json.dumps(state.title)}, {json.dumps(state.artist)});")
@@ -432,14 +662,23 @@ class SmtcBridge:
                     state.title, state.artist, state.length_ms, state.album, "filename")
                 if not self.shutdown_event.is_set():
                     lines_json = json.dumps(lines)
+                    # Same cache-aware starting offset as the SMTC path, and the
+                    # same per-track override (the VLC path used to ignore both
+                    # and always hand the UI the baseline).
+                    saved_offset = CACHE.get_latency(
+                        track_sig, default_latency_for(diagnostics.get("cache")))
                     window.evaluate_js(
                         f"window.loadLyrics({lines_json}, {json.dumps(state.title)}, "
                         f"{json.dumps(state.artist)}, {json.dumps(source)}, "
                         f"{state.position_ms or 0}, {json.dumps(track_sig)}, "
-                        f"{DEFAULT_LATENCY_MS}, null);"
+                        f"{saved_offset}, null);"
                     )
                     window.evaluate_js(f"window.setDiagnostics({json.dumps(diagnostics)});")
-                    window.evaluate_js(f"window.setTrackDuration({state.length_ms or 0});")
+                    window.evaluate_js(
+                        f"window.setTrackDuration({json.dumps(state.length_ms or None)});")
+                    # VLC reports its own position and length, so its timeline is
+                    # live; the length can still be missing on a stream.
+                    self._push_transport_state("VLC", True, state.length_ms)
                     window.evaluate_js(f"window.setPlaybackState({str(is_playing).lower()});")
             except Exception as exc:
                 debug_log("VLC lyric fetch failed:", exc)
