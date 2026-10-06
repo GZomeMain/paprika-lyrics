@@ -34,6 +34,9 @@ if HAS_WINSDK:
     import core.smtc as smtc_mod
     from core import smtc as _smtc  # noqa: F401  (ensures the module is loadable)
 
+# Pure (no I/O), so it imports on every platform.
+from core.vlc_meta import VlcState
+
 
 SENTINEL = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc)
 
@@ -523,6 +526,95 @@ class LoopPayloadTest(unittest.TestCase):
         for value in after:
             self.assertLess(value, 60000.0)
         self.assertGreaterEqual(before[-1], 200000.0)
+
+
+class ScriptedVlc:
+    """A VLC source whose status read is set by the test; no HTTP involved."""
+
+    def __init__(self, state=None):
+        self.state = state
+        self.configured = True
+        self.commands = []
+
+    def poll(self):
+        return self.state
+
+    def poll_interval(self, _state):
+        return 0.0
+
+    def command(self, command, **params):
+        self.commands.append((command, params))
+
+
+@unittest.skipUnless(HAS_WINSDK, "winsdk is required for the SMTC bridge")
+class VlcTrackChangeTest(unittest.TestCase):
+    """The VLC fallback must refetch on a new track — and only then.
+
+    VLC 3.x never appears in GSMTC, so when no session exists the bridge polls
+    VLC's HTTP interface and decides for itself when the track changed. That
+    decision is the signature it keeps in `_vlc_track_sig`, and it is the whole
+    feature: a signature that never changed would leave the previous song's
+    lyrics on screen for the length of the next one.
+
+    These drive the real `_vlc_tick`, not a helper, because the dead
+    `VlcSource.changed_track` this replaced was exactly the kind of detector that
+    passes review and never runs.
+    """
+
+    def _bridge(self):
+        bridge = make_bridge(None)
+        bridge.vlc = ScriptedVlc()
+        return bridge
+
+    def _tick(self, bridge, title, artist, length_ms, calls):
+        bridge.vlc.state = VlcState(title=title, artist=artist, length_ms=length_ms,
+                                   position_ms=1000.0, playing=True)
+
+        def fake_fetch(fetched_title, fetched_artist, _duration, _album, _source):
+            calls.append((fetched_title, fetched_artist))
+            return ([{"startTimeMs": 0.0, "endTimeMs": 1000.0, "text": "hi", "words": []}],
+                    "test", "tid", {"cache": "hit"})
+
+        with mock.patch.object(smtc_mod, "fetch_lyrics", fake_fetch):
+            bridge._vlc_tick(bridge.window)
+
+    def test_a_new_track_refetches_and_a_repeat_does_not(self):
+        bridge = self._bridge()
+        calls = []
+        self._tick(bridge, "Song A", "Artist", 100000, calls)
+        self._tick(bridge, "Song A", "Artist", 100000, calls)   # same track
+        self._tick(bridge, "Song B", "Artist", 120000, calls)   # next track
+        self.assertEqual(calls, [("Song A", "Artist"), ("Song B", "Artist")])
+
+    def test_the_lyrics_reach_the_ui_for_the_new_track(self):
+        bridge = self._bridge()
+        self._tick(bridge, "Song A", "Artist", 100000, [])
+        self.assertTrue([s for s in bridge.window.scripts
+                         if s.startswith("window.loadLyrics(")])
+
+    def test_an_untagged_stream_is_not_looked_up(self):
+        # VLC reports only the filename for an untagged stream, so there is
+        # nothing to resolve; hammering the resolvers for it would be noise.
+        bridge = self._bridge()
+        calls = []
+        self._tick(bridge, "", "", None, calls)
+        self.assertEqual(calls, [])
+
+    def test_a_failed_lookup_is_retried_on_the_next_tick(self):
+        # The signature is cleared on failure, so a transient network error does
+        # not leave the song lyric-less until the user skips.
+        bridge = self._bridge()
+        attempts = []
+
+        def failing_fetch(fetched_title, *_args):
+            attempts.append(fetched_title)
+            raise RuntimeError("network down")
+
+        bridge.vlc.state = VlcState(title="Song A", artist="Artist", length_ms=1000)
+        with mock.patch.object(smtc_mod, "fetch_lyrics", failing_fetch):
+            bridge._vlc_tick(bridge.window)
+            bridge._vlc_tick(bridge.window)
+        self.assertEqual(attempts, ["Song A", "Song A"])
 
 
 if __name__ == "__main__":

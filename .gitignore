@@ -31,6 +31,10 @@ ttml/
 build/
 dist/
 
+# The on-disk log (config.LOG_FILE). A runtime artifact beside the cache, and it
+# names the data folder and the build, so it is machine state rather than source.
+logs/
+
 # Local runtime cache: contains the user's listening history (track IDs, offsets, lyrics).
 # The wildcard also covers hand-made backups (spotify_cache.json.bak), which hold
 # the same private data and would otherwise be committed.

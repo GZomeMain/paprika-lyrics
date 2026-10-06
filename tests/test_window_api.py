@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -618,6 +619,169 @@ class TtmlApiTest(unittest.TestCase):
             snapshot = self.api.ttml_list("Song", "Artist")
         self.assertEqual(snapshot["entries"], [])
         self.assertEqual(snapshot["count"], 0)
+
+    def test_spicy_api_key_window_api(self):
+        with mock.patch("core.resolver.http_get") as mock_get:
+            mock_get.return_value = mock.Mock(status_code=200)
+            res = self.api.set_spicy_api_key("sl_sk_testkey9999")
+            self.assertTrue(res["ok"])
+            self.assertTrue(res["verified"])
+            self.bridge.request_reload.assert_called()
+
+        info = self.api.get_spicy_api_key()
+        self.assertTrue(info["set"])
+        self.assertEqual(info["key"], "sl_sk_testkey9999")
+        self.assertIn("sl_sk_", info["masked"])
+
+        self.bridge.reset_mock()
+        clear_res = self.api.set_spicy_api_key("")
+        self.assertTrue(clear_res["ok"])
+        self.assertFalse(clear_res["key_set"])
+        self.bridge.request_reload.assert_called()
+
+        info_after = self.api.get_spicy_api_key()
+        self.assertFalse(info_after["set"])
+
+
+class ShutdownTest(unittest.TestCase):
+    """Teardown must not let one failing step swallow the ones behind it.
+
+    `on_closed` is the last code the process runs, so a raise inside it is both
+    invisible (a windowed build has no console) and expensive: the window-geometry
+    write and the cache flush that follow the failure are skipped, and the user
+    loses their window position and any local-TTML binding they had just made.
+    The reported crash was `HOTKEY_MANAGER.stop()` on a manager that had never
+    been constructed; the guard is per-step, so the rest runs whatever fails.
+    """
+
+    class FakeCache:
+        def __init__(self, ok=True):
+            self.ok = ok
+            self.flushes = 0
+
+        def flush_sync(self):
+            self.flushes += 1
+            return self.ok
+
+    class FakeExecutor:
+        def __init__(self):
+            self.shutdowns = 0
+            self.wait = None
+
+        def shutdown(self, wait=False):
+            self.shutdowns += 1
+            self.wait = wait
+
+    class FakeApi:
+        def __init__(self, explode=None):
+            self.explode = explode
+            self.steps = []
+
+        def _cancel_peek_timer(self):
+            self._step("peek")
+
+        def _stop_hover_probe(self):
+            self._step("probe")
+
+        def _record_window_geometry(self):
+            self._step("geometry")
+
+        def _step(self, name):
+            self.steps.append(name)
+            if self.explode == name:
+                raise RuntimeError(f"{name} blew up")
+
+    def test_every_step_runs_when_none_fails(self):
+        api = self.FakeApi()
+        cache = self.FakeCache()
+        executor = self.FakeExecutor()
+        signal = threading.Event()
+        failures = paprika_app.shutdown_app(api, mock.Mock(), cache, executor, signal)
+        self.assertEqual(failures, [])
+        self.assertEqual(api.steps, ["peek", "probe", "geometry"])
+        self.assertEqual(cache.flushes, 1)
+        self.assertEqual(executor.shutdowns, 1)
+        self.assertTrue(signal.is_set())
+
+    def test_a_failing_step_does_not_skip_the_writes_behind_it(self):
+        api = self.FakeApi(explode="probe")
+        cache = self.FakeCache()
+        executor = self.FakeExecutor()
+        with mock.patch.object(paprika_app, "log_to_file"):
+            failures = paprika_app.shutdown_app(
+                api, mock.Mock(), cache, executor, threading.Event())
+        self.assertEqual([name for name, _ in failures], ["hover probe"])
+        self.assertIn("geometry", api.steps)
+        self.assertEqual(cache.flushes, 1)
+        self.assertEqual(executor.shutdowns, 1)
+
+    def test_a_missing_hotkey_manager_or_api_is_not_fatal(self):
+        cache = self.FakeCache()
+        executor = self.FakeExecutor()
+        failures = paprika_app.shutdown_app(
+            None, None, cache, executor, threading.Event())
+        self.assertEqual(failures, [])
+        self.assertEqual(cache.flushes, 1)
+        self.assertEqual(executor.shutdowns, 1)
+
+    def test_a_cache_that_cannot_be_written_is_reported_not_raised(self):
+        cache = self.FakeCache(ok=False)
+        executor = self.FakeExecutor()
+        failures = paprika_app.shutdown_app(
+            None, mock.Mock(), cache, executor, threading.Event())
+        self.assertEqual(failures, [])
+        self.assertEqual(executor.shutdowns, 1)
+
+    def test_on_closed_is_wired_to_the_guarded_path(self):
+        # The guard only helps if the teardown actually goes through it. Asserted
+        # against the source because on_closed is defined inside the __main__
+        # block, which cannot be called from a test.
+        src = (Path(__file__).resolve().parent.parent / "paprika_app.py").read_text(
+            encoding="utf-8")
+        self.assertIn(
+            "shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)",
+            src)
+
+class FatalStartupErrorTest(unittest.TestCase):
+    """A frozen build is windowed, so `print` goes nowhere.
+
+    Without this, a machine missing the WebView2 runtime got a double-click that
+    did nothing at all — no window, no message, no log. `_fatal` is the path that
+    replaces that silence, so its two channels are exercised here rather than
+    only asserted against the source.
+    """
+
+    def _fatal_with(self, has_console, logged):
+        # config.log_to_file, not paprika_app's own name: `_fatal` must import it
+        # lazily, because it also has to report a failure to import config.
+        with mock.patch.object(paprika_app, "_HAS_CONSOLE", has_console), \
+             mock.patch("config.log_to_file", side_effect=lambda m: logged.append(m)), \
+             mock.patch.object(paprika_app.ctypes, "windll", mock.Mock(),
+                               create=True) as windll:
+            paprika_app._fatal("no WebView2 runtime")
+        return windll
+
+    def test_without_a_console_it_shows_a_dialog_and_writes_the_log(self):
+        logged = []
+        windll = self._fatal_with(False, logged)
+        windll.user32.MessageBoxW.assert_called_once()
+        self.assertTrue(any("no WebView2 runtime" in line for line in logged))
+
+    def test_with_a_console_it_does_not_show_a_dialog(self):
+        # A console build is a developer or a debug artifact: printing is enough,
+        # and a modal box would block an automated run.
+        logged = []
+        windll = self._fatal_with(True, logged)
+        windll.user32.MessageBoxW.assert_not_called()
+        self.assertTrue(any("no WebView2 runtime" in line for line in logged))
+
+    def test_every_fatal_startup_path_uses_it(self):
+        # Missing pywebview, a missing core module, and a failed webview.start()
+        # (the WebView2 case) — each must go through _fatal, not print.
+        src = (Path(__file__).resolve().parent.parent / "paprika_app.py").read_text(
+            encoding="utf-8")
+        self.assertIn("def _fatal(", src)
+        self.assertEqual(src.count("_fatal("), 4)
 
 
 if __name__ == "__main__":

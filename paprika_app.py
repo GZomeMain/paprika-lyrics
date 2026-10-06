@@ -20,10 +20,43 @@ DEPENDENCY_HINT = (
     "    pip install -r requirements.txt"
 )
 
+# A windowed build has no console to print to (`pythonw`, or a frozen
+# `console=False` exe), so a fatal startup error used to be silent: no WebView2
+# runtime meant a double-click that appeared to do nothing at all. `_fatal`
+# routes those messages somewhere the user can see them and somewhere a bug
+# report can quote them.
+_HAS_CONSOLE = sys.stdout is not None and sys.stderr is not None
+
+
+def _fatal(message: str, title: str = "Paprika Lyrics") -> None:
+    """
+    Reports a startup failure that would otherwise vanish.
+
+    Prints when there is a console, always appends to the on-disk log, and shows
+    a native message box when there is not. Every channel is best-effort: this
+    runs on the way out of a failed launch, so it must not raise in turn.
+    """
+    print(f"[{title}] {message}")
+    try:
+        from config import log_to_file
+        log_to_file("FATAL: " + message)
+    except Exception:
+        pass
+    if _HAS_CONSOLE:
+        return
+    try:
+        # MB_ICONERROR | MB_TOPMOST: the overlay has no parent window yet, and a
+        # dialog that opened behind other windows would be as invisible as the
+        # silence it replaces.
+        ctypes.windll.user32.MessageBoxW(None, message, title, 0x00000010 | 0x00040000)
+    except Exception:
+        pass
+
+
 try:
     import webview
 except ImportError:
-    print("[Paprika Lyrics] Could not import 'pywebview'.\n" + DEPENDENCY_HINT)
+    _fatal("Could not import 'pywebview'.\n" + DEPENDENCY_HINT)
     sys.exit(1)
 
 try:
@@ -37,11 +70,15 @@ _DEFAULT_FIX_POINT = (FixPoint.NORTH | FixPoint.WEST) if FixPoint is not None el
 
 try:
     from config import (
+        APP_VERSION,
+        DATA_DIR,
+        DATA_DIR_IS_FALLBACK,
         DEFAULT_WIDTH,
         DEFAULT_HEIGHT,
         INDEX_HTML_PATH,
         PARSER_VERSION,
         WEBVIEW_PROFILE_DIR,
+        log_to_file,
     )
     from storage import CACHE
     from core.lyrics import ASYNC_EXECUTOR
@@ -50,7 +87,7 @@ try:
     from core.ttml_library import TTML_LIBRARY
     from core import native_window
 except ImportError as exc:
-    print(f"[Paprika Lyrics] Failed to load a core module: {exc}\n" + DEPENDENCY_HINT)
+    _fatal(f"Failed to load a core module: {exc}\n" + DEPENDENCY_HINT)
     sys.exit(1)
 
 SHUTDOWN_SIGNAL = threading.Event()
@@ -793,10 +830,143 @@ class WindowApi:
     def seek_position(self, target_ms: float):
         SMTC_BRIDGE.seek_position(target_ms)
 
+    def get_spicy_api_key(self) -> dict:
+        """Returns the current Spicy Lyrics API key configuration."""
+        import config
+        key = config.get_spicy_api_key()
+        masked = ""
+        if key:
+            if len(key) > 8:
+                prefix = key[:6] if key.startswith("sl_sk_") else key[:3]
+                suffix = key[-4:]
+                masked = f"{prefix}••••••••{suffix}"
+            else:
+                masked = "••••••••"
+        return {
+            "set": bool(key),
+            "key": key,
+            "masked": masked,
+        }
+
+    def set_spicy_api_key(self, key: str) -> dict:
+        """
+        Saves the user's Spicy Lyrics secret key, tests connectivity,
+        and requests a reload so current lyrics re-resolve immediately.
+        """
+        import config
+        res = config.set_spicy_api_key(key)
+        status_msg = "Key removed. Using LRCLIB line fallback."
+        verified = False
+
+        clean_key = config.get_spicy_api_key()
+        if clean_key:
+            # Quick validation check against the Spicy Lyrics API
+            try:
+                from core.resolver import http_get
+                test_url = f"{config.BASE_URL}/v1/lyrics/test"
+                resp = http_get(test_url, headers={"Authorization": f"Bearer {clean_key}"}, timeout=3.0)
+                if resp is not None:
+                    if resp.status_code in (401, 403):
+                        status_msg = "Key saved, but rejected by Spicy Lyrics (HTTP 401/403). Check your key."
+                    elif resp.status_code in (200, 404):
+                        status_msg = "Key saved & verified! Syllable-sync enabled."
+                        verified = True
+                    else:
+                        status_msg = f"Key saved! (Spicy Lyrics responded with HTTP {resp.status_code})"
+                        verified = True
+                else:
+                    status_msg = "Key saved! (Spicy Lyrics server could not be reached right now)"
+                    verified = True
+            except Exception:
+                status_msg = "Key saved!"
+                verified = True
+
+            # If playback is active, trigger an immediate lyric reload so the song upgrades
+            try:
+                SMTC_BRIDGE.request_reload()
+            except Exception:
+                pass
+        else:
+            try:
+                SMTC_BRIDGE.request_reload()
+            except Exception:
+                pass
+
+        res["status"] = status_msg
+        res["verified"] = verified
+        return res
+
+
+def _report_shutdown_failure(step: str, exc: BaseException) -> None:
+    """Says out loud that one shutdown step failed, without raising."""
+    message = f"Shutdown step '{step}' failed: {exc}"
+    print(f"[Paprika Lyrics] {message}")
+    try:
+        log_to_file(message)
+    except Exception:
+        pass
+
+
+def shutdown_app(api, hotkey_manager, cache, executor, shutdown_signal):
+    """
+    Tears the launch down one step at a time; no step may skip another.
+
+    This runs from `window.events.closed`, which is the last code the process
+    executes. An unguarded exception here used to take the rest of the teardown
+    with it: `HOTKEY_MANAGER.stop()` raising would skip the window-geometry write
+    and the cache flush behind it, silently costing the user their window
+    position and any local-TTML binding they had just made — and in a windowed
+    build nothing would have been printed either. Each step is therefore
+    isolated, and every failure is both reported and returned.
+
+    The pieces are arguments rather than module globals so the path is testable
+    without a window: see `tests/test_window_api.py`.
+    """
+    def flush_cache():
+        # flush_sync, not flush: the writes are debounced behind a timer, and a
+        # timer that has not fired is gone with the process — which is how a
+        # just-made local-TTML binding could be forgotten. It reports its own
+        # failure, so a cache that cannot be written is said out loud instead of
+        # costing the user their settings silently.
+        if not cache.flush_sync():
+            print("[Paprika Lyrics] Warning: the cache could not be saved on exit.")
+
+    steps = (
+        ("shutdown signal", lambda: shutdown_signal.set()),
+        # `is not None`, not truthiness, and defensive on purpose: a manager that
+        # was never constructed (or a future build without hotkeys) must not
+        # cost the user the two writes below it.
+        ("hotkeys", lambda: hotkey_manager.stop() if hotkey_manager is not None else None),
+        ("peek timer", lambda: api._cancel_peek_timer() if api is not None else None),
+        ("hover probe", lambda: api._stop_hover_probe() if api is not None else None),
+        ("window geometry", lambda: api._record_window_geometry() if api is not None else None),
+        ("cache flush", flush_cache),
+        ("async executor", lambda: executor.shutdown(wait=False)),
+    )
+    failures = []
+    for name, step in steps:
+        try:
+            step()
+        except Exception as exc:
+            failures.append((name, exc))
+            _report_shutdown_failure(name, exc)
+    return failures
+
+
 # =====================================================================
 # APPLICATION RUNTIME ENTRY
 # =====================================================================
 if __name__ == '__main__':
+    # First act: record which build this is and where it may write. A frozen
+    # build that had to move its data folder (see config._writable_data_dir)
+    # says so here, so a "my settings vanish" report can be answered from the log
+    # instead of guessed at.
+    log_to_file(
+        "startup: version=%s data_dir=%s fallback=%s frozen=%s"
+        % (APP_VERSION, DATA_DIR, DATA_DIR_IS_FALLBACK,
+           bool(getattr(sys, "frozen", False)))
+    )
+
     # Purge cached lyrics from older parser versions (and anything past its TTL)
     # before the UI can ever be handed one. Reading still re-validates each
     # payload, so this only stops dead weight accumulating on disk.
@@ -865,26 +1035,16 @@ if __name__ == '__main__':
         api.ttml_reveal,
         api.ttml_bind,
         api.ttml_set_enabled,
-        api.ttml_remove
+        api.ttml_remove,
+        api.get_spicy_api_key,
+        api.set_spicy_api_key
     )
 
     def on_shown():
         apply_native_window_frame(window)
 
     def on_closed():
-        SHUTDOWN_SIGNAL.set()
-        HOTKEY_MANAGER.stop()
-        api._cancel_peek_timer()
-        api._stop_hover_probe()
-        api._record_window_geometry()
-        # flush_sync, not flush: the writes are debounced behind a timer, and a
-        # timer that has not fired is gone with the process — which is how a
-        # just-made local-TTML binding could be forgotten. It also reports its own
-        # failure, so a cache that cannot be written is said out loud instead of
-        # costing the user their settings silently.
-        if not CACHE.flush_sync():
-            print("[Paprika Lyrics] Warning: the cache could not be saved on exit.")
-        ASYNC_EXECUTOR.shutdown(wait=False)
+        shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)
 
     window.events.shown += on_shown
     window.events.closed += on_closed
@@ -904,8 +1064,8 @@ if __name__ == '__main__':
             storage_path=str(WEBVIEW_PROFILE_DIR),
         )
     except Exception as exc:
-        print(
-            "[Paprika Lyrics] The window failed to start. This usually means the "
+        _fatal(
+            "The window failed to start. This usually means the "
             "Microsoft Edge WebView2 Runtime is missing.\n"
             "Download it from https://developer.microsoft.com/en-us/microsoft-edge/webview2/\n"
             f"Details: {exc}"

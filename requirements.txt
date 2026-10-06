@@ -1,7 +1,15 @@
 # Core runtime dependencies for Paprika Lyrics
-pywebview>=5.0
-winsdk>=1.0.0b10
-requests>=2.31.0
+#
+# Pinned exactly, not floored. The release workflow installs from this file and
+# packages whatever it resolves, so a floating range means the shipped build
+# changes under the user without a commit: a future pywebview major (which owns
+# the WebView2 host and its native loader) or winsdk (which owns the GSMTC
+# transport) could land in a tagged release that was never tested against it.
+# These are the versions the app was verified on (Windows, Python 3.10-3.13);
+# bump them deliberately, in a commit, with a test run.
+pywebview==6.2.1
+winsdk==1.0.0b10
+requests==2.32.3
 # Optional: spotify-scraper>=0.9.0
 #   core/resolver.py imports it behind a guard (SPOTIFY_SCRAPER_AVAILABLE) and
 #   degrades to the other resolution tiers without it. It is not installed here
