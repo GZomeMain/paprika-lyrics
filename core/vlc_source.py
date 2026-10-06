@@ -8,9 +8,6 @@ its errors) is contained here.
 """
 from __future__ import annotations
 
-import threading
-import time
-
 import requests
 
 from config import debug_log
@@ -29,14 +26,21 @@ _SESSION.headers.update({"User-Agent": "PaprikaLyrics/1.0"})
 
 
 class VlcSource:
-    """Polls VLC's HTTP interface; remembers the last state for dedupe."""
+    """Polls VLC's HTTP interface and dispatches playback commands to it.
+
+    Deliberately stateless about the last-read track. An earlier revision kept a
+    `last_state` here and exposed a `changed_track()`, but the live code path
+    (`SmtcBridge._vlc_tick`) compares its own `_vlc_track_sig` — the same
+    signature the SMTC path and the per-track latency lookup key off — so
+    `changed_track` was never called and, because `poll()` had already stored the
+    new state, could not have answered correctly if it were. One place decides
+    what "a different track" means; this class only does I/O.
+    """
 
     def __init__(self, password: str = "", host: str = "127.0.0.1", port: int = 8080):
         self.password = password
         self.status_url = build_status_url(host, port)
-        self.last_state: VlcState | None = None
         self.consecutive_failures = 0
-        self.lock = threading.Lock()
 
     @property
     def configured(self) -> bool:
@@ -55,23 +59,12 @@ class VlcSource:
             if res.status_code != 200:
                 raise RuntimeError(f"HTTP {res.status_code}")
             self.consecutive_failures = 0
-            state = parse_status(res.json(), now_ms=None)
-            with self.lock:
-                self.last_state = state
-            return state
+            return parse_status(res.json(), now_ms=None)
         except Exception as exc:
             self.consecutive_failures += 1
             if self.consecutive_failures == 1 or self.consecutive_failures % 30 == 0:
                 debug_log("VLC poll failed:", exc)
             return None
-
-    def changed_track(self, state: VlcState) -> bool:
-        """True when this state is a different track than the last pushed one."""
-        prev = self.last_state
-        if prev is None:
-            return True
-        return (state.title, state.artist, state.album, state.length_ms) != (
-            prev.title, prev.artist, prev.album, prev.length_ms)
 
     def command(self, command: str, **params) -> None:
         """Fire a playback command (pl_next, seek, ...). Best-effort."""

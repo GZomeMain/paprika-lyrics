@@ -330,10 +330,18 @@ class ShutdownFlushTest(unittest.TestCase):
         # The method only helps if the exit path calls it. Wiring that cannot be
         # executed headlessly (pywebview owns the close event), so it is asserted
         # against the source the way the WebView2 profile wiring is.
+        #
+        # The call lives in `shutdown_app`, which `on_closed` routes through (it
+        # had to become parameterised so a failing teardown step cannot swallow
+        # the flush), so the guard follows it there — and adds the routing check
+        # rather than dropping one.
         src = (Path(__file__).resolve().parent.parent / "paprika_app.py").read_text(
             encoding="utf-8")
-        self.assertIn("CACHE.flush_sync()", src)
-        self.assertNotIn("CACHE.flush()\n", src)
+        self.assertIn("cache.flush_sync()", src)
+        self.assertNotIn("cache.flush()\n", src)
+        self.assertIn(
+            "shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)",
+            src)
 
 
 class WindowGeometryTest(unittest.TestCase):

@@ -98,7 +98,12 @@ class SmtcBridge:
             host=os.getenv("VLC_HTTP_HOST", "127.0.0.1"),
             port=int(os.getenv("VLC_HTTP_PORT", "8080")),
         )
+        # The whole VLC checkpoint is initialized HERE, not on the first pass of
+        # run(): `_vlc_tick` reads all three, and state that only exists once the
+        # loop has started makes the tick uncallable (and untestable) on its own.
         self._vlc_track_sig = ""
+        self._vlc_last_playing = False
+        self._vlc_last_pos_ms = 0.0
         # Also initialized here: a local-TTML change can arrive before the
         # listener loop has started, and it must not be lost.
         self.reload_requested = False

@@ -6,6 +6,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import config
 from config import BASE_DIR, WEBVIEW_PROFILE_DIR
@@ -180,6 +181,72 @@ class FrozenPathTests(unittest.TestCase):
         self.assertIn("DATA_DIR in self.directory.resolve().parents", src)
 
 
+class WritableDataDirTests(unittest.TestCase):
+    """A build dropped somewhere read-only must still be able to save.
+
+    The portable zip writes beside the executable, which is correct when the
+    user extracted it into their own folder and silently broken when it was
+    unzipped under `C:\Program Files`: a standard user cannot create a file
+    there, so the cache flush, the `.env` save and the WebView2 profile — every
+    persistence guarantee the app makes — fail together. `_writable_data_dir` is
+    the fallback, and its probe is injected so this is testable without a
+    read-only volume.
+    """
+
+    def test_a_writable_folder_is_kept(self):
+        target = Path("E:/Games/PaprikaLyrics")
+        chosen, fell_back = config._writable_data_dir(target, probe=lambda d: True)
+        self.assertEqual(chosen, target)
+        self.assertFalse(fell_back)
+
+    def test_an_unwritable_folder_falls_back_to_the_user_directory(self):
+        target = Path("C:/Program Files/PaprikaLyrics")
+        chosen, fell_back = config._writable_data_dir(target, probe=lambda d: d != target)
+        self.assertEqual(chosen, config._fallback_data_dir())
+        self.assertTrue(fell_back)
+
+    def test_the_fallback_is_one_app_specific_folder_under_local_app_data(self):
+        # %LOCALAPPDATA% is per-user and always writable, and the folder is ours
+        # alone so another program's data cannot collide with our cache.
+        with mock.patch.dict(os.environ,
+                             {"LOCALAPPDATA": "E:/Users/Someone/AppData/Local"}):
+            self.assertEqual(
+                config._fallback_data_dir(),
+                Path("E:/Users/Someone/AppData/Local/PaprikaLyrics"))
+
+    def test_nothing_writable_keeps_the_preferred_folder(self):
+        # Abandoning the user's chosen folder for one we cannot write either
+        # would be a silent relocation, which is worse than a reported failure.
+        target = Path("E:/Games/PaprikaLyrics")
+        chosen, fell_back = config._writable_data_dir(target, probe=lambda d: False)
+        self.assertEqual(chosen, target)
+        self.assertFalse(fell_back)
+
+    def test_a_probe_that_raises_is_treated_as_not_writable(self):
+        # The probe touches the filesystem; it must not be able to take the
+        # process down at import time if the drive disappears underneath it.
+        def exploding(_directory):
+            raise OSError("drive disconnected")
+
+        target = Path("E:/Games/PaprikaLyrics")
+        chosen, fell_back = config._writable_data_dir(target, probe=exploding)
+        self.assertEqual(chosen, target)
+        self.assertFalse(fell_back)
+
+    def test_every_write_target_follows_the_resolved_data_dir(self):
+        # The fallback only helps if the cache, the log and the rest derive from
+        # DATA_DIR rather than rebuilding a path from BASE_DIR or the exe folder.
+        src = (BASE_DIR / "config.py").read_text(encoding="utf-8")
+        self.assertIn("DATA_DIR, DATA_DIR_IS_FALLBACK = _writable_data_dir(", src)
+        self.assertIn('LOG_FILE = DATA_DIR / "logs" / "paprika.log"', src)
+
+    def test_the_resolved_folder_is_reported_at_startup(self):
+        # A "my settings vanish" report has to be answerable from the log, so the
+        # startup line must name the folder and whether it was the fallback.
+        src = (BASE_DIR / "paprika_app.py").read_text(encoding="utf-8")
+        self.assertIn("data_dir=%s fallback=%s frozen=%s", src)
+
+
 class CredentialGuardTests(unittest.TestCase):
     """
     Agent scratch directories hold live session tokens.
@@ -287,6 +354,39 @@ class WebviewProfileDirTests(unittest.TestCase):
         src = (BASE_DIR / "paprika_app.py").read_text(encoding="utf-8")
         self.assertIn("private_mode=False", src)
         self.assertIn("storage_path=str(WEBVIEW_PROFILE_DIR)", src)
+
+
+class SpicyApiKeyManagementTests(unittest.TestCase):
+    """Verifies in-app configuration and persistence for the Spicy Lyrics API key."""
+
+    def setUp(self):
+        self._orig_env = os.environ.get("SPICY_API_KEY")
+        self._orig_config_key = config.SPICY_API_KEY
+
+    def tearDown(self):
+        if self._orig_env is not None:
+            os.environ["SPICY_API_KEY"] = self._orig_env
+        else:
+            os.environ.pop("SPICY_API_KEY", None)
+        config.SPICY_API_KEY = self._orig_config_key
+
+    def test_set_and_get_spicy_api_key(self):
+        res = config.set_spicy_api_key("sl_sk_abcdef123456")
+        self.assertTrue(res["ok"])
+        self.assertTrue(res["key_set"])
+        self.assertIn("sl_sk_", res["masked"])
+        self.assertIn("3456", res["masked"])
+        self.assertEqual(config.get_spicy_api_key(), "sl_sk_abcdef123456")
+        self.assertEqual(os.environ.get("SPICY_API_KEY"), "sl_sk_abcdef123456")
+
+    def test_clear_spicy_api_key(self):
+        config.set_spicy_api_key("sl_sk_samplekey")
+        res = config.set_spicy_api_key("")
+        self.assertTrue(res["ok"])
+        self.assertFalse(res["key_set"])
+        self.assertEqual(res["masked"], "")
+        self.assertEqual(config.get_spicy_api_key(), "")
+        self.assertNotIn("SPICY_API_KEY", os.environ)
 
 
 if __name__ == "__main__":
