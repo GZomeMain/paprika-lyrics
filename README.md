@@ -39,7 +39,7 @@ Uncomment and point at your own files once they exist:
 
 Paprika Lyrics is a lightweight, GPU-accelerated desktop overlay that turns any song into **Apple Music-style, word-by-word synced lyrics** — floating on top of your desktop or filling the screen.
 
-It follows **whatever your PC is playing** by reading the track straight from Windows' own media controls (GSMTC). That means it works with almost anything — Spotify, YouTube / YouTube Music in a browser, SimpMusic, VLC, Foobar2000, Groove, and any other player that reports its now-playing track to Windows. Not just one app.
+It follows **whatever your PC is playing** by reading the track straight from Windows' own media controls (GSMTC). That means it works with almost anything — Spotify, YouTube / YouTube Music in a browser, SimpMusic, Foobar2000, Groove, and any other player that reports its now-playing track to Windows. Not just one app.
 
 **No audio is ever captured.** Paprika listens to the *media session*, not the music.
 
@@ -53,6 +53,7 @@ It follows **whatever your PC is playing** by reading the track straight from Wi
 - **💃 Living motion** — words lift, breathe and bloom as they land; spring physics, depth of field and a motion-variant engine keep lines alive without looking cartoonish.
 - **🥁 Beat-synced light** — a rhythm model estimated from the lyrics pulses the room and the sleeve on the actual beat, builds, drops and hooks included.
 - **🧩 Local lyrics** — bring your own `.ttml` files for songs the online lookup gets wrong.
+- **🔤 Your own fonts** — import `.ttf` / `.otf` / `.woff` / `.woff2` faces for the lyrics or the interface; the settings list shows each one in its own typeface, and the files live in a folder you can open.
 - **🪶 Graceful fallback** — no syllable data? It drops to line-synced lyrics from [LRCLIB](https://lrclib.net/) and keeps going.
 - **🪟 Built for Windows** — frameless overlay, always-on-top, mini player, click-through mode, native anchored resizing, and global hotkeys.
 - **⚡ Light on resources** — a small Python host driving Edge WebView2 (Chromium); every animation is transform/opacity only.
@@ -96,7 +97,6 @@ Edge WebView2 overlay                  ui/ (style.css · app.js)
 ## 📋 Requirements
 
 - **Windows 10** (1809+) or **Windows 11**, 64-bit
-- **[Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)** — pre-installed on most modern Windows systems
 - **Python 3.10 – 3.13** — only needed to run from source
 
 ---
@@ -136,7 +136,8 @@ The key unlocks **syllable-level** (word-by-word) lyrics. Without it the app sti
 
 **2. Put it in the app**
 
-Create a file named `.env` next to `paprika_app.py` (copy the committed [`.env.example`](.env.example)) and set:
+- **In the App (Easiest):** Press <kbd>Ctrl + ,</kbd> (or click the gear icon on the album art) → switch to the **Lyrics** tab → paste your secret key into the **Spicy Lyrics API** box and click **Save**.
+- **Or via `.env` file:** Create a file named `.env` next to `paprika_app.py` (or beside `PaprikaLyrics.exe` if running the packaged build; copy [`.env.example`](.env.example)):
 
 ```env
 SPICY_API_KEY="sl_sk_your_key_here"
@@ -145,13 +146,12 @@ SPICY_BASE_URL="https://api.spicylyrics.org"
 
 - A real environment variable (`SPICY_API_KEY`) always outranks the `.env` file.
 - `.env` is **git-ignored** — never commit your key.
-- Running the packaged `.exe`? Put `.env` beside the executable.
 
 **3. Verify it worked**
 
-Open **Settings → Resolve report**. It shows `API key: Set` once the key is picked up.
+Open **Settings → Diagnostics → Resolve report**. It shows `API key: Set` once the key is active, and word-by-word syllable sync will be used automatically.
 
-Every optional setting (`SPICY_TTML_DIR`, `SPICY_WEBVIEW_DIR`, `SPICY_CACHE_TTL_SECONDS`, `SPICY_DEBUG`) is documented with its default in [`.env.example`](.env.example).
+Every optional setting (`SPICY_TTML_DIR`, `SPICY_FONT_DIR`, `SPICY_WEBVIEW_DIR`, `SPICY_CACHE_TTL_SECONDS`, `SPICY_DEBUG`) is documented with its default in [`.env.example`](.env.example).
 
 ---
 
@@ -183,6 +183,26 @@ For tracks the online lookup gets wrong, keep your own Apple / AMLL `.ttml` file
 
 ---
 
+## 🔤 Fonts
+
+Settings → **Fonts** lists every face the overlay can draw in — the stock ones, then whatever you
+imported:
+
+- **Add font…** opens a file picker and takes several files at once. The chosen files are **copied
+  into your fonts folder** (`fonts/` beside the app, or `SPICY_FONT_DIR`), so an import survives a
+  restart and there is no cap on how many you keep.
+- Each row is drawn **in the face it names**: pick by looking rather than by reading file names. The
+  face in use for the Lyrics or the Interface is marked on its row, and one click moves that job.
+- **Remove** moves a file to `fonts/.trash` — a management action, not a delete, so the file can be
+  dragged back in.
+- A file whose bytes will not load (a renamed download, a corrupt font) is listed as unreadable
+  rather than applied or silently ignored.
+- **Open folder** shows the folder in Explorer, where you can also drop fonts in yourself.
+
+Imports are registered at runtime, so a new face applies the moment you pick it — no restart.
+
+---
+
 ## 📦 Build a standalone `.exe`
 
 No Python required by whoever runs it.
@@ -192,7 +212,7 @@ pip install pyinstaller
 python -m PyInstaller PaprikaLyrics.spec --noconfirm
 ```
 
-The result is `dist/PaprikaLyrics/` — a **onedir** build, so ship the whole folder. It is unsigned, so Windows SmartScreen warns on first run (*More info → Run anyway*). Everything the app **writes** (`.env`, `.webview/`, `ttml/`, `spotify_cache.json`) lives **beside** the executable, never inside the bundle.
+The result is `dist/PaprikaLyrics/` — a **onedir** build, so ship the whole folder. It is unsigned, so Windows SmartScreen warns on first run (*More info → Run anyway*). Everything the app **writes** (`.env`, `.webview/`, `ttml/`, `fonts/`, `spotify_cache.json`) lives **beside** the executable, never inside the bundle.
 
 ---
 
@@ -202,7 +222,7 @@ The result is `dist/PaprikaLyrics/` — a **onedir** build, so ship the whole fo
 | --- | --- |
 | Lyrics are line-synced, not word-by-word | The track has no syllable sync, or your API key is missing. Check **Settings → Resolve report**. |
 | Lyrics are slightly ahead / behind | Nudge with `Ctrl + [` / `Ctrl + ]` (saved per song), or use the latency rail. |
-| Song shows `--:--` and the seek bar does nothing | Your player doesn't publish a timeline to Windows (SimpMusic does this). That's the player, not the overlay. |
+| Song shows `--:--` and the seek bar does nothing | Your player doesn't publish a length to Windows (SimpMusic does this), or has blanked its timeline while the next item opens. That's the player, not the overlay — the length is re-announced as soon as it publishes one, including on a player that only reports it a moment after the title. |
 | I can't click the overlay | It's in click-through mode — press `Ctrl + Shift + T`. |
 | I want to reset all settings | Delete the `.webview/` folder. |
 
