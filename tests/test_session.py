@@ -1,63 +1,60 @@
+"""Tests for the media-session selection policy (core.session).
+
+The policy is pure, so every rule about which player the overlay follows is
+pinned here — including the two that real players broke:
+
+* a pinned but idle app used to keep the overlay forever, so switching to
+  another (playing) player left stale lyrics on screen;
+* two tabs of one browser share a ``SourceAppUserModelId``, so identifying a
+  session by app id alone could follow the paused tab while the other one played.
+"""
 import unittest
 
 from core.session import HANDOVER_QUIET_S, select_session
 
 
-def d(app_id, playing=False, is_current=False, in_current=False):
+def d(key, app_id=None, playing=False):
     return {
-        "app_id": app_id,
+        "key": key,
+        "app_id": key if app_id is None else app_id,
         "playing": playing,
-        "is_current": is_current,
-        "in_current": in_current,
     }
 
 
 class SelectSessionTest(unittest.TestCase):
-    """Regression: a paused pinned session used to keep the overlay forever,
-    so switching to another (playing) player left stale lyrics on screen."""
-
     def test_no_sessions_clears_everything(self):
         chosen, pin, challenger = select_session([], "A", ("A", 1.0), 100)
         self.assertIsNone(chosen)
         self.assertEqual(pin, "")
         self.assertIsNone(challenger)
 
-    def test_lone_session_takes_over_and_then_pins(self):
-        descs = [d("A", playing=True)]
-        chosen, pin, challenger = select_session(descs, "", None, 100)
-        self.assertEqual(chosen, "A")
-        self.assertEqual(pin, "")            # not pinned until the quiet period
-        self.assertEqual(challenger, ("A", 100))
-
-        chosen, pin, challenger = select_session(descs, pin, challenger, 103)
-        self.assertEqual(chosen, "A")
-        self.assertEqual(pin, "")            # still earning it
-        self.assertEqual(challenger, ("A", 100))
-
-        chosen, pin, challenger = select_session(
-            descs, pin, challenger, 100 + HANDOVER_QUIET_S)
-        self.assertEqual(chosen, "A")
-        self.assertEqual(pin, "A")
+    def test_the_best_session_is_taken_immediately_when_nothing_is_on_screen(self):
+        descs = [d("A", playing=False), d("B", playing=True), d("C", playing=False)]
+        chosen, pin, challenger = select_session(descs, "", None, 0)
+        self.assertEqual(chosen, "B")
+        self.assertEqual(pin, "B")
         self.assertIsNone(challenger)
 
     def test_playing_pin_keeps_the_overlay(self):
-        # A second app starting must never steal a pin that is still playing.
-        descs = [d("A", playing=True, in_current=True), d("B", playing=True)]
-        chosen, pin, challenger = select_session(descs, "A", None, 100)
+        # A second player starting must never steal a pin that is still playing.
+        descs = [d("A", playing=True), d("B", playing=True)]
+        chosen, pin, _ = select_session(descs, "A", None, 100)
         self.assertEqual(chosen, "A")
         self.assertEqual(pin, "A")
-        self.assertIsNone(challenger)
+
+    def test_idle_pin_stays_when_nothing_else_plays(self):
+        descs = [d("A", playing=False)]
+        chosen, pin, _ = select_session(descs, "A", None, 100)
+        self.assertEqual(chosen, "A")
+        self.assertEqual(pin, "A")
 
     def test_idle_pin_relinquishes_to_a_playing_challenger(self):
-        # The bug: pinned SimpMusic went idle while Spotify played. The pin must
-        # be dropped and the challenger must earn the handover.
-        descs = [
-            d("SimpMusic", playing=False, is_current=True, in_current=True),
-            d("Spotify", playing=True),
-        ]
+        # The bug: pinned SimpMusic went idle while Spotify played, so the overlay
+        # sat on a paused app. The challenger must earn the handover first.
+        descs = [d("SimpMusic", playing=False), d("Spotify", playing=True)]
         chosen, pin, challenger = select_session(descs, "SimpMusic", None, 100)
-        self.assertEqual(pin, "")            # pin relinquished
-        self.assertEqual(chosen, "SimpMusic")  # keep following current briefly
+        self.assertEqual(chosen, "SimpMusic")   # held while it earns it
+        self.assertEqual(pin, "SimpMusic")
         self.assertEqual(challenger[0], "Spotify")
 
         chosen, pin, challenger = select_session(
@@ -66,39 +63,76 @@ class SelectSessionTest(unittest.TestCase):
         self.assertEqual(pin, "Spotify")
         self.assertIsNone(challenger)
 
-    def test_idle_pin_stays_when_nothing_else_plays(self):
-        descs = [d("A", playing=False, in_current=True)]
-        chosen, pin, challenger = select_session(descs, "A", None, 100)
+    def test_a_challenger_that_goes_quiet_loses_its_progress(self):
+        # A blip must not flick the lyrics onto another session.
+        descs = [d("A", playing=False), d("B", playing=True)]
+        _chosen, pin, challenger = select_session(descs, "A", None, 100)
+        self.assertEqual(challenger[0], "B")
+
+        # B stops playing: A keeps the overlay, and B has to earn the handover
+        # again from scratch rather than resuming where it left off.
+        then = [d("A", playing=False), d("B", playing=False)]
+        chosen, pin, challenger = select_session(then, pin, challenger, 105)
         self.assertEqual(chosen, "A")
         self.assertEqual(pin, "A")
+        self.assertIsNone(challenger)
 
-    def test_lost_pin_falls_through_to_reselection(self):
-        descs = [d("B", playing=True)]
-        chosen, pin, challenger = select_session(descs, "A", ("A", 1.0), 100)
-        self.assertEqual(chosen, "B")
-        self.assertNotEqual(pin, "A")
-
-    def test_multiple_sessions_without_current_choose_a_playing_one(self):
-        # The old fallback could return None here (overlay blanked while audio
-        # played); it must always pick something.
-        descs = [d("A", playing=False), d("B", playing=True), d("C", playing=False)]
-        chosen, _pin, _ch = select_session(descs, "", None, 0)
-        self.assertEqual(chosen, "B")
-
-    def test_no_pin_holds_idle_current_until_challenger_earns_it(self):
-        descs = [d("A", playing=False, in_current=True), d("B", playing=True)]
-        chosen, pin, challenger = select_session(descs, "", None, 100)
-        self.assertEqual(chosen, "A")          # hold current, no flicker
-        self.assertEqual(pin, "")
-        chosen, pin, _ch = select_session(
-            descs, pin, challenger, 100 + HANDOVER_QUIET_S)
+        # Once B plays again for the whole quiet period, it wins.
+        again = [d("A", playing=False), d("B", playing=True)]
+        chosen, pin, challenger = select_session(again, pin, None, 106)
+        self.assertEqual(chosen, "A")
+        chosen, pin, _ = select_session(again, pin, challenger,
+                                        106 + HANDOVER_QUIET_S)
         self.assertEqual(chosen, "B")
         self.assertEqual(pin, "B")
 
-    def test_current_idle_does_not_beat_a_playing_session(self):
-        descs = [d("A", playing=False, is_current=True), d("B", playing=True)]
-        chosen, _pin, _ch = select_session(descs, "", None, 0)
+    def test_a_lost_pin_falls_through_to_reselection(self):
+        descs = [d("B", playing=True)]
+        chosen, pin, _ = select_session(descs, "A", ("A", 1.0), 100)
         self.assertEqual(chosen, "B")
+        self.assertEqual(pin, "B")
+
+    def test_the_same_app_is_preferred_among_playing_sessions(self):
+        descs = [d("Other.exe\x01Song", app_id="Other.exe", playing=True),
+                 d("browser\x01Song", app_id="browser", playing=True)]
+        chosen, _pin, _ = select_session(descs, "", None, 0,
+                                         pinned_app_id="browser")
+        self.assertEqual(chosen, "browser\x01Song")
+
+    def test_two_tabs_of_one_browser_follow_the_playing_tab(self):
+        # The reported bug: "songs keep switching from yt music to another tab
+        # which is not even playing". Both tabs share the browser's app id, so
+        # only the session key tells them apart.
+        songs_tab = d("msedge.exe\x01Song A", app_id="msedge.exe", playing=False)
+        other_tab = d("msedge.exe\x01Other Video", app_id="msedge.exe", playing=True)
+
+        chosen, pin, _ = select_session([songs_tab, other_tab], "", None, 0)
+        self.assertEqual(chosen, other_tab["key"])
+        self.assertEqual(pin, other_tab["key"])
+
+        # And a paused tab must not displace the playing one it shares an app id
+        # with, even when it is listed first.
+        chosen, pin, _ = select_session([songs_tab, other_tab], other_tab["key"], None, 1)
+        self.assertEqual(chosen, other_tab["key"])
+
+        # A new song in the paused tab does not steal it either: the key changed,
+        # but the session is idle and the challenger rule protects the playing pin.
+        changed = d("msedge.exe\x01Song B", app_id="msedge.exe", playing=False)
+        chosen, pin, _ = select_session([changed, other_tab], other_tab["key"], None, 2)
+        self.assertEqual(chosen, other_tab["key"])
+
+    def test_a_playing_same_browser_tab_takes_over_from_an_idle_one(self):
+        yt = d("chrome.exe\x01Song", app_id="chrome.exe", playing=False)
+        video = d("chrome.exe\x01Video", app_id="chrome.exe", playing=True)
+        chosen, pin, challenger = select_session([yt], "chrome.exe\x01Song", None, 0)
+        self.assertEqual(chosen, yt["key"])
+
+        chosen, pin, challenger = select_session([yt, video], pin, None, 1)
+        self.assertEqual(chosen, yt["key"])          # held while the challenger earns it
+        chosen, pin, _ = select_session(
+            [yt, video], pin, challenger, 1 + HANDOVER_QUIET_S)
+        self.assertEqual(chosen, video["key"])
+        self.assertEqual(pin, video["key"])
 
 
 if __name__ == "__main__":

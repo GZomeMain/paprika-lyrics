@@ -3,13 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Paprika Lyrics — real-time lyric display for SimpMusic">
+  <meta name="description" content="Paprika Lyrics — real-time synchronized lyrics overlay for Windows">
   <title>Paprika Lyrics</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="icon" type="image/png" href="icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<!-- `duration-unknown` starts on: the page has not been told a length yet, and a
+     total it cannot know is not 0:00 — it is unknown. The host pushes the real
+     length (or an explicit unknown) within a second of the first track. -->
+<body class="duration-unknown">
   <div class="app-root">
 
     <div class="ambient-backdrop">
@@ -65,6 +69,12 @@
                which is why neither this stage nor the wrapper may clip it. -->
           <div class="art-light" aria-hidden="true"></div>
           <img id="track-art" class="track-art" alt="" draggable="false">
+          <!-- The lean's gloss, on a clipping layer of its own. The stage cannot
+               clip (the lamp bleeds past the sleeve), so a band rotated on it
+               painted its corners outside the artwork — a bright sliver along the
+               sleeve edge, most visible leaning right. This layer is the sleeve's
+               own rounded rect as a clip, and the band rotates inside it. -->
+          <div class="tilt-gloss" aria-hidden="true"></div>
         </div>
 
         <!-- Spicy-style on-art controls, revealed while hovered: layout and
@@ -154,14 +164,14 @@
               <div class="float-progress-fill" id="art-progress-fill"></div>
               <div class="art-thumb" id="art-thumb"></div>
             </div>
-            <span class="art-time" id="art-duration-display">0:00</span>
+            <span class="art-time" id="art-duration-display">--:--</span>
           </div>
         </div>
       </div>
       <div class="track-text">
         <!-- Title and artist only: the seek row lives on the cover (see
              #art-player), so this column is exactly what it says it is. -->
-        <div id="title">Waiting for SimpMusic...</div>
+        <div id="title">Waiting for music...</div>
         <div id="artist">Play any track to begin</div>
       </div>
     </div>
@@ -234,6 +244,7 @@
         <div class="tilt-stage">
           <div class="art-light" aria-hidden="true"></div>
           <img id="side-art" class="side-art" alt="" draggable="false">
+          <div class="tilt-gloss" aria-hidden="true"></div>
         </div>
         <!-- Same hover controls as the compact float, so split is fully operable.
              Split only ever renders in fullscreen, so its window-mode button is
@@ -291,7 +302,7 @@
         <div class="side-progress-row">
           <span class="side-time" id="side-time-now">0:00</span>
           <div class="side-progress-track"><div class="side-progress-fill" id="side-progress-fill"></div></div>
-          <span class="side-time" id="side-time-total">0:00</span>
+          <span class="side-time" id="side-time-total">--:--</span>
         </div>
         <div class="side-title" id="side-title"></div>
         <div class="side-artist" id="side-artist"></div>
@@ -443,7 +454,22 @@
               </div>
               <p class="sp-hint">Lyric timing against playback — a larger offset shows lyrics
                 earlier. Also on <kbd style="font-family:inherit;opacity:.6">Ctrl+[</kbd> later /
-                <kbd style="font-family:inherit;opacity:.6">Ctrl+]</kbd> earlier, saved per track.</p>
+                <kbd style="font-family:inherit;opacity:.6">Ctrl+]</kbd> earlier, saved per track.
+                Auto latency instead opens the song where the audio should be by now —
+                fetch time plus the beat it takes Windows to notice the track — then
+                learns this player's error from your Ctrl+[/] nudges, for
+                players that never report their position (the resolve report says &ldquo;no timeline
+                from player&rdquo;).</p>
+              <button class="qp-row qp-action" id="qp-default-latency" onclick="cycleDefaultLatency()"
+                      title="Starting offset for fresh tracks; saved per-track nudges always win">
+                <span class="qp-label">Default latency</span>
+                <span class="qp-state" id="qp-default-latency-state">On</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-auto-latency" onclick="cycleAutoLatency()"
+                      title="Only applies to players that publish no timeline, and never overrides an offset you set for a track">
+                <span class="qp-label">Auto latency</span>
+                <span class="qp-state" id="qp-auto-latency-state">Off</span>
+              </button>
             </section>
 
             <section class="sp-group">
@@ -452,14 +478,73 @@
                 <span class="qp-label">Translations</span>
                 <span class="qp-state">On</span>
               </button>
-              <button class="qp-row qp-action" id="qp-font" onclick="cycleFont()">
-                <span class="qp-label">Font</span>
-                <span class="qp-state">Apple</span>
+              <button class="qp-row qp-action" id="qp-linesync" onclick="cycleLineSync()">
+                <span class="qp-label">Line-by-line</span>
+                <span class="qp-state" id="qp-linesync-state">Auto</span>
               </button>
               <button class="qp-row qp-action" id="qp-align" onclick="cycleLyricAlign()">
                 <span class="qp-label">Alignment</span>
                 <span class="qp-state" id="qp-align-state">Left</span>
               </button>
+            </section>
+
+            <section class="sp-group">
+              <h2 class="sp-group-title">Fonts</h2>
+              <button class="qp-row qp-action" id="qp-ui-font" onclick="cycleUiFont()">
+                <span class="qp-label">Interface</span>
+                <span class="qp-state" id="qp-ui-font-state">Inter</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-font" onclick="cycleFont()">
+                <span class="qp-label">Lyrics</span>
+                <span class="qp-state" id="qp-font-state">System</span>
+              </button>
+              <!-- The faces themselves, managed as a list: every face the overlay
+                   can draw in, the ones in use marked, one click to give a face a
+                   job, and an import removed from its own row rather than by
+                   cycling onto it first. Rendered by renderFontPanel() from the
+                   font folder the host owns (core/font_library.py). -->
+              <div class="font-bar">
+                <button class="font-act" id="qp-font-add" onclick="importFonts()">Add font…</button>
+                <button class="font-act" id="qp-font-open" onclick="revealFonts()">Open folder</button>
+              </div>
+              <div class="font-status" id="qp-font-status" role="status" aria-live="polite"></div>
+              <div class="font-list" id="qp-font-list"></div>
+              <p class="sp-hint">Each row is drawn in the face it names. Give a face the Lyrics or
+                the Interface — an imported one works for both. Inter and Barriecito are fetched
+                from the web; the rest are faces Windows and macOS already ship, so the overlay
+                still reads well offline. Add font… takes .ttf, .otf, .woff or .woff2 files,
+                copies them into your fonts folder and keeps them across restarts — import as
+                many as you like; Remove moves one to that folder’s <code>.trash</code>.</p>
+            </section>
+
+            <!-- Spicy Lyrics API Secret Key -->
+            <section class="sp-group">
+              <h2 class="sp-group-title">Spicy Lyrics API</h2>
+              <div class="spicy-key-card" id="spicy-key-card">
+                <div class="spicy-key-head">
+                  <div class="spicy-badge" id="spicy-key-badge">Not configured</div>
+                  <div class="spicy-key-status" id="spicy-key-status">Using LRCLIB line fallback</div>
+                </div>
+                <div class="spicy-input-wrap">
+                  <input type="password" id="spicy-key-input" class="spicy-input"
+                         placeholder="Paste secret key: sl_sk_…"
+                         aria-label="Spicy Lyrics API secret key"
+                         autocomplete="off" spellcheck="false">
+                  <button type="button" class="spicy-btn spicy-eye" id="spicy-key-toggle" title="Show / hide secret key" aria-label="Show or hide secret key">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </button>
+                  <button type="button" class="spicy-btn spicy-btn-save" id="spicy-key-save" title="Save secret key">Save</button>
+                  <button type="button" class="spicy-btn spicy-btn-clear" id="spicy-key-clear" title="Clear key">Clear</button>
+                </div>
+                <div class="spicy-key-feedback" id="spicy-key-feedback" role="status" aria-live="polite"></div>
+                <div class="spicy-key-hint">
+                  Unlocks studio-quality syllable (word-by-word) synced lyrics. Get a free key at
+                  <a href="https://developers.spicylyrics.org" target="_blank" rel="noopener noreferrer">developers.spicylyrics.org</a>.
+                </div>
+              </div>
             </section>
 
             <!-- Local TTML library. The panel is rendered entirely from the
@@ -522,7 +607,11 @@
 
           <div class="sp-panel" id="qp-panel-diag" role="tabpanel"
                aria-labelledby="qp-tab-diag" hidden>
-            <section class="sp-group">
+            <!-- `data-static`: this group is NOT a dropdown. Its one row already
+                 carries the disclosure (Show / Hide), so a second toggle on the
+                 heading would be a dropdown that opens onto a single row with a
+                 chevron of its own. See initSettingsGroups in app.js. -->
+            <section class="sp-group" data-static>
               <h2 class="sp-group-title">Diagnostics</h2>
               <button class="qp-row qp-action" id="qp-info-toggle" onclick="toggleDiagnostics()"
                       aria-expanded="false" aria-controls="qp-info">

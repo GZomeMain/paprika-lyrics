@@ -20,6 +20,10 @@ env/
 # The folder also writes its own .gitignore, so a library elsewhere is covered too.
 ttml/
 
+# The local font library: the .ttf/.otf/.woff/.woff2 faces the user imported for
+# the lyrics or the interface (and its .trash). Same self-ignoring folder.
+fonts/
+
 # The Edge WebView2 profile: local storage for the UI's settings, plus the
 # browser's own cache. Machine-local and large. Deleting it is how a user resets
 # every preference at once (and the app recreates it on the next launch).

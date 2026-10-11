@@ -339,9 +339,13 @@ class ShutdownFlushTest(unittest.TestCase):
             encoding="utf-8")
         self.assertIn("cache.flush_sync()", src)
         self.assertNotIn("cache.flush()\n", src)
+        # Flattened so the call's line wrapping is not the thing under test: what
+        # matters is that on_closed routes the teardown through the guarded
+        # function with the real objects.
+        wired = " ".join(src.split())
         self.assertIn(
             "shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)",
-            src)
+            wired)
 
 
 class WindowGeometryTest(unittest.TestCase):

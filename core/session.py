@@ -3,89 +3,97 @@
 Kept separate from ``core.smtc`` on purpose: the policy needs no Windows
 Runtime, so it can be unit-tested on any platform, and the I/O loop keeps only
 the thin job of turning live sessions into descriptors and mapping the result
-back. ``SmtcBridge`` owns the mutable conversation state (``pinned_app_id``,
+back. ``SmtcBridge`` owns the mutable conversation state (``pinned_key``,
 ``challenger_since``) and passes it in each tick.
+
+**Identity.** WinRT hands back a *fresh Python wrapper* for the same media
+session on every ``get_sessions()`` call, so ``is`` and ``==`` against a session
+from a previous tick are always False. The previous policy compared them and
+therefore never saw Windows' current session, never recognised the session it
+was already following, and — because two browser tabs share one
+``SourceAppUserModelId`` — could end up following a *paused* tab while the other
+one played. Sessions are identified here by a ``key`` the bridge computes from
+what a session actually reports: the app id plus the media title it is playing.
+That distinguishes two tabs of the same browser, and it is stable for exactly as
+long as the decision has to hold (a session showing the same track).
 
 Rules, in order:
 
-1. A pinned session keeps the overlay while it exists **and is still the best
-   thing to follow** — it is playing, or nothing else is playing. A pinned app
-   that has gone idle no longer blocks a different, playing app: it relinquishes
-   the pin and a challenger has to earn the handover, exactly as when there is
-   no pin at all.
-2. With no pin, a challenger must be the session we would follow for a quiet
-   period before it is pinned. Until then we keep following whatever we were
-   already following, so alt-tabbing through apps does not flick the lyrics.
+1. A pinned session that is still playing keeps the overlay. This is what stops
+   a second player starting up from stealing the lyrics mid-song.
+2. A pinned session that has gone idle keeps the overlay while nothing else is
+   playing — the lyrics stay on the song the user last listened to.
+3. If the pinned session is gone entirely, the best available session takes over
+   immediately: there is nothing on screen worth protecting.
+4. If the pinned session is idle and something else is playing, that challenger
+   has to be the best available session for a quiet period before it may take
+   over, so a blip or a transient tab switch cannot flick the lyrics.
 """
 
 from __future__ import annotations
 
-# An idle challenger must be the best candidate for this long before it may
-# take the overlay (seconds).
+# A challenger must be the best candidate for this long before it may take the
+# overlay (seconds).
 HANDOVER_QUIET_S = 4.0
 
 
-def select_session(descriptors, pinned_app_id, challenger_since, now,
-                   quiet_s: float = HANDOVER_QUIET_S):
+def _best(descriptors, prefer_app: str = ""):
+    """The session to follow out of a set: playing first, then same-app, then first.
+
+    A playing session outranks an idle one. Among equals the app the overlay is
+    already following wins, because a second tab of the same browser is a
+    continuation of what the user is listening to, while another app is a
+    context switch.
+    """
+    playing = [d for d in descriptors if d["playing"]]
+    pool = playing if playing else descriptors
+    if prefer_app:
+        for d in pool:
+            if d.get("app_id") == prefer_app:
+                return d
+    return pool[0]
+
+
+def select_session(descriptors, pinned_key, challenger_since, now,
+                   pinned_app_id: str = "", quiet_s: float = HANDOVER_QUIET_S):
     """
     Choose which session the overlay should follow.
 
     ``descriptors`` is a list of dicts with keys:
-      ``app_id``     stable identity of the source app (may be "")
-      ``playing``    whether that session is currently playing
-      ``is_current`` whether Windows considers it the current session
-      ``in_current`` whether it is the session the bridge is already following
-      (extra keys, e.g. the live session object, are ignored)
 
-    Returns ``(chosen_app_id | None, pinned_app_id, challenger_since)``.
+      ``key``      stable identity of this *session* (app id + what it plays)
+      ``app_id``   stable identity of the source app (shared by its sessions)
+      ``playing``  whether that session is currently playing
+
+    (extra keys, e.g. the live session object, are ignored.)
+
+    Returns ``(chosen_key | None, pinned_key, challenger_since)``.
     """
     if not descriptors:
         return None, "", None
 
-    def find(app_id):
-        for d in descriptors:
-            if d["app_id"] == app_id:
-                return d
-        return None
+    pinned = (next((d for d in descriptors if d["key"] == pinned_key), None)
+              if pinned_key else None)
+    prefer_app = pinned["app_id"] if pinned is not None else (pinned_app_id or "")
 
-    pinned = find(pinned_app_id) if pinned_app_id else None
+    # 1 & 2: a live pin keeps the overlay unless something else is playing.
     if pinned is not None:
-        others_playing = any(
-            d["playing"] for d in descriptors if d["app_id"] != pinned_app_id
-        )
-        if pinned["playing"] or not others_playing:
-            return pinned_app_id, pinned_app_id, None
-        # The pinned app went idle while something else is playing. Relinquish
-        # the pin and let the challenger rule below decide, instead of freezing
-        # the overlay on a paused app for as long as its session lives.
-        pinned_app_id = ""
-    else:
-        pinned_app_id = ""   # the pinned session is gone
-
-    if len(descriptors) == 1:
-        candidate = descriptors[0]
-    else:
-        playing = [d for d in descriptors if d["playing"]]
-        current = next((d for d in descriptors if d["is_current"]), None)
-        # A playing session outranks Windows' notion of "current" when the
-        # current one is idle; otherwise honour current, then fall back to the
-        # first playing session, then to whatever is left.
-        if current is not None and (current["playing"] or not playing):
-            candidate = current
-        elif playing:
-            candidate = playing[0]
+        if pinned["playing"]:
+            return pinned["key"], pinned["key"], None
+        others_playing = [d for d in descriptors
+                          if d["playing"] and d["key"] != pinned["key"]]
+        if not others_playing:
+            return pinned["key"], pinned["key"], None
+        candidate = _best(others_playing, prefer_app)
+        # 4: the challenger must earn the handover. The pin stays on screen
+        # (still pinned, so the check above keeps firing) until it has.
+        if challenger_since is not None and challenger_since[0] == candidate["key"]:
+            if now - challenger_since[1] >= quiet_s:
+                return candidate["key"], candidate["key"], None
         else:
-            candidate = current or descriptors[0]
+            challenger_since = (candidate["key"], now)
+        return pinned["key"], pinned["key"], challenger_since
 
-    app_id = candidate["app_id"]
-    if challenger_since and challenger_since[0] == app_id \
-            and now - challenger_since[1] >= quiet_s:
-        return app_id, app_id, None
-    if not challenger_since or challenger_since[0] != app_id:
-        challenger_since = (app_id, now)
-
-    # Keep following the current session while the challenger earns the handover.
-    held = next((d for d in descriptors if d["in_current"]), None)
-    if held is not None:
-        return held["app_id"], pinned_app_id, challenger_since
-    return app_id, pinned_app_id, challenger_since
+    # 3: no live pin — take the best session right away.
+    candidate = _best(descriptors, prefer_app)
+    return candidate["key"], candidate["key"], None

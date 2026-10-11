@@ -1,5 +1,6 @@
-import concurrent.futures
-from config import (SPICY_API_KEY, BASE_URL, APP_VERSION, PARSER_VERSION,
+from concurrent.futures import ThreadPoolExecutor
+import config
+from config import (get_spicy_api_key, BASE_URL, APP_VERSION, PARSER_VERSION,
                     debug_log, warn_missing_api_key)
 from storage import CACHE
 from core.metadata import extract_clean_metadata, track_cache_key
@@ -7,7 +8,7 @@ from core.resolver import http_get, resolve_spotify_track_id
 from core.parser import count_syllables, parse_spicy_body, parse_lrc
 from core.ttml_library import TTML_LIBRARY
 
-ASYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 _API_KEY_WARNED = False
 
@@ -15,7 +16,7 @@ _API_KEY_WARNED = False
 def _warn_key_once():
     """Prints the missing-API-key notice at most once per process."""
     global _API_KEY_WARNED
-    if not SPICY_API_KEY and not _API_KEY_WARNED:
+    if not get_spicy_api_key() and not _API_KEY_WARNED:
         _API_KEY_WARNED = True
         warn_missing_api_key()
 
@@ -86,9 +87,10 @@ def fetch_lrclib(title: str, artist: str, duration_ms: float | None = None,
 
 
 def fetch_spicy_with_id(track_id: str, lrclib_lines: list[dict] = None) -> tuple[list[dict], str | None]:
-    if track_id and SPICY_API_KEY:
-        url = f"{BASE_URL}/v1/lyrics/{track_id}"
-        headers = {"Authorization": f"Bearer {SPICY_API_KEY}"}
+    api_key = get_spicy_api_key()
+    if track_id and api_key:
+        url = f"{config.BASE_URL}/v1/lyrics/{track_id}"
+        headers = {"Authorization": f"Bearer {api_key}"}
         print(f"📡 Querying Spicy Lyrics: {url} ...")
         res = http_get(url, headers=headers, timeout=4.5)
         if res and res.status_code == 200:
@@ -206,7 +208,7 @@ def _build_diagnostics(source: str, cache: str, lines: list[dict],
         # format it speaks. A user pasting their resolve report has named both.
         "app_version": APP_VERSION,
         "parser_version": PARSER_VERSION,
-        "api_key": bool(SPICY_API_KEY),
+        "api_key": bool(get_spicy_api_key()),
         # Which local file served this track, and whether the user bound it or
         # its own metadata matched. Empty when no local file was involved.
         "ttml": ttml,
@@ -263,6 +265,14 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
         CACHE.drop_lyrics(lyrics_cache_key)
         cached_payload = None
 
+    if cached_payload and cached_payload.get("source") == "LRCLIB" and get_spicy_api_key():
+        # A track cached while keyless must not stay line-synced forever: the
+        # user adding a key afterwards should upgrade it to syllable timing on
+        # the next play, not after a manual cache clear or the 3-day TTL.
+        print(f"⚡ [Lyrics Cache] '{c_title}' was LRCLIB-only; retrying Spicy with API key.")
+        CACHE.drop_lyrics(lyrics_cache_key)
+        cached_payload = None
+
     if cached_payload:
         print(f"⚡ [Lyrics Disk Cache Hit] '{c_title}'")
         cached_lines = cached_payload.get("lines", [])
@@ -275,7 +285,7 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
         return cached_lines, cached_source, cached_track_id, diag
 
     print(f"\n======================================")
-    print(f"🎵 [SimpMusic Event] '{c_title}' by '{primary_artist}'")
+    print(f"🎵 [Now Playing] '{c_title}' by '{primary_artist}'")
 
     _warn_key_once()
 

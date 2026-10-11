@@ -25,8 +25,15 @@
  *      its own bar, whose buttons sit outside the drag region and stay hidden
  *      until the pointer reaches the top band.
  *   5. The settings sheet is centred, inside the window, its groups are ordered
- *      overlay-first, and the density token still compacts below 420px of height.
- *   6. The on-art progress bar publishes a playhead position for its dot.
+ *      overlay-first, the density token still compacts below 420px of height, and
+ *      every group is a dropdown: closed unless it was opened before, still saying
+ *      what it stands for while closed, opening one group at a time, and handing
+ *      its rows to a search that lifted them out of it. A group that declares
+ *      itself `data-static` in the markup stays open with no toggle — Diagnostics,
+ *      whose own row already carries the disclosure.
+ *   6. The on-art progress bar publishes a playhead position for its dot, and
+ *      both totals start as `--:--` under `body.duration-unknown` rather than as
+ *      a 0:00 length the host has not reported.
  *   7. Motion: one variant per WORD (a split word never moves in two pieces),
  *      a waiting word leans in only as it approaches and clears after, the lean
  *      it reached is CONTINUED by the first sung frame (never dropped, never
@@ -45,7 +52,12 @@
  *      resolve report states what the player publishes, names the build that
  *      produced it, a refused seek is
  *      rolled back while an accepted one is kept, and a refusal that arrives
- *      after the seek already landed is ignored.
+ *      after the seek already landed is ignored. A position report from the
+ *      bridge carries how the playhead must take it: a snap lands on it, soft
+ *      drift is absorbed as a correction instead of teleporting the wipe, a
+ *      report inside the noise floor is dropped, and a hold moves nothing — the
+ *      wipe keeps its own 1x clock through any number of them, because a held
+ *      source is still a live one.
  *  11. Room air and cover tilt: the motes are laid out deterministically and are
  *      tinted with the album's colour, the air never takes a pointer event, and
  *      Off / reduced motion / the mini player leave the room stock; and the
@@ -55,10 +67,35 @@
  *      break out of the CSS it is written into (a quote or a paren in it stays
  *      inside the url()), and rebuilding the air never stacks a second mote
  *      field on the first.
- *  12. Artwork and air hygiene: a cover URL from a third-party lookup cannot
- *      break out of the CSS it is written into (a quote or a paren in it stays
- *      inside the url()), and rebuilding the air never stacks a second mote
- *      field on the first.
+ *  13. The lyric-video export: the settings row expands and collapses, and the
+ *      recording HUD it stands in for is OUTSIDE the settings sheet (so closing
+ *      the sheet cannot hide a recording with minutes left), hidden at rest,
+ *      carrying both ways out of one, and clear of every drag surface. The
+ *      frame renderer is proven to draw the snapshot it is handed rather than
+ *      the track playing right now: the same snapshot redrawn after the live
+ *      lyric list is swapped out is pixel-identical, and a snapshot built from
+ *      other lines is not — which is what keeps the first half from passing
+ *      vacuously on a blank canvas.
+ *  14. The playhead's glide: a player-side seek inside the song travels to its
+ *      new position instead of cutting to it (the catch-up is over in a fraction
+ *      of a second), a snap still lands on the frame it is reported on, and the
+ *      glide is not secretly a snap — the report that opens it leaves the wipe
+ *      exactly where it already was. The wipe RIDES that travel, backwards
+ *      included: held forward-only, a seek backwards pinned the wipe and the
+ *      lyrics never followed the player.
+ *  15. Fonts are a list of faces, not a counter against a cap: each row is drawn
+ *      in the face it names, a face is offered only the jobs it can hold, one
+ *      click gives it one, and an import is removed from its own row — armed
+ *      first, through the host, with the bytes fetched from the font folder on
+ *      demand and a file that will not load reported instead of used.
+ *  19. A long line cannot leave the column: the column clips sideways, so a run
+ *      wider than it is CUT rather than scrolled, and the tail of the line is
+ *      simply gone. A long word and a line-synced script that writes no spaces
+ *      (the fallback splits those per character) wrap between their syllables at
+ *      full size, and a line whose widest SYLLABLE still does not fit is scaled
+ *      through --line-fit — measured here against real payloads at both windowed
+ *      and fullscreen sizes, in the idle and the sung state, because the fitting
+ *      is only as good as the metrics it used.
  *
  * Transitions are suspended for the whole run: this measures settled geometry,
  * and a throttled preview can otherwise freeze a transition mid-flight and
@@ -161,7 +198,12 @@ async function run(label) {
   if (!result.dragSurfacesHaveNoGrabCursor) {
     problems.push('a drag surface still shows the grab cursor');
   }
-  // The opt-out never stomps the cursors of the controls inside it.
+  // The opt-out never stomps the cursors of the controls inside it. Measured
+  // with a length in hand, because a rail with no known total is inert ON
+  // PURPOSE (see body.duration-unknown in the stylesheet) — that is a different
+  // rule, and reading the cursor without establishing which state the page is in
+  // made this pass or fail on whatever the previous check happened to leave.
+  setTrackDuration(213000);
   result.seekBarKeepsItsCursor = getComputedStyle(document.getElementById('art-progress')).cursor === 'pointer';
   if (!result.seekBarKeepsItsCursor) problems.push('the seek bar lost its pointer cursor');
   // The seek bar and the transport must opt out, or a mousedown on them would
@@ -358,7 +400,7 @@ async function run(label) {
   // lives on.
   const expectedTabGroups = {
     window: ['Window'],
-    lyrics: ['Sync', 'Lyrics', 'Local lyrics'],
+    lyrics: ['Sync', 'Lyrics', 'Fonts', 'Spicy Lyrics API', 'Local lyrics'],
     visuals: ['Motion'],
     diag: ['Diagnostics'],
   };
@@ -366,8 +408,10 @@ async function run(label) {
   for (const tab of tabs) {
     const id = tab.dataset.tab;
     openSettingsTab(id);
-    result.settingsTabGroups[id] = [...document.querySelectorAll('#qp-panel-' + id + ' .sp-group-title')]
-      .map((h) => h.textContent.trim());
+    // Named by the group, not by its heading row's text: the heading now carries
+    // the dropdown toggle and the state it reports, which is not the group's name.
+    result.settingsTabGroups[id] = [...document.querySelectorAll('#qp-panel-' + id + ' .sp-group')]
+      .map((g) => g.dataset.groupName || (g.querySelector('.sp-group-title') || {}).textContent || '');
     if (JSON.stringify(result.settingsTabGroups[id]) !== JSON.stringify(expectedTabGroups[id])) {
       problems.push('tab ' + id + ' holds ' + result.settingsTabGroups[id].join(' / ') +
         ' (expected ' + expectedTabGroups[id].join(' / ') + ')');
@@ -469,6 +513,132 @@ async function run(label) {
   if (!result.settingsSearchTabsReturn) problems.push('the tab strip did not come back after a search');
   if (result.settingsSearchCleared !== 0) problems.push('clearing the search left its results behind');
 
+  // --- 5b. the groups are dropdowns --------------------------------------
+  // A page opens as a short list of summary rows. The rows stay inside their own
+  // group — the search lifts them in and out — so what has to hold is: closed
+  // unless this group was opened before, one toggle one group, the closed row
+  // still reporting the state it stands for, and a row inside a CLOSED group
+  // still reachable by the search.
+  openSettingsTab('lyrics');
+  const lyricGroups = [...document.querySelectorAll('#qp-panel-lyrics .sp-group[data-group]')];
+  result.settingsGroupCount = lyricGroups.length;
+  if (lyricGroups.length !== 5) {
+    problems.push('the Lyrics page holds ' + lyricGroups.length + ' groups, expected 5');
+  }
+  result.settingsGroupsHonourSavedState = lyricGroups.filter((g) =>
+    g.classList.contains('collapsed') === (localStorage.getItem('sl_spGroup_' + g.dataset.group) !== '1')
+  ).length === lyricGroups.length;
+  if (!result.settingsGroupsHonourSavedState) {
+    problems.push('a settings group does not match the state saved for it');
+  }
+  // The default is closed: with no choice saved for a group, restoring it closes
+  // it. Driven through the app's own restore path, so this reads the behaviour a
+  // first run gets rather than a hook the harness invented.
+  const fontsGroup = document.querySelector('#qp-panel-lyrics .sp-group[data-group="fonts"]');
+  const savedFontsGroup = localStorage.getItem('sl_spGroup_fonts');
+  localStorage.removeItem('sl_spGroup_fonts');
+  applySettingsGroup('fonts', settingsGroupOpen('fonts'), false);
+  result.settingsGroupDefaultIsClosed = fontsGroup.classList.contains('collapsed');
+  if (!result.settingsGroupDefaultIsClosed) problems.push('a settings group opens expanded by default');
+  result.settingsGroupTogglesWired = lyricGroups.every((g) => {
+    const t = g.querySelector('.sp-group-title > .sp-group-toggle');
+    return !!t && t.getAttribute('aria-controls') === g.id && !!g.id
+      && t.getAttribute('aria-expanded') === (g.classList.contains('collapsed') ? 'false' : 'true');
+  });
+  if (!result.settingsGroupTogglesWired) problems.push('a settings group toggle is not wired to its group');
+  // A closed group lays out none of its own rows: the heading row is all there is.
+  const syncGroup = document.querySelector('#qp-panel-lyrics .sp-group[data-group="sync"]');
+  const syncRows = [...syncGroup.children].filter((el) => el.classList.contains('qp-row'));
+  result.closedGroupHidesItsRows = syncRows.length > 0
+    && syncRows.every((el) => el.getBoundingClientRect().height === 0);
+  if (!result.closedGroupHidesItsRows) problems.push('a closed group still lays out its rows');
+  // The closed row reports the state the group stands for, and reports the SAME
+  // state the row inside it does — read live, not at the moment it was built.
+  result.closedGroupSummary = (document.getElementById('sp-group-sum-sync') || {}).textContent;
+  const movedLatency = document.getElementById('qp-latency').textContent.trim();
+  // Driven through the setting itself, not by writing the row's text: the panel
+  // sync rewrites that row from `latencyOffsetMs`, so a poked string would be
+  // overwritten before the summary could ever read it.
+  const savedLatencyMs = latencyOffsetMs;
+  latencyOffsetMs = 1230;
+  syncSettingsPanel();
+  result.closedGroupSummaryFollows =
+    document.getElementById('sp-group-sum-sync').textContent.trim() === '+1230ms';
+  if (!result.closedGroupSummaryFollows) {
+    problems.push('the closed Sync row does not follow the row it stands for');
+  }
+  latencyOffsetMs = savedLatencyMs;
+  syncSettingsPanel();
+  result.closedGroupSummaryMatchesRow =
+    document.getElementById('sp-group-sum-sync').textContent.trim() === movedLatency;
+  if (!result.closedGroupSummaryMatchesRow) {
+    problems.push('the closed Sync row reads "' + result.closedGroupSummary.trim() + '"');
+  }
+  // One click opens one group. The state a click writes is put back, so a run
+  // does not silently change what the reader will see next time.
+  const storedSyncGroup = localStorage.getItem('sl_spGroup_sync');
+  const openBefore = lyricGroups.filter((g) => !g.classList.contains('collapsed')).length;
+  syncGroup.querySelector('.sp-group-toggle').click();
+  result.groupOpensOnClick = !syncGroup.classList.contains('collapsed')
+    && syncGroup.querySelector('.sp-group-toggle').getAttribute('aria-expanded') === 'true'
+    && syncGroup.querySelector('.qp-row').getBoundingClientRect().height > 0;
+  result.oneClickOpensOneGroup =
+    lyricGroups.filter((g) => !g.classList.contains('collapsed')).length === openBefore + 1;
+  if (!result.groupOpensOnClick) problems.push('clicking a group row did not expand its group');
+  if (!result.oneClickOpensOneGroup) problems.push('one click expanded more than its own group');
+  syncGroup.querySelector('.sp-group-toggle').click();
+  result.groupClosesOnClick = syncGroup.classList.contains('collapsed')
+    && syncGroup.querySelector('.sp-group-toggle').getAttribute('aria-expanded') === 'false';
+  if (!result.groupClosesOnClick) problems.push('clicking an expanded group row did not close it');
+  if (storedSyncGroup === null) {
+    localStorage.removeItem('sl_spGroup_sync');
+  } else {
+    localStorage.setItem('sl_spGroup_sync', storedSyncGroup);
+  }
+  if (savedFontsGroup === null) {
+    localStorage.removeItem('sl_spGroup_fonts');
+  } else {
+    localStorage.setItem('sl_spGroup_fonts', savedFontsGroup);
+  }
+  applySettingsGroup('sync', settingsGroupOpen('sync'), false);
+  applySettingsGroup('fonts', settingsGroupOpen('fonts'), false);
+  // A row inside a CLOSED group is still found: the result view is built out of
+  // the group's own rows and is never itself collapsed.
+  runSettingsSearch('default latency');
+  result.closedGroupRowIsSearchable =
+    document.querySelector('#qp-body .sp-result #qp-default-latency') ===
+    document.getElementById('qp-default-latency');
+  if (!result.closedGroupRowIsSearchable) {
+    problems.push('a row inside a closed group is unreachable by the search');
+  }
+  // …and the result is headed by the group's name, not by the closed row's own
+  // text (the heading carries the toggle and the state now).
+  const searchGroupHeading = document.querySelector('#qp-body .sp-result .sp-group-title');
+  result.searchResultHeadingIsGroupName = !!searchGroupHeading
+    && searchGroupHeading.textContent.trim() === 'Sync';
+  if (!result.searchResultHeadingIsGroupName) {
+    problems.push('a search result is headed "' +
+      (searchGroupHeading ? searchGroupHeading.textContent.trim() : '(none)') + '"');
+  }
+  runSettingsSearch('');
+  result.dropdownLeavesSearchClean = document.querySelectorAll('#qp-body .sp-result').length === 0;
+  if (!result.dropdownLeavesSearchClean) {
+    problems.push('clearing the search after a group was collapsed left results behind');
+  }
+  // …except a group that declares itself static in the markup. Diagnostics is one
+  // row whose own Show / Hide IS the disclosure, so the group must not add a
+  // second one: no toggle, never collapsed, and its row laid out to prove it.
+  openSettingsTab('diag');
+  const staticGroup = document.querySelector('#qp-panel-diag .sp-group');
+  result.staticGroupHasNoDropdown = !!staticGroup
+    && !staticGroup.querySelector('.sp-group-toggle')
+    && !staticGroup.classList.contains('collapsed')
+    && document.getElementById('qp-info-toggle').getBoundingClientRect().height > 0;
+  if (!result.staticGroupHasNoDropdown) {
+    problems.push('the Diagnostics group is a dropdown again');
+  }
+  openSettingsTab('visuals');
+
   // The Big moments row mirrors Beat sync: same three states, same labels, and it
   // has to be reachable on the page it claims to live on.
   openSettingsTab('visuals');
@@ -493,16 +663,128 @@ async function run(label) {
   startMomentEngine();
   syncSettingsPanel();
 
+  // The Line-by-line row cycles Auto -> On -> Off under a persisted mode.
+  const savedLineSync = lineSyncMode;
+  lineSyncMode = 'auto';
+  const lineCycles = [];
+  for (let i = 0; i < 4; i++) {
+    cycleLineSync();
+    lineCycles.push(document.getElementById('qp-linesync-state').textContent.trim());
+  }
+  result.lineSyncRowCycles = lineCycles;
+  if (JSON.stringify(lineCycles) !== JSON.stringify(['On', 'Off', 'Auto', 'On'])) {
+    problems.push('the Line-by-line row cycles ' + lineCycles.join(' -> '));
+  }
+  lineSyncMode = savedLineSync;
+  syncSettingsPanel();
+  // --- 14. a player-side seek glides to its place -------------------------
+  const expSavedPlaying = isPlaying;
+  const expSavedHead = playheadMs;
+  const expSavedDrift = targetDriftMs;
+  const expSavedAnchor = anchorPosMs;
+  const expSavedWall = anchorWallMs;
+  const expSavedSeekAt = lastUserSeekAt;
+  const expSavedGlide = glideUntilMs;
+  try {
+    // Seeded, not inherited. With no transport behind it a plain browser leaves
+    // the app on the clock it boots with (anchor 0, wall stamp 0), so
+    // ``predictedPlayhead()`` reads as the PAGE's uptime — and a glide measured
+    // from there eases in from uptime instead of from the wipe. Where the wipe is
+    // has to be stated for this to measure the glide rather than the page load.
+    lastUserSeekAt = -Infinity;   // a seek an earlier check made must not veto this one
+    isPlaying = true;
+    glideUntilMs = 0;             // so the window below is the one THIS report opens
+    playheadMs = 300000;
+    renderMs = 300000;
+    anchorPosMs = 300000;
+    anchorWallMs = performance.now();
+    targetDriftMs = 0;
+    const expFrom = playheadMs;
+    const expStartedAt = performance.now();
+    syncPlayhead(301200, 'glide');
+    // No frame can run between those two statements: a glide that teleported
+    // would already be at the new position here.
+    result.glideDoesNotTeleport = playheadMs === expFrom && expFrom === 300000;
+    if (!result.glideDoesNotTeleport) {
+      problems.push('a glide landed at ' + Math.round(playheadMs) + ' instead of travelling from ' + expFrom);
+    }
+    // A snap lands and opens no travel window. A glide opens SYNC_GLIDE_MS from
+    // now, and that window is the whole difference: it is what tells tick() to
+    // ease the wipe across instead of cutting it.
+    result.glideWindowOpened = glideUntilMs > performance.now() + 100;
+    if (!result.glideWindowOpened) {
+      problems.push('a player-side seek opened no glide window (glideUntilMs ' + Math.round(glideUntilMs) + ')');
+    }
+    // Where the audio is, measured from the moment the report arrived.
+    const expAudioAt = (now) => 301200 + (now - expStartedAt);
+    let expCaught = -1;
+    const expGiveUp = expStartedAt + 1500;
+    // The error series is kept so a failure says HOW the travel went wrong —
+    // standing still and easing too slowly look the same in a single number.
+    const expErrors = [];
+    const expTrace = [];
+    for (;;) {
+      const expNow = performance.now();
+      expErrors.push(Math.round(playheadMs - expAudioAt(expNow)));
+      expTrace.push(Math.round(expNow - expStartedAt) + 'ms a=' + Math.round(anchorPosMs)
+        + ' w=' + Math.round(anchorWallMs - expStartedAt) + ' d=' + Math.round(targetDriftMs)
+        + ' g=' + Math.round(glideUntilMs - expStartedAt));
+      if (Math.abs(playheadMs - expAudioAt(expNow)) <= 100) {
+        expCaught = Math.round(expNow - expStartedAt);
+        break;
+      }
+      if (expNow >= expGiveUp) break;
+      // Whichever comes first: waiting for a frame must not be able to hang the run.
+      await Promise.race([
+        new Promise((resolve) => requestAnimationFrame(resolve)),
+        new Promise((resolve) => setTimeout(resolve, 250)),
+      ]);
+    }
+    result.glideCatchUpMs = expCaught;
+    if (expCaught < 0 || expCaught > 500) {
+      // With the frame loop named in the failure: a catch-up that never happens
+      // because no frame ran is a different bug from one that eases too slowly.
+      problems.push('a player-side seek took '
+        + (expCaught < 0 ? 'longer than 1500ms' : expCaught + 'ms')
+        + ' to catch up with the audio (loop=' + renderLoopActive
+        + ' lastFrameAgo=' + Math.round(performance.now() - lastTick)
+        + 'ms playing=' + isPlaying
+        + ' errors=' + expErrors.slice(0, 6).join(',') + '…' + expErrors.slice(-2).join(',')
+        + ' trace=' + expTrace.slice(0, 5).join(' | ') + ' … ' + expTrace.slice(-2).join(' | ') + ')');
+    }
+    // A snap still lands on the frame it is reported on.
+    syncPlayhead(400000, 'snap');
+    result.snapLandsAtOnce = playheadMs === 400000;
+    if (!result.snapLandsAtOnce) problems.push('a snap settled at ' + Math.round(playheadMs));
+  } finally {
+    isPlaying = expSavedPlaying;
+    playheadMs = expSavedHead;
+    targetDriftMs = expSavedDrift;
+    anchorPosMs = expSavedAnchor;
+    anchorWallMs = expSavedWall;
+    lastUserSeekAt = expSavedSeekAt;
+    glideUntilMs = expSavedGlide;
+  }
+
+
   openSettingsTab('window');
-  // Four hints across the four pages: Window, Sync, Local lyrics and Motion.
+  // One hint per page that needs one: Window, Sync, Lyrics (the font families),
+  // Local lyrics and Motion. The count is pinned so a new hint has to be a
+  // deliberate edit here rather than an unremarked sixth page of prose.
   result.settingsHints = document.querySelectorAll('#quick-panel .sp-hint').length;
-  if (result.settingsHints !== 4) {
-    problems.push('the sheet carries ' + result.settingsHints + ' hints, expected 4');
+  if (result.settingsHints !== 5) {
+    problems.push('the sheet carries ' + result.settingsHints + ' hints, expected 5');
   }
   // Every row is a <button>, whose user-agent text-align is `center` — the label
   // span inside inherits it, so action rows centred their text while the div rows
   // and the group titles stayed left. One column, one edge. A hidden panel
-  // reports zero rects, so this reads the panel that is up.
+  // reports zero rects, so this reads the panel that is up — and the groups are
+  // dropdowns, so they are opened first: a closed group lays out none of its rows,
+  // and a zero-height rect is not a measurement. Opened without persisting, so a
+  // regression run cannot edit the reader's own saved groups.
+  for (const g of document.querySelectorAll('#qp-body .sp-group[data-group]')) {
+    applySettingsGroup(g.dataset.group, true, false);
+  }
   const shown = document.querySelector('#quick-panel .sp-panel:not([hidden])');
   const labels = [...shown.querySelectorAll('.qp-row .qp-label')];
   const labelLefts = labels.map((el) => Math.round(el.getBoundingClientRect().left));
@@ -535,6 +817,13 @@ async function run(label) {
   if (!result.settingsFits) problems.push('settings sheet overflows');
   if (!result.sheetCentered) problems.push('settings sheet is not centred');
   if (window.innerHeight <= 420 && parseInt(result.rowMinH) !== 28) problems.push('density query not applying');
+  // Opened for the measurement above, so closed again here: this suite is run at
+  // five viewports against ONE page, and the next run has to find the sheet the
+  // way it boots. Restored to the saved state, not blanket-closed, so a reader
+  // who has a group open keeps it.
+  for (const g of document.querySelectorAll('#qp-body .sp-group[data-group]')) {
+    applySettingsGroup(g.dataset.group, settingsGroupOpen(g.dataset.group), false);
+  }
   panel.classList.remove('open');
 
   // --- 6. fullscreen hover parting --------------------------------------
@@ -567,6 +856,32 @@ async function run(label) {
   // Driven between two positions of the SAME run: comparing against whatever the
   // last run left on the thumb made every run after the first report a dot that
   // "never moved" (it had already been put exactly there).
+  // The totals the page SHIPS are `--:--` under a body marked duration-unknown:
+  // a length the host has not reported is not a 0:00 total, which is the same
+  // fabricated number the host refuses to report for a player that publishes
+  // none, and it made an honest `--:--` indistinguishable from a push that never
+  // arrived. Read from the source rather than the live DOM, because by this point
+  // a repeated run has already pushed a real length — a check that only works
+  // when it happens to go first passes for the wrong reason.
+  let shipped = '';
+  try { shipped = await (await fetch('index.html')).text(); } catch (e) { shipped = ''; }
+  const shippedDur = shipped.match(/id="art-duration-display"[^>]*>([^<]*)</);
+  const shippedTotal = shipped.match(/id="side-time-total"[^>]*>([^<]*)</);
+  result.shippedDurationLabels = (shippedTotal ? shippedTotal[1] : '?') + ' / ' +
+    (shippedDur ? shippedDur[1] : '?');
+  result.shippedDurationUnknown = /<body[^>]*class="[^"]*duration-unknown/.test(shipped);
+  if (!shipped) {
+    problems.push('the page source could not be read back to check its shipped totals');
+  } else {
+    if (result.shippedDurationLabels.indexOf('--:--') === -1) {
+      problems.push('the page ships a total before the host has reported one: ' +
+        result.shippedDurationLabels);
+    }
+    if (!result.shippedDurationUnknown) {
+      problems.push('the page does not ship marked duration-unknown');
+    }
+  }
+
   window.setTrackDuration(180_000);   // the dot only rides a known duration
   updateArtProgress(45_000);          // 25%
   const before = parseFloat(document.getElementById('art-thumb').style.left) || 0;
@@ -1062,9 +1377,26 @@ async function run(label) {
   // no longer be drawn: no gutter is reserved, nothing is styled as a scroller,
   // and app.js only ever writes scrollTop.
   const scroller = document.getElementById('lyrics-container');
-  result.lyricsOverflowX = getComputedStyle(scroller).overflowX;
-  result.lyricsScrollbarWidth = getComputedStyle(scroller).scrollbarWidth;
-  result.lyricsPaddingRight = getComputedStyle(scroller).paddingRight;
+  const scrollerStyle = getComputedStyle(scroller);
+  result.lyricsOverflowX = scrollerStyle.overflowX;
+  result.lyricsScrollbarWidth = scrollerStyle.scrollbarWidth;
+  // The right inset is the room the active line's scale needs, so the thing worth
+  // pinning is that it HAS that room — a row that reaches the edge of the column is
+  // drawn at scale(1.025) from its left edge plus a 2px lean, and a flat 32px inset left
+  // the last glyph of the active line a few px outside a wide window. The 32px floor is
+  // asserted too: narrow windows must keep the gutter they always had.
+  result.lyricsPaddingRight = parseFloat(scrollerStyle.paddingRight) || 0;
+  const columnWidth = scroller.clientWidth - (parseFloat(scrollerStyle.paddingLeft) || 0)
+    - result.lyricsPaddingRight;
+  const activeLineRoom = columnWidth * 0.025 + 2;
+  result.lyricsActiveLineRoom = Math.round(activeLineRoom * 10) / 10;
+  if (result.lyricsPaddingRight < 32) {
+    problems.push('the lyric column lost its minimum right inset: ' + result.lyricsPaddingRight);
+  }
+  if (result.lyricsPaddingRight + 0.5 < activeLineRoom) {
+    problems.push('the lyric column has no room for the active line\u2019s scale: '
+      + result.lyricsPaddingRight + 'px inset for ' + activeLineRoom.toFixed(1) + 'px of growth');
+  }
   result.lyricsScrollerChromeRules = flattenSheetRules().filter((r) => r.selectorText && /#lyrics-container.*::-webkit-scrollbar/.test(r.selectorText)).length;
   if (result.lyricsOverflowX !== 'clip' && result.lyricsOverflowX !== 'hidden') {
     problems.push('the lyric viewport can still scroll sideways: ' + result.lyricsOverflowX);
@@ -1075,9 +1407,7 @@ async function run(label) {
   if (result.lyricsScrollerChromeRules !== 0) {
     problems.push('the lyric scroller still styles its own chrome');
   }
-  if (result.lyricsPaddingRight !== '32px') {
-    problems.push('the lyric column right inset moved: ' + result.lyricsPaddingRight);
-  }
+
 
   // --- 13. the room's colour comes from the artwork ------------------------
   // The grade is no longer a hard-coded amber: one accent, taken from the cover,
@@ -1108,6 +1438,41 @@ async function run(label) {
   if (result.accentFromGrey !== null) {
     problems.push('a colourless cover produced an accent: ' + JSON.stringify(result.accentFromGrey));
   }
+  // The air takes its tint from the cover, per vertical half, pre-offset
+  // against the region it floats in front of. The same synthetic pixels drive it:
+  // blue on top, red below, so the two halves MUST come back distinct, and the
+  // tint must not equal the raw winner (the region contrast is part of the deal).
+  const halfPixels = new Uint8ClampedArray(4 * ACCENT_GRID * ACCENT_GRID);
+  for (let y = 0; y < ACCENT_GRID; y++) {
+    for (let x = 0; x < ACCENT_GRID; x++) {
+      const i = (y * ACCENT_GRID + x) * 4;
+      if (y < ACCENT_GRID / 2) {
+        halfPixels[i] = 40; halfPixels[i + 1] = 90; halfPixels[i + 2] = 220;
+      } else {
+        halfPixels[i] = 220; halfPixels[i + 1] = 60; halfPixels[i + 2] = 40;
+      }
+      halfPixels[i + 3] = 255;
+    }
+  }
+  result.motePalette = extractPalette(halfPixels);
+  if (!result.motePalette || !result.motePalette[0] || !result.motePalette[1] ||
+      result.motePalette[0].b <= result.motePalette[0].r ||
+      result.motePalette[1].r <= result.motePalette[1].b) {
+    problems.push('the mote palette does not split by vertical half: ' +
+      JSON.stringify(result.motePalette));
+  }
+  result.moteTintTop = offsetTintAgainstRegion(result.motePalette[0],
+    halfRegionLuma(halfPixels, 0));
+  result.moteTintBottom = offsetTintAgainstRegion(result.motePalette[1],
+    halfRegionLuma(halfPixels, 1));
+  if (result.moteTintTop === result.moteTintBottom) {
+    problems.push('a two-region cover produced one mote tint');
+  }
+  // The motes carry their colour as --mote-c with the accent as the fallback, so
+  // a cover with no palette (grey, blown out) leaves the accent lighting the air.
+  const moteTintDecl = flattenSheetRules().some((r) =>
+    r.selectorText === '.mote' && /--mote-c/.test(r.style ? r.style.cssText : ''));
+  if (!moteTintDecl) problems.push('.mote does not read the per-mote tint (--mote-c)');
   result.accentDefault = getComputedStyle(document.documentElement)
     .getPropertyValue('--art-accent').trim();
   if (!result.accentDefault) problems.push('--art-accent has no registered default');
@@ -1230,6 +1595,19 @@ async function run(label) {
       result.durationKnownPointerEvents);
   }
 
+  // One writer for a track's length: `setTrackDuration` owns both labels, so a
+  // progress tick must not be the thing that paints the total. If it were, a
+  // render that never consulted the host could put a length on screen.
+  const knownSideText15 = totalEl15.textContent;
+  const knownArtText15 = artDurEl15.textContent;
+  updateArtProgress(120000);
+  result.progressTickLeavesTheTotalAlone = artDurEl15.textContent === knownArtText15
+    && totalEl15.textContent === knownSideText15;
+  if (!result.progressTickLeavesTheTotalAlone) {
+    problems.push('a progress tick rewrote the track length: ' + totalEl15.textContent
+      + ' / ' + artDurEl15.textContent);
+  }
+
   // null (and 0) mean "this player publishes no duration".
   setTrackDuration(null);
   result.durationUnknownLabels = totalEl15.textContent + ' / ' + artDurEl15.textContent;
@@ -1295,9 +1673,52 @@ async function run(label) {
   // takes a few tens of milliseconds, so a second run in the same page session
   // would have its baseline swallow by the previous run's tail seek — the harness
   // expires the guard on purpose to stand in for real elapsed time.
+  // The bridge's position report is the clock, and it says how the playhead has
+  // to take the new value: 'snap' is a place the lyrics must land on (a track
+  // change, a seek, a play/pause edge, or a jump it measured), 'soft' is ordinary
+  // drift it may ease into. Getting that wrong in either direction is a visible
+  // reset mid-song, so all three behaviours are pinned here.
+  setPlaybackState(true);
+  lastUserSeekAt = -Infinity;
+  playheadMs = 100000;
+  anchorPosMs = 100000;
+  anchorWallMs = performance.now();
+  targetDriftMs = 0;
+  syncPlayhead(100020, 'soft');          // inside the noise floor of the wipe
+  result.syncNoiseIgnored = Math.abs(playheadMs - 100000) < 1 && targetDriftMs === 0;
+  if (!result.syncNoiseIgnored) {
+    problems.push('a position report that agreed with the wipe was not dropped: '
+      + Math.round(playheadMs) + ' / ' + Math.round(targetDriftMs));
+  }
+  syncPlayhead(100400, 'soft');          // 400ms of drift: eased in, not teleported
+  result.syncSoftEased = Math.abs(playheadMs - 100000) < 60
+    && targetDriftMs < -350 && targetDriftMs > -450;
+  if (!result.syncSoftEased) {
+    problems.push('a soft report moved the playhead instead of easing it: '
+      + Math.round(playheadMs) + ' / ' + Math.round(targetDriftMs));
+  }
+  syncPlayhead(140000, 'snap');          // a real move: the lyrics land on it
+  result.syncSnapLanded = Math.abs(playheadMs - 140000) < 1 && targetDriftMs === 0;
+  if (!result.syncSnapLanded) {
+    problems.push('a snap report did not land the playhead: ' + Math.round(playheadMs));
+  }
+
+  // Back to a paused overlay for the seek checks below.
   setPlaybackState(false);
   lastUserSeekAt = -Infinity;
-  syncPlayhead(40000);
+  syncPlayhead(40000, 'snap');
+  // A paused move from the player itself (an external scrub while paused,
+  // or a soft landing the clock did not call a jump) must repaint the words,
+  // not just the timer — the highlight used to sit frozen until the next
+  // pause/resume edge. 40400 stays under SYNC_SNAP_MS on purpose: only the
+  // paused path may repaint here, never the snap upgrade.
+  lastActiveSig = "0";
+  syncPlayhead(40400, 'soft');
+  result.pausedSoftRepaints = lastActiveSig === "";
+  if (!result.pausedSoftRepaints) {
+    problems.push('a paused move left the lyric highlight frozen: ' + lastActiveSig);
+  }
+  syncPlayhead(40000, 'snap');
   applySeek(200000);
   result.seekOptimistic = Math.round(playheadMs);
   transportResult({ action: 'seek', ok: false, detail: 'player refused' });
@@ -1326,6 +1747,232 @@ async function run(label) {
   if (!result.seekLateRefusalIgnored) {
     problems.push('a late refusal rolled the playhead back: ' + Math.round(playheadMs));
   }
+
+  // --- 15b. the font list -------------------------------------------------
+  // The Fonts group is a LIST of faces, not a pair of counter rows: nothing to
+  // import against a cap, every row drawn in the face it names, a face offered
+  // only the jobs it can hold, one click to give it a job, and an import removed
+  // from its own row — two-step, through the host, whose bytes were fetched on
+  // demand rather than kept here. Driven against a stub bridge, since a plain
+  // browser has no Python behind it.
+  openSettingsTab('lyrics');
+  const savedFontsOpen = localStorage.getItem('sl_spGroup_fonts');
+  applySettingsGroup('fonts', true, false);
+
+  result.fontCapIsGone = typeof CUSTOM_FONT_LIMIT === 'undefined'
+    && typeof CUSTOM_FONT_MAX_BYTES === 'undefined';
+  if (!result.fontCapIsGone) {
+    problems.push('the font import is still capped by a constant');
+  }
+  result.fontCounterRowsAreGone = !document.getElementById('qp-font-import')
+    && !document.getElementById('qp-font-remove');
+  if (!result.fontCounterRowsAreGone) {
+    problems.push('the old import/remove counter rows are still in the sheet');
+  }
+  const fontsGroupEl = document.querySelector('#qp-panel-lyrics .sp-group[data-group="fonts"]');
+  const fontsText = fontsGroupEl ? fontsGroupEl.textContent : '';
+  // No count against a ceiling, and no prose about one: a limit the sheet no
+  // longer enforces must not survive as a sentence either.
+  result.fontLimitProse = /\blimit/i.test(fontsText) || /\d+\s*\/\s*\d+/.test(fontsText)
+    || /(MB max|up to \d)/i.test(fontsText);
+  if (result.fontLimitProse) {
+    problems.push('the Fonts group still talks about an import limit');
+  }
+  const fontActionBar = document.getElementById('qp-font-add') && document.getElementById('qp-font-open');
+  if (!fontActionBar) problems.push('the font list has no Add font / Open folder buttons');
+  if (!document.getElementById('qp-font-list')) problems.push('the font list is not in the sheet');
+
+  syncSettingsPanel();
+  const stockFontRows = [...document.querySelectorAll('#qp-font-list .font-row')];
+  result.fontStockRows = stockFontRows.length;
+  if (result.fontStockRows !== 6) {
+    problems.push('the list shows ' + result.fontStockRows + ' faces with no font folder, expected 6');
+  }
+  // Every row is drawn in its own face — that is the whole point of the list, and
+  // two rows sharing a stack would mean it is not showing what it claims to.
+  const stockStacks = stockFontRows.map((row) =>
+    getComputedStyle(row.querySelector('.font-row-name')).fontFamily);
+  result.fontRowStacksDistinct = new Set(stockStacks).size === stockStacks.length
+    && stockStacks.every((s) => s && s !== 'none');
+  if (!result.fontRowStacksDistinct) {
+    problems.push('two font rows are drawn in the same face');
+  }
+  // A face is only offered the jobs it can hold.
+  const actionsIn = (face) => [...document.querySelectorAll(
+    '.font-row[data-face="' + face + '"] button[data-action]')].map((b) => b.dataset.action);
+  result.fontRoleButtons = { system: actionsIn('system'), barriecito: actionsIn('barriecito'),
+                             inter: actionsIn('inter') };
+  if (result.fontRoleButtons.system.join() !== 'lyrics,interface') {
+    problems.push('a face that holds both jobs does not offer both: '
+      + result.fontRoleButtons.system.join());
+  }
+  if (result.fontRoleButtons.barriecito.join() !== 'lyrics') {
+    problems.push('a lyrics-only face is offered the interface');
+  }
+  if (result.fontRoleButtons.inter.join() !== 'interface') {
+    problems.push('an interface-only face is offered the lyrics');
+  }
+  // The face in use is marked on its own row, and one click moves the job.
+  const applyLyrics = (face) => document.querySelector(
+    '.font-row[data-face="' + face + '"] button[data-action="lyrics"]');
+  const markedButton = applyLyrics(lyricFontName);
+  result.fontActiveMarked = !!(markedButton && markedButton.getAttribute('aria-pressed') === 'true'
+    && markedButton.classList.contains('is-active'));
+  if (!result.fontActiveMarked) problems.push('the face in use is not marked on its row');
+  const faceBeforePick = lyricFontName;
+  const serifButton = applyLyrics('serif');
+  if (serifButton) {
+    serifButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    result.fontPickedFromRow = lyricFontName;
+    result.fontPickChangedTheSheet = /serif/i.test(
+      document.documentElement.style.getPropertyValue('--lyric-font-family') || '');
+    if (result.fontPickedFromRow !== 'serif') {
+      problems.push('clicking Lyrics on a row did not apply that face');
+    }
+    if (!result.fontPickChangedTheSheet) {
+      problems.push('the applied face never reached the stylesheet');
+    }
+  } else {
+    problems.push('the Serif row has no Lyrics action');
+  }
+  applyFont(faceBeforePick);   // put the run back where it found it
+
+  // With a font folder behind it: the imports appear as rows, their bytes are
+  // fetched from the host (one face at a time, never held here), a file that
+  // will not load says so instead of standing in for a face it is not, and
+  // Remove takes two clicks and names the file it removes.
+  const fontCalls = [];
+  const fontStub = {
+    dir: 'C:\\PaprikaLyrics\\fonts', count: 2, trash: 0, status: '',
+    entries: [
+      { file: 'honk.ttf', name: 'honk.ttf', label: 'Honk', id: 'custom-honk', size: 3100000,
+        suffix: '.ttf', weight: 400, style: 'normal', family: 'Honk' },
+      { file: 'zany.woff2', name: 'zany.woff2', label: 'Zany', id: 'custom-zany', size: 90000,
+        suffix: '.woff2', weight: 700, style: 'normal', family: 'Zany',
+        subfamily: 'Bold' },
+    ],
+  };
+  const fontBridgeBefore = window.pywebview;
+  window.pywebview = { api: {
+    font_list: () => fontStub,
+    font_data: (file) => { fontCalls.push(['data', file]); return 'data:font/ttf;base64,AAAA'; },
+    font_import: () => { fontCalls.push(['import']); return { ...fontStub, count: 3, status: 'Added 1 font' }; },
+    font_reveal: (file) => { fontCalls.push(['reveal', file]); return true; },
+    font_remove: (file) => {
+      fontCalls.push(['remove', file]);
+      return { ...fontStub, count: 1, trash: 1, entries: [fontStub.entries[1]],
+               status: 'Removed ' + file + ' (moved to .trash)' };
+    },
+  } };
+  await refreshFonts();
+  // Each row is named the way its own file names it: a family's bold file says so
+  // instead of repeating the family, which is what makes four faces of one family
+  // distinguishable without reading file names.
+  const namesByFace = {};
+  document.querySelectorAll('#qp-font-list .font-row').forEach((row) => {
+    namesByFace[row.dataset.face] = row.querySelector('.font-row-name').textContent;
+  });
+  result.fontRowNames = namesByFace;
+  if (namesByFace['custom-zany'] !== 'Zany Bold') {
+    problems.push('a bold import is listed as "' + namesByFace['custom-zany'] +
+      '" instead of its own subfamily');
+  }
+  if (namesByFace['custom-honk'] !== 'Honk') {
+    problems.push('a plain regular import is not named by its family alone: ' +
+      namesByFace['custom-honk']);
+  }
+
+  result.fontRowsWithFolder = document.querySelectorAll('#qp-font-list .font-row').length;
+  if (result.fontRowsWithFolder !== 8) {
+    problems.push('the folder\u2019s fonts are not listed: ' + result.fontRowsWithFolder + ' rows');
+  }
+  result.fontListHead = (document.querySelector('#qp-font-list .font-list-head') || {}).textContent;
+  if (!/2 fonts/.test(result.fontListHead || '')) {
+    problems.push('the list does not say how many fonts are in the folder: ' + result.fontListHead);
+  }
+  result.fontDataCalls = fontCalls.filter((c) => c[0] === 'data').map((c) => c[1]);
+  if (result.fontDataCalls.length < 2) {
+    problems.push('the list never asked the host for the imported faces');
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Re-queried on every read: the list rebuilds itself (a status, a re-render
+  // after a mutation), so a row captured once goes stale and the check would be
+  // comparing a detached node with the page.
+  const honkRow = () => document.querySelector('.font-row[data-face="custom-honk"]');
+  const honkName = honkRow() && honkRow().querySelector('.font-row-name');
+  result.fontUnreadableMarked = !!(honkName && honkName.classList.contains('is-unreadable'));
+  result.fontUnreadableNote = honkRow() ? honkRow().querySelector('.font-row-sub').textContent : '';
+  if (!result.fontUnreadableMarked || !/could not be read/i.test(result.fontUnreadableNote)) {
+    problems.push('a font whose bytes will not load is not reported on its row');
+  }
+  // …and an unreadable face is never applied, whatever is clicked.
+  const honkLyrics = honkRow() && honkRow().querySelector('button[data-action="lyrics"]');
+  if (honkLyrics) {
+    honkLyrics.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    result.fontUnreadableRefused = lyricFontName !== 'custom-honk';
+    if (!result.fontUnreadableRefused) {
+      problems.push('an unreadable face was applied to the lyrics anyway');
+    }
+  } else {
+    problems.push('an imported face is not listed with its actions');
+  }
+  // Remove: first click arms, second click removes THAT file.
+  const removeButton = () => honkRow() && honkRow().querySelector('button[data-action="remove"]');
+  result.fontRemoveNeedsConfirm = false;
+  if (removeButton()) {
+    removeButton().click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    result.fontRemoveAfterArm = removeButton() ? removeButton().textContent : '';
+    result.fontRemoveCalledEarly = fontCalls.some((c) => c[0] === 'remove');
+    result.fontRemoveNeedsConfirm = result.fontRemoveAfterArm === 'Confirm' && !result.fontRemoveCalledEarly;
+    if (!result.fontRemoveNeedsConfirm) {
+      problems.push('Remove does not ask for confirmation before touching the file');
+    }
+    removeButton().click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const removeCall = fontCalls.find((c) => c[0] === 'remove');
+    result.fontRemoveCall = removeCall || null;
+    if (!removeCall || removeCall[1] !== 'honk.ttf') {
+      problems.push('Confirm did not remove that row\u2019s own file');
+    }
+    result.fontRowsAfterRemove = document.querySelectorAll('#qp-font-list .font-row').length;
+    if (result.fontRowsAfterRemove !== 7) {
+      problems.push('the removed font is still listed: ' + result.fontRowsAfterRemove + ' rows');
+    }
+  } else {
+    problems.push('an imported face cannot be removed from its own row');
+  }
+  // The bar: Add font asks the host to open a picker, Open folder asks it to show
+  // the folder — no inline file input, no path assembled in the page.
+  document.getElementById('qp-font-add').click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  result.fontAddCall = fontCalls.some((c) => c[0] === 'import');
+  if (!result.fontAddCall) problems.push('Add font\u2026 never asks the host for a file picker');
+  document.getElementById('qp-font-open').click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  result.fontRevealCall = fontCalls.some((c) => c[0] === 'reveal');
+  if (!result.fontRevealCall) problems.push('Open folder never asks the host to show the folder');
+  result.fontStatusLine = document.getElementById('qp-font-status').textContent;
+  if (!/Added 1 font/.test(result.fontStatusLine)) {
+    problems.push('the list does not show what the host reported: ' + result.fontStatusLine);
+  }
+
+  // Put the page back: no stub bridge, no folder, and the group as it was found.
+  window.pywebview = fontBridgeBefore;
+  fontLibrary = null;
+  fontListSig = "";
+  fontFaceState.clear();
+  fontFacePromises.clear();
+  fontStatusText = "";
+  renderFontPanel();
+  if (savedFontsOpen === null) {
+    localStorage.removeItem('sl_spGroup_fonts');
+  } else {
+    localStorage.setItem('sl_spGroup_fonts', savedFontsOpen);
+  }
+  applySettingsGroup('fonts', settingsGroupOpen('fonts'), false);
 
   setTransportState(null);
   setTrackDuration(213000);
@@ -1521,9 +2168,13 @@ async function run(label) {
     const mid = [...kf[0].cssRules].find((k) => /50%/.test(k.keyText));
     return mid ? parseFloat(mid.style.opacity) : null;
   })();
+  // Loud-pass feedback dimmed the mote itself: the firefly look came from the
+  // keyframe peak, not from the field level, so the peak is pinned here at the
+  // dimmed value — a later "brighten the air" tidy turns the field dial (which
+  // the modes own), not this per-mote constant
   result.motePeakOpacity = moteOpacityMid;
-  if (!(moteOpacityMid >= 0.8)) {
-    problems.push('a mote never brightens past ' + moteOpacityMid + ' — too dim to notice');
+  if (!(moteOpacityMid >= 0.55 && moteOpacityMid <= 0.68)) {
+    problems.push('the mote peak opacity drifted from the dimmed pass: ' + moteOpacityMid);
   }
 
   // --- 17. cover tilt -----------------------------------------------------
@@ -1548,6 +2199,22 @@ async function run(label) {
   result.tiltChromeOutsideStage = stages.length === 2 && stages.every((s) =>
     !s.querySelector('.art-controls'));
   if (!result.tiltChromeOutsideStage) problems.push('the control row sits inside the tilt stage');
+  // The gloss is clipped to the sleeve by a layer of its own. The stage cannot
+  // clip — the beat lamp bleeds past the artwork on every side — so a band
+  // rotated on the stage painted its corners OUTSIDE the sleeve, which showed as
+  // a bright sliver along the edge, obvious when leaning right.
+  result.tiltGlossLayerPerStage = stages.length === 2 && stages.every((s) =>
+    s.querySelectorAll('.tilt-gloss').length === 1);
+  if (!result.tiltGlossLayerPerStage) {
+    problems.push('a tilt stage has no gloss clipping layer');
+  }
+  result.tiltGlossClips = stages.length === 2 && stages.every((s) => {
+    const gloss = s.querySelector('.tilt-gloss');
+    return !!gloss && getComputedStyle(gloss).overflowX === 'hidden';
+  });
+  if (!result.tiltGlossClips) {
+    problems.push('the gloss layer does not clip the band to the sleeve');
+  }
   // Stacking is NOT re-derived here: section 14 already measures whether the
   // artwork paints above its lamp (`artOverLamp` / `artPositions`), and a second
   // copy of that reading is a second thing to keep in step.
@@ -1589,6 +2256,16 @@ async function run(label) {
   const stageText = stageRules.map((r) => r.selectorText + '{' + (r.style ? r.style.cssText : '') + '}').join('\n');
   result.tiltStageOwnsTransform = /transform[^;]*--tilt-x/.test(stageText);
   if (!result.tiltStageOwnsTransform) problems.push('the tilt stage does not read --tilt-x');
+  // The band itself must live on the clipping layer, and the stage must no
+  // longer paint one directly — that is the whole fix for the edge sliver.
+  const glossText = tiltSheet.filter((r) => r.selectorText && /tilt-gloss/.test(r.selectorText))
+    .map((r) => r.selectorText + '{' + (r.style ? r.style.cssText : '') + '}').join('\n');
+  result.tiltBandOnGlossLayer = /rotate/.test(glossText) && /--tilt-x/.test(glossText);
+  if (!result.tiltBandOnGlossLayer) problems.push('the gloss band is not on the clipping layer');
+  result.tiltStagePaintsNoGloss = !tiltSheet.some((r) => r.selectorText === '.tilt-stage::after');
+  if (!result.tiltStagePaintsNoGloss) {
+    problems.push('.tilt-stage::after still paints the gloss outside the sleeve');
+  }
   result.tiltReducedNeutral = tiltSheet.some((r) =>
     r.selectorText && /\.reduce-motion[^{]*\.tilt-stage/.test(r.selectorText) &&
     /transform:\s*none/.test(r.style ? r.style.cssText : ''));
@@ -1603,29 +2280,57 @@ async function run(label) {
     tiltRoot.style.getPropertyValue('--tilt-x'),
     tiltRoot.style.getPropertyValue('--tilt-y'),
   ];
+  // The lean is published once per frame from the newest pointer sample, so a
+  // check that read it in the same task as the event would read the previous
+  // frame's value — and the wrap is measured once per hover, because a rect read
+  // inside the move handler is what made the lean crawl whenever the lyric engine
+  // was busy.
+  const tiltFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  const tiltMove = async (x, y) => {
+    tiltWrap.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true, clientX: x, clientY: y,
+    }));
+    await tiltFrame();
+    await tiltFrame();
+  };
+  // The stage's rotation is itself a transition (--tilt-dur), so a check that wants
+  // the settled ANGLE has to wait for the value to stop moving. Two frames is
+  // enough to see the published numbers, not enough to see where the ease ends.
+  const tiltSettle = async (el, frames = 48) => {
+    let previous = '';
+    for (let i = 0; i < frames; i++) {
+      await tiltFrame();
+      const current = getComputedStyle(el).transform;
+      if (current === previous) return current;
+      previous = current;
+    }
+    return previous;
+  };
   result.tiltWrapVisible = !!tiltRect && tiltRect.width > 0 && tiltRect.height > 0;
   if (!result.tiltWrapVisible) problems.push('the compact art is not measurable for the tilt');
   const savedTiltMode = tiltMode;
   if (tiltMode === 'off') cycleTilt();
+  let tiltRects = 0;
   if (tiltRect && tiltRect.width > 0) {
-    tiltWrap.dispatchEvent(new MouseEvent('mousemove', {
-      bubbles: true,
-      clientX: tiltRect.right - 2,
-      clientY: tiltRect.bottom - 2,
-    }));
+    const realRect = tiltWrap.getBoundingClientRect.bind(tiltWrap);
+    tiltWrap.getBoundingClientRect = function () { tiltRects++; return realRect(); };
+    await tiltMove(tiltRect.right - 2, tiltRect.bottom - 2);
     result.tiltBottomRight = tiltRead().map((v) => parseFloat(v));
-    tiltWrap.dispatchEvent(new MouseEvent('mousemove', {
-      bubbles: true,
-      clientX: tiltRect.left + 2,
-      clientY: tiltRect.top + 2,
-    }));
+    // Six more samples inside the same hover: they must reuse the measured rect.
+    for (let i = 0; i < 6; i++) await tiltMove(tiltRect.left + 2, tiltRect.top + 2);
     result.tiltTopLeft = tiltRead().map((v) => parseFloat(v));
+    delete tiltWrap.getBoundingClientRect;
     tiltWrap.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
     result.tiltAfterLeave = tiltRead().map((v) => parseFloat(v));
   } else {
     result.tiltBottomRight = null;
     result.tiltTopLeft = null;
     result.tiltAfterLeave = null;
+  }
+  result.tiltRectsPerHover = tiltRects;
+  result.tiltRectCached = !result.tiltWrapVisible || tiltRects <= 1;
+  if (!result.tiltRectCached) {
+    problems.push('the lean re-measures the art once per pointer event: ' + tiltRects);
   }
   result.tiltFollowsPointer =
     !!result.tiltBottomRight && !!result.tiltTopLeft &&
@@ -1654,7 +2359,7 @@ async function run(label) {
     bubbles: true, clientX: angleRect.right - 2, clientY: angleRect.top + 2,
   }));
   const angleStage = document.querySelector('.tilt-stage');
-  const angleMatrix = getComputedStyle(angleStage).transform;
+  const angleMatrix = await tiltSettle(angleStage);
   const angleNums = ((angleMatrix.match(/matrix3d\(([^)]+)\)/) || [null, ''])[1])
     .split(',').map(Number);
   result.tiltBoldAngleDeg = angleNums.length === 16
@@ -1670,12 +2375,13 @@ async function run(label) {
   if (!result.tiltLiftScalesWithAmp) {
     problems.push('the tilt lift does not scale with the amplitude');
   }
-  result.tiltGloss = tiltSheet.some((r) =>
-    /tilt-stage::after/.test(r.selectorText || '') &&
-    /linear-gradient/.test(r.style ? r.style.cssText : ''));
-  result.tiltGlossScalesWithAmp = tiltSheet.some((r) =>
-    /tilt-stage::after/.test(r.selectorText || '') &&
-    /opacity[^;]*--tilt-mag/.test(r.style ? r.style.cssText : ''));
+  // The band itself lives on the clipping layer, not on the stage — see the
+  // tiltBandOnGlossLayer check above — so the gloss is read from `.tilt-gloss::after`.
+  const glossAfter = tiltSheet.filter((r) => (r.selectorText || '') === '.tilt-gloss::after')
+    .map((r) => (r.style ? r.style.cssText : '')).join(';');
+  result.tiltGloss = /linear-gradient/.test(glossAfter);
+  result.tiltGlossScalesWithAmp = /opacity[^;]*--tilt-mag/.test(glossAfter)
+    && /opacity[^;]*--tilt-amp/.test(glossAfter);
   if (!result.tiltGloss) problems.push('the sleeve has no gloss to make the lean legible');
   if (!result.tiltGlossScalesWithAmp) problems.push('the gloss does not follow the lean');
   resetTilt();
@@ -1691,6 +2397,10 @@ async function run(label) {
       bubbles: true, clientX: tiltRect.right - 2, clientY: tiltRect.bottom - 2,
     }));
   }
+  // Off refuses the sample in the handler, so nothing is published at all; the
+  // frame is waited out anyway, so a fix that started publishing during a pending
+  // Off frame would be caught rather than raced.
+  await tiltFrame();
   result.tiltOffNeutral = tiltRead().every((v) => parseFloat(v) === 0);
   if (!result.tiltOffNeutral) problems.push('the sleeve leans while Cover tilt is Off');
 
@@ -1730,9 +2440,13 @@ async function run(label) {
   leanWrap.dispatchEvent(new MouseEvent('mousemove', {
     bubbles: true, clientX: leanRect.right - 2, clientY: leanRect.bottom - 2,
   }));
+  await tiltFrame();
+  await tiltFrame();
   result.tiltLeanBeforeLayout = tiltRead().map((v) => parseFloat(v));
   if (!(Math.abs(result.tiltLeanBeforeLayout[0]) > 0.5)) {
-    problems.push('the layout-change check could not lean the sleeve first');
+    problems.push('the layout-change check could not lean the sleeve first: ' +
+      JSON.stringify(result.tiltLeanBeforeLayout) + ' tiltMode=' + JSON.stringify(tiltMode) +
+      ' rect=' + JSON.stringify([leanRect.left, leanRect.top, leanRect.width, leanRect.height]));
   }
   cycleLayout();                                   // compact -> split
   result.tiltLeanClearedOnLayout = tiltRead().every((v) => parseFloat(v) === 0);
@@ -1750,6 +2464,8 @@ async function run(label) {
   blurWrap.dispatchEvent(new MouseEvent('mousemove', {
     bubbles: true, clientX: blurRect.right - 2, clientY: blurRect.top + 2,
   }));
+  await tiltFrame();
+  await tiltFrame();
   result.tiltLeanBeforeBlur = tiltRead().map((v) => parseFloat(v));
   if (!(Math.abs(result.tiltLeanBeforeBlur[1]) > 0.5)) {
     problems.push('the blur check could not lean the sleeve first');
@@ -1834,6 +2550,316 @@ async function run(label) {
       for (const mote of savedMotes) dust.appendChild(mote);
     }
   }
+
+  // --- 18. the position contract: hold, cap, monotonic paint --------------
+  // Three rules the wipe depends on, each one a reported symptom:
+  //
+  //   * 'hold' — the bridge had no fresh sample (a browser after a site-side
+  //     seek, SimpMusic between reports) and is only offering its parked
+  //     projection. Obeying it stalled real-time sync and dragged the wipe back
+  //     over letters already sung, so it must not move the playhead at all;
+  //   * a large BACKWARD 'soft' report is the same parked number slipping
+  //     through: at most SOFT_BACK_MAX_MS of it may be taken, and a forward one
+  //     must still converge exactly;
+  //   * a 'snap' is a landing, so it may move the wipe anywhere.
+  //
+  // The whole suite runs off the live globals; every one it writes is saved and
+  // put back below, so the checks leave the app exactly as they found it.
+  const savedSync = {
+    isPlaying, playheadMs, renderMs, anchorPosMs, anchorWallMs,
+    targetDriftMs, glideUntilMs, lastUserSeekAt,
+  };
+  try {
+    // A seek an earlier check made must not veto these reports: the echo guard is
+    // exactly what the bridge's reports would trip for the next 900ms.
+    lastUserSeekAt = -Infinity;
+    const put = (ms) => {
+      isPlaying = true;
+      playheadMs = ms;
+      renderMs = ms;
+      anchorPosMs = ms;
+      anchorWallMs = performance.now();
+      targetDriftMs = 0;
+    };
+
+    // A hold is not a correction.
+    put(10000);
+    window.syncPlayhead(70000, 'hold');
+    result.holdLeavesThePlayhead = playheadMs === 10000 && renderMs === 10000
+      && anchorPosMs === 10000;
+    if (!result.holdLeavesThePlayhead) {
+      problems.push('a hold moved the playhead (a parked position became a correction)');
+    }
+
+    // A long stretch of holds must leave the wipe running on its own clock. A held
+    // projection is not the bridge going quiet — it is the bridge still reporting,
+    // from a timeline the player has not refreshed — so it must not start a
+    // countdown to parking the lyrics. Parked mid-line is precisely the "the lyrics
+    // are basically paused and only a pause/unpause brings them back" report, and
+    // the stretch covered below is 13 seconds of playback.
+    isPlaying = true;
+    playheadMs = 10000;
+    renderMs = 10000;
+    anchorPosMs = 10000;
+    anchorWallMs = performance.now() - 13000;   // 13s of playback…
+    targetDriftMs = 0;
+    glideUntilMs = 0;
+    window.syncPlayhead(22000, 'hold');         // …in which the bridge only held
+    // The frames have to come from somewhere: a hold returns before the wake-up a
+    // real correction triggers, and a paused overlay's loop parks itself.
+    wakeRenderLoop();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    result.holdsDoNotFreezeTheWipe = playheadMs >= 22000;
+    if (!result.holdsDoNotFreezeTheWipe) {
+      problems.push('a stretch of holds froze the wipe at ' + Math.round(playheadMs));
+    }
+    // …and the clock is the ONLY source of the position while playing. The freeze
+    // behind the report was an `else` on this very assignment — a "quiet source"
+    // branch that stopped advancing the wipe — so its shape is named here. The
+    // check above is the real guard; this one says what defeated it.
+    const tickText = tick.toString();
+    result.tickAdvancesFromTheClock = /playheadMs\s*=\s*predictedPlayhead\(\)/.test(tickText)
+      && !/else\s*\{\s*playheadMs\s*=\s*predictedPlayhead\(\)/.test(tickText);
+    if (!result.tickAdvancesFromTheClock) {
+      problems.push('tick() can skip advancing the wipe while playing');
+    }
+
+    // A backward soft report is capped, not obeyed: the anchor may not be pulled
+    // further back than the cap. (The parked 4s-back number used to drag the
+    // wipe — and the syllables it had passed — backwards every poll.)
+    put(10000);
+    window.syncPlayhead(9000, 'soft');
+    result.softBackIsCapped = anchorPosMs >= 10000 - SOFT_BACK_MAX_MS - 1;
+    if (!result.softBackIsCapped) {
+      problems.push('a soft report 1000ms behind pulled the wipe back in full: '
+        + Math.round(anchorPosMs));
+    }
+    // ...and it must not paint backwards either.
+    result.softBackNeverRepaints = renderMs >= 10000;
+    if (!result.softBackNeverRepaints) {
+      problems.push('a backward soft report moved the painted playhead back');
+    }
+
+    // A forward soft report still converges exactly onto what the bridge said.
+    put(10000);
+    window.syncPlayhead(10500, 'soft');
+    result.softForwardConverges = Math.abs(anchorPosMs - 10500) < 1;
+    if (!result.softForwardConverges) {
+      problems.push('a forward soft report no longer converges: ' + anchorPosMs);
+    }
+
+    // A snap is a landing: it may move the wipe anywhere, including backwards.
+    put(20000);
+    window.syncPlayhead(30000, 'snap');
+    result.snapLands = Math.abs(playheadMs - 30000) < 1
+      && Math.abs(renderMs - 30000) < 1;
+    if (!result.snapLands) {
+      problems.push('a snap did not land the wipe: ' + playheadMs + ' / ' + renderMs);
+    }
+
+    // A glide is a move the user made IN THE PLAYER, not drift, so the wipe must
+    // ride it — backwards included. Held forward-only, a seek backwards pinned the
+    // wipe where it was and the lyrics never followed the player: the "I moved the
+    // progress bar and the lyrics did not update" report.
+    put(300000);
+    glideUntilMs = 0;
+    window.syncPlayhead(295000, 'glide');
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    result.glideCarriesTheWipeBackwards = Math.abs(renderMs - 295000) <= 1000;
+    if (!result.glideCarriesTheWipeBackwards) {
+      problems.push('a backward seek left the wipe at ' + Math.round(renderMs)
+        + ' (the audio is at 295000)');
+    }
+
+    // The per-frame paint only advances while playing. This is what makes a
+    // re-sweep impossible even if a small backward correction lands.
+    const tickSrc = tick.toString();
+    result.tickPaintIsMonotonic = /renderMs\s*=\s*Math\.max\(renderMs,\s*playheadMs\)/.test(tickSrc)
+      || /if\s*\(\s*playheadMs\s*>\s*renderMs\s*\)\s*renderMs\s*=\s*playheadMs/.test(tickSrc);
+    result.tickPaintsFromTheWipe = /renderProgress\(renderMs\s*\+\s*latencyOffsetMs\)/.test(tickSrc);
+    if (!result.tickPaintIsMonotonic || !result.tickPaintsFromTheWipe) {
+      problems.push('tick() no longer paints from the forward-only position');
+    }
+    // …and it behaves that way, not just reads that way: with the clock put five
+    // seconds BEHIND the wipe, a real frame must leave the paint where it was.
+    isPlaying = true;
+    playheadMs = 20000;
+    renderMs = 20000;
+    anchorPosMs = 15000;
+    anchorWallMs = performance.now();
+    targetDriftMs = 0;
+    wakeRenderLoop();
+    await Promise.race([
+      new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      new Promise((resolve) => setTimeout(resolve, 500)),
+    ]);
+    result.tickPaintNeverRewinds = renderMs >= 20000;
+    if (!result.tickPaintNeverRewinds) {
+      problems.push('a frame painted behind the wipe: ' + Math.round(renderMs));
+    }
+    // The frame loop survives a throwing frame instead of dying silently, which
+    // is what used to leave the overlay frozen until a pause or a lyric click.
+    result.frameLoopSurvivesAThrow = /reportRenderLoopError/.test(tickSrc)
+      && typeof reportRenderLoopError === 'function';
+    if (!result.frameLoopSurvivesAThrow) {
+      problems.push('a thrown frame would kill the render loop again');
+    }
+  } catch (err) {
+    problems.push('the position contract threw: ' + (err && err.message));
+  } finally {
+    isPlaying = savedSync.isPlaying;
+    playheadMs = savedSync.playheadMs;
+    renderMs = savedSync.renderMs;
+    anchorPosMs = savedSync.anchorPosMs;
+    anchorWallMs = savedSync.anchorWallMs;
+    targetDriftMs = savedSync.targetDriftMs;
+    glideUntilMs = savedSync.glideUntilMs;
+    lastUserSeekAt = savedSync.lastUserSeekAt;
+  }
+
+  // --- 19. a long line cannot leave the column ------------------------------
+  // The column clips sideways (`overflow-x: clip`), so a run wider than it is not
+  // scrolled, it is CUT: the tail of the line is gone and no gesture brings it back.
+  // Wrapping covers everything with a space in it; a long word, a token in a script
+  // that writes no spaces, and a syllable that is simply too wide at this size have
+  // nothing to break at — a word wraps between its own syllables, and a line whose
+  // widest syllable still does not fit is scaled (`--line-fit`). Both are asserted
+  // here, against the rendered glyphs rather than the numbers the fitting computed.
+  const overflowFixture = [
+    { startTimeMs: 0, endTimeMs: 3000, text: 'she lies down?' },
+    { startTimeMs: 3000, endTimeMs: 6000, text: 'the world right round, and her' },
+    // Long enough to be wider than the column at every viewport, including the
+    // 1400px one, so the wrapping is exercised rather than merely available.
+    { startTimeMs: 6000, endTimeMs: 12000,
+      text: 'Supercalifragilisticexpialidocious'.repeat(3) },
+    { startTimeMs: 12000, endTimeMs: 16000,
+      text: 'きみのしらないものがたりをうたうよせかいがおわるまえに' },
+    { startTimeMs: 16000, endTimeMs: 20000, text: 'a line with a translation layer',
+      translation: 'a translation long enough to wrap rather than run off the side' },
+    { startTimeMs: 20000, endTimeMs: 23000, text: 'Происходит' },
+  ];
+  // `content-visibility: auto` is the app's own optimisation for the lines off screen
+  // and not what is being tested here — a skipped line has no glyph geometry to read.
+  const forceLyricLayout = document.createElement('style');
+  forceLyricLayout.textContent = '#lyrics-container > .line { content-visibility: visible !important; }';
+  document.head.appendChild(forceLyricLayout);
+  window.loadLyrics(overflowFixture, 'Overflow probe', 'Regression', 'LRCLIB',
+                    0, 'overflow-probe', 0, null, true);
+
+  const overflowScan = () => {
+    const containerEl = document.getElementById('lyrics-container');
+    const cRect = containerEl.getBoundingClientRect();
+    const lineEls = [...containerEl.querySelectorAll(':scope > .line')];
+    const column = lineEls.length ? lineEls[0].clientWidth : 0;
+    const rows = lineEls.map((el, i) => {
+      const lRect = el.getBoundingClientRect();
+      const kids = [...el.querySelectorAll('.word-group, .syllable, .line-secondary')];
+      const bounds = kids.reduce((acc, kid) => {
+        const r = kid.getBoundingClientRect();
+        return { left: Math.min(acc.left, r.left), right: Math.max(acc.right, r.right) };
+      }, { left: Infinity, right: -Infinity });
+      const syllables = [...el.querySelectorAll('.syllable')];
+      const widthOf = (rect) => rect.width;
+      return {
+        i,
+        text: (el.textContent || '').slice(0, 16),
+        pastContent: kids.length ? Math.round(bounds.right - (lRect.left + column)) : 0,
+        pastContainer: kids.length ? Math.round(bounds.right - cRect.right) : 0,
+        height: Math.round(lRect.height),
+        syllables: syllables.length,
+        // What the line would be wide as ONE row: the sum of its own syllables. This is
+        // the number the wrap has to beat, and the fixture asserts that it does.
+        unbrokenWidth: Math.round(syllables.reduce((sum, s) => sum + widthOf(s.getBoundingClientRect()), 0)),
+        fit: el.style.getPropertyValue('--line-fit') || '1',
+        active: el.classList.contains('is-active'),
+      };
+    });
+    return { rows, column };
+  };
+
+  const overflowProblems = [];
+  const scanOverflow = (state) => {
+    const idleScan = overflowScan();
+    const idle = idleScan.rows;
+    const column = idleScan.column;
+    // A line at rest is compared against the COLUMN: nothing about it may reach the edge
+    // of the text area it is set in, which is where the clipping starts. The line being
+    // sung is the exception, and deliberately so — it is drawn at scale(1.025) from its
+    // left edge, which is what the container's right inset is for — so it is held to the
+    // window instead, below.
+    const idlePast = idle.filter((row) => !row.active && row.pastContent > 1);
+    if (idlePast.length) {
+      overflowProblems.push(state + ': a line runs past the column: '
+        + JSON.stringify(idlePast.map((r) => [r.i, r.pastContent, r.text])));
+    }
+    // …and the sung line against the WINDOW: the active line scales 1.025 and a sung
+    // syllable pops about its own centre, so it is allowed the container's gutter, not
+    // the column's edge.
+    const target = idle.reduce((a, b) => (b.height > a.height ? b : a), idle[0] || { i: 0 }).i;
+    activeLineIdx = target;
+    lastActiveSig = '';
+    resetAllLines();
+    updateLineDepthOfField([target]);
+    const lDom = lyricDom[target];
+    const lastWord = lDom && lDom.words[lDom.words.length - 1];
+    const lastSyl = lastWord && lastWord.syllables[lastWord.syllables.length - 1];
+    if (lastSyl) setSyllableState(lastSyl, 'singing', lastSyl.numChars, 1, lastSyl.startTimeMs);
+    const active = overflowScan().rows;
+    const activePast = active.filter((row) => row.pastContainer > 0);
+    if (activePast.length) {
+      overflowProblems.push(state + ': a sung line leaves the window: '
+        + JSON.stringify(activePast.map((r) => [r.i, r.pastContainer, r.text])));
+    }
+    return { idle, active: active[target] || null, target, column };
+  };
+
+  const savedOverflowFullscreen = isFullscreen;
+  const savedOverflowFace = lyricFontName;
+  setFullscreen(false);
+  const overflowWindowed = scanOverflow('windowed');
+  setFullscreen(true);
+  const overflowFullscreen = scanOverflow('fullscreen');
+  setFullscreen(false);
+  // …and again in a different real face: the fitting is computed from font metrics, so a
+  // family whose glyphs are wider than the default stack's is exactly what would break it.
+  applyFont('serif');
+  const overflowSerif = scanOverflow('serif');
+  result.lyricOverflowFace = getComputedStyle(document.querySelector('#lyrics-container .line')).fontFamily;
+  applyFont(savedOverflowFace);
+  setFullscreen(savedOverflowFullscreen);
+
+  // The fixture has to keep exercising the path: if the wrapping and the split stop
+  // running, every line fits by itself and the checks above pass for free.
+  const longWordLine = overflowWindowed.idle[2] || { syllables: 0, height: 0, unbrokenWidth: 0 };
+  const cjkLine = overflowWindowed.idle[3] || { syllables: 0, height: 0, unbrokenWidth: 0 };
+  const singleRowHeight = (overflowWindowed.idle[0] || {}).height || 0;
+  const column = overflowWindowed.column || 1;
+  result.overflowFixtureWraps = longWordLine.syllables > 1
+    && longWordLine.unbrokenWidth > column
+    && longWordLine.height > singleRowHeight + 2;
+  if (!result.overflowFixtureWraps) {
+    problems.push('the long word did not wrap between its syllables: '
+      + JSON.stringify(longWordLine));
+  }
+  result.overflowFixtureSplitsSpaceLessText = cjkLine.syllables > 8;
+  if (!result.overflowFixtureSplitsSpaceLessText) {
+    problems.push('a space-less line was left as one unbreakable run: '
+      + JSON.stringify(cjkLine));
+  }
+  result.lyricOverflowIdle = overflowWindowed.idle.map((r) => r.pastContent);
+  result.lyricOverflowFullscreen = overflowFullscreen.idle.map((r) => r.pastContent);
+  result.lyricOverflowSerif = overflowSerif.idle.map((r) => r.pastContent);
+  result.lyricOverflowFixture = { column,
+    unbroken: [longWordLine.unbrokenWidth, cjkLine.unbrokenWidth] };
+  result.lyricOverflowActive = overflowFullscreen.active;
+  problems.push(...overflowProblems);
+
+  // Back to no lyrics: the checks that need lyrics loaded are the ones above, and the run
+  // is replayed at five viewports in one page.
+  window.loadLyrics([], '', '', '', 0, '', 0, null, true);
+  activeLineIdx = -1;
+  lastActiveSig = '';
+  forceLyricLayout.remove();
 
   // leave the app in the state the checks started from
   tiltMode = savedTiltMode;

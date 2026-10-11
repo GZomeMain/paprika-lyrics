@@ -24,6 +24,10 @@
   /* ---------- Motion tokens ---------- */
   --dur-1: 0.12s; /* press / micro feedback */
   --dur-2: 0.20s; /* hover */
+  /* The sleeve's lean is published once per frame from the newest pointer sample,
+     so it only has to smooth the gap BETWEEN frames: at hover's 0.2s the lean
+     visibly trailed the pointer, worst while the lyric engine was busy. */
+  --tilt-dur: 0.09s;
   --dur-3: 0.32s; /* surfaces (panels, chips) */
   --dur-4: 0.48s; /* layout & art growth */
   --ease-fluid: cubic-bezier(0.33, 0, 0.2, 1);
@@ -237,13 +241,14 @@ html, body {
   initial-value: 0;
 }
 
-/* --dur-2 rather than --dur-3 for the tilt: the value is published on every
-   pointer move, so it has to settle BEHIND the pointer rather than trail it. */
+/* The tilt gets its own (short) duration rather than a hover one: its value is
+   published on every pointer move, so it has to settle BEHIND the pointer rather
+   than trail it — a long ease here is the "laggy tilt" itself. */
 :root {
   transition: --art-accent 1.6s var(--ease-fluid),
               --dust-op var(--dur-4) var(--ease-fluid),
-              --tilt-x var(--dur-2) var(--ease-out),
-              --tilt-y var(--dur-2) var(--ease-out);
+              --tilt-x var(--tilt-dur) var(--ease-out),
+              --tilt-y var(--tilt-dur) var(--ease-out);
 }
 
 /* =========================================================
@@ -596,24 +601,37 @@ body.moment-live {
   pointer-events: none;
   /* A two-stop core, not one long fade. At 2-7px across, a gradient that is
      already 40% transparent at its own centre reads as nothing on a dark room;
-     a near-solid middle and a soft edge is what makes a mote a light. */
+     a near-solid middle and a soft edge is what makes a mote a light.
+     The tint is the mote's OWN region colour (--mote-c, a per-half tint of the
+     cover applied in app.js) against the blurred artwork it drifts in front of,
+     falling back to the room accent when no palette exists (grey cover, no
+     cover). It is pre-offset in app.js — lighter where the region is dark,
+     darker where it is bright — so the mote always separates from its patch
+     of the gradient. */
   background: radial-gradient(closest-side,
-    color-mix(in srgb, var(--art-accent) 95%, transparent) 0%,
-    color-mix(in srgb, var(--art-accent) 55%, transparent) 45%,
+    color-mix(in srgb, var(--mote-c, var(--art-accent)) 95%, transparent) 0%,
+    color-mix(in srgb, var(--mote-c, var(--art-accent)) 55%, transparent) 45%,
     transparent 100%);
   /* Alternate, not one-way. A mote travelling straight up leaves the clipped
      field for good and thins the room out over a long song; air drifts and comes
      back, and the round trip is twice the motion for the same duration. */
   animation: mote-drift var(--mt, 22s) ease-in-out infinite alternate;
   animation-delay: var(--md, 0s);
+  /* A track change hands the mote a new colour: blended rather than swapped, so
+     the room re-tints as one move instead of motes flickering to the new hue. */
+  transition: background 1.6s var(--ease-fluid);
 }
 
 /* Transform and opacity only: the field is on for the whole song, so a keyframe
-   that moved `left`/`top` would run layout on every frame of it. */
+   that moved `left`/`top` would run layout on every frame of it.
+   The opacities are the dimmed pass: the first one shipped a 0.9 peak that read
+   as fireflies on a photograph rather than as air, so the mote now peaks at just
+   over half strength and the field's own --dust-op level stays the single
+   brightness dial the modes turn. */
 @keyframes mote-drift {
-  0%   { transform: translate3d(0, 0, 0) scale(0.9); opacity: 0.34; }
-  50%  { opacity: 0.9; }
-  100% { transform: translate3d(var(--mw, 1rem), -4rem, 0) scale(1.12); opacity: 0.42; }
+  0%   { transform: translate3d(0, 0, 0) scale(0.9); opacity: 0.2; }
+  50%  { opacity: 0.6; }
+  100% { transform: translate3d(var(--mw, 1rem), -4rem, 0) scale(1.12); opacity: 0.26; }
 }
 
 /* The beat nudges the WHOLE body of air, on the same grid and with the same
@@ -683,22 +701,44 @@ body.mini .dust-field,
   will-change: transform;
 }
 
-/* The gloss: a highlight that slides across the sleeve as the pointer moves, at
-   z-index 2 so it paints over the artwork (1) and the lamp (0). This is the part
-   that makes the lean legible at a glance — light travelling across a surface is
-   something the eye catches, where a small rotation of a square of artwork is
-   not. At rest --tilt-mag is 0, so the sleeve is unglossed until it is touched. */
-.tilt-stage::after {
-  content: '';
+/* The gloss: a highlight that slides across the sleeve as the pointer moves, on
+   a layer of its own at z-index 2 so it paints over the artwork (1) and the lamp
+   (0). This is the part that makes the lean legible at a glance — light
+   travelling across a surface is something the eye catches, where a small
+   rotation of a square of artwork is not. At rest --tilt-mag is 0, so the sleeve
+   is unglossed until it is touched.
+
+   The clipping layer is the point: the stage itself must NOT clip (the beat lamp
+   bleeds a third of its size past the sleeve — see the markup note), so a band
+   rotated directly on the stage painted its rotated corners *outside* the
+   artwork, which showed as a bright sliver along the sleeve's edge, most obvious
+   when leaning right. This layer is the sleeve's own rounded rect as a clip and
+   the band rotates inside it, so nothing can escape the artwork. */
+.tilt-gloss {
   position: absolute;
   inset: 0;
   z-index: 2;
   border-radius: inherit;
+  overflow: hidden;
   pointer-events: none;
-  background: linear-gradient(calc(70deg + var(--tilt-x, 0) * 26deg),
+}
+
+.tilt-gloss::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* A fixed band, ROTATED by the lean rather than re-angled by it: a gradient
+     whose angle changes has to be rasterised again on the main thread every
+     frame, and while a song is playing that is the frame budget the lean needs.
+     Rotating the layer is a compositor transform, and the band is transparent at
+     both ends, so its rotated edges show nothing. */
+  background: linear-gradient(70deg,
     transparent 34%,
     rgba(255, 255, 255, 0.34) 50%,
     transparent 66%);
+  transform: rotate(calc(var(--tilt-x, 0) * 26deg));
+  will-change: transform;
   opacity: calc(0.85 * var(--tilt-amp, 1) * var(--tilt-mag));
   transition: opacity var(--dur-2) var(--ease-out);
 }
@@ -710,7 +750,7 @@ body.mini .dust-field,
   will-change: auto;
 }
 
-.reduce-motion .tilt-stage::after {
+.reduce-motion .tilt-gloss::after {
   opacity: 0;
 }
 
@@ -949,9 +989,14 @@ body.mini .dust-field,
    mechanism rather than hiding it, so the viewport cannot be scrolled sideways
    by any means.
 
-   The 32px right inset is what the column really had while the 10px bar was
-   taking space inside the padding box, so the type sits exactly where it did,
-   and the extra 10px is the room the scaled active line needs. */
+   The right inset is the room the SCALED ACTIVE LINE needs: the live line is drawn at
+   scale(1.025) from its left edge plus a 2px lean, so a row that reaches the edge of the
+   column reaches ~2.5% (and 2px) further than the column's own width. A flat 32px was
+   that room for a column of about 1280px and nothing wider — a window at 2560px lost the
+   last glyph of the active line to the window edge — so it is proportional, with the old
+   32px kept as the floor for narrow windows (where 3% is a few px). The left inset stays a
+   flat value: with the growth anchored left (or right, see the alignment block) the left
+   edge never moves. */
 #lyrics-container {
   /* How far down the list fades to nothing. The floating track card is painted
      over the scroller, so this has to reach past it or lyric glyphs show through
@@ -961,7 +1006,7 @@ body.mini .dust-field,
   min-height: 0;
   overflow-y: scroll;
   overflow-x: clip;
-  padding: 180px 32px 240px 28px;
+  padding: 180px max(32px, 3%) 240px 28px;
   scrollbar-width: none;
   z-index: 10;
   position: relative;
@@ -1204,7 +1249,12 @@ body.mini .dust-field,
 .line {
   font-family: var(--lyric-font-family, 'Barriecito', cursive, sans-serif);
   font-weight: var(--lyric-font-weight, 400); /* 400 avoids synthetic blurring for Barriecito */
-  font-size: var(--lyric-font-size, 30px);
+  /* `--line-fit` is the line's own shrink factor (1 unless the line holds a run
+     that cannot be broken — a long word, or a line-synced script without spaces —
+     and is wider than the column, see fitLyricLines in app.js). It multiplies the
+     shared size rather than replacing it, so a zoom, a fullscreen multiplier or a
+     font change keeps composing and the line only ever holds the ratio. */
+  font-size: calc(var(--lyric-font-size, 30px) * var(--line-fit, 1));
   letter-spacing: 0.01em;
   line-height: 1.44;
   margin-bottom: 28px;
@@ -1216,6 +1266,36 @@ body.mini .dust-field,
     filter 0.5s var(--ease-fluid),
     opacity 0.5s var(--ease-fluid),
     transform 0.5s var(--ease-fluid);
+}
+
+/* Only about four lines are on screen at once; a 200-line song is ~8,600 DOM
+   nodes, and `loadLyrics` rebuilds all of them on every track change. Letting
+   the browser skip style, layout and paint for the lines that are off screen
+   makes that rebuild measurably cheaper (1.5x at 200 lines, 1.9x at 400, and
+   ~11x on the scroll/forced-layout path the spring scroller hits every frame).
+
+   `contain-intrinsic-size` is the line's CONTENT height (1.44 x 30px x ~3
+   wrapped rows = 129.6px), NOT its outer height: including the 28px
+   `margin-bottom` here inflated the scroll height by ~28px per line — 11,360px
+   over a 400-line song. With the content height the scroll geometry is within
+   0.4px per line. The `auto` keyword makes it self-correcting per line the
+   first time that line is actually rendered, so a font-size change only affects
+   lines that have never been on screen. Verified against
+   tools/ui-preview-regression.js at all five viewports. */
+#lyrics-container > .line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 130px;
+}
+
+/* The live line's glow must bleed past its own box (up to ~30px of blur plus
+   the highlight's 24px bleed). content-visibility:auto carries paint
+   containment, which clips absolutely-positioned bleed to the line's padding
+   box — that read as a hard vertical wall on the first glyph ("Drink") and a
+   flat cut across the top ("you"). The active line is already on screen and
+   already composited, so opting it out of skipping keeps the optimisation for
+   every other line while the glow spreads like the rest of the highlight. */
+#lyrics-container > .line.is-active {
+  content-visibility: visible;
 }
 
 .line:hover {
@@ -1250,8 +1330,14 @@ body.align-right #lyrics-container .line-secondary {
   transform-origin: right center;
 }
 
+/* A word that wrapped between its syllables is several flex rows inside one box that
+   `text-align` positions as a whole, so its own rows have to follow the alignment too
+   or the wrapped part of a centred line would sit left against the rest. */
+body.align-center #lyrics-container .word-group { justify-content: center; }
+body.align-right #lyrics-container .word-group { justify-content: flex-end; }
+
 .line.backing-vocal {
-  font-size: calc(var(--lyric-font-size, 30px) * 0.72);
+  font-size: calc(var(--lyric-font-size, 30px) * 0.72 * var(--line-fit, 1));
   font-style: italic;
   margin-bottom: 20px;
 }
@@ -1259,10 +1345,14 @@ body.align-right #lyrics-container .line-secondary {
 /* Subordinate translation / transliteration layer */
 .line-secondary {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
-  font-size: calc(var(--lyric-font-size, 30px) * 0.42);
+  font-size: calc(var(--lyric-font-size, 30px) * 0.42 * var(--line-fit, 1));
   font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1.35;
+  /* A translation is a text layer, not a glyph run of syllables, so it can break at any
+     character when it has no space to break at: a space-less translation line wraps
+     rather than running past the column. */
+  overflow-wrap: anywhere;
   margin-top: 6px;
   color: rgba(255, 255, 255, 0.55);
   cursor: pointer;
@@ -1272,10 +1362,29 @@ body.align-right #lyrics-container .line-secondary {
   display: none;
 }
 
+/* A word is a flex row of its own syllables — and, when it is too wide for the column to
+   hold at all, a BLOCK that wraps between them (`.is-wrapped`, set by fitLyricLines in
+   app.js). Wrapping is what keeps such a word readable and inside the text area: without
+   it the word is one unbreakable run, and the column clips sideways, so the tail of the
+   line is simply gone. It becomes a block rather than a wrapping inline-flex for a
+   measured reason — an inline-flex that wraps is sized by its max-width while the inline
+   layout places it by its width, so it was put on a row with too little room left and its
+   flex rows then painted past the column (seen at 330x380: a 230px box laid out 12px over
+   the edge, which is a clipped glyph again). As a block it starts its own row, its rows
+   are the only thing on them, and the inline content before and after it keeps its order
+   in the anonymous blocks on either side. */
 .word-group {
   display: inline-flex;
   white-space: pre;
   position: relative;
+}
+
+.word-group.is-wrapped {
+  display: flex;
+  flex-wrap: wrap;
+  /* `block` + `justify-content` is what the alignment modes position a wrapped word
+     with; see the alignment block below. */
+  justify-content: flex-start;
 }
 
 .word-space {
@@ -1291,6 +1400,7 @@ body.align-right #lyrics-container .line-secondary {
 .syllable {
   position: relative;
   display: inline-block;
+  flex-shrink: 0;   /* a syllable is never squeezed; the word wraps instead */
   white-space: pre;
   transform-origin: bottom center;
   /* Eased settle used by the sung-word pop; per-frame sway is applied to the
@@ -1325,38 +1435,42 @@ body.align-right #lyrics-container .line-secondary {
 /* Layer 2: Radiant letter luminescence with no horizontal scanlines */
 .syllable-highlight {
   position: absolute;
-  top: -8px;
-  bottom: -8px;
-  left: -16px;
-  right: -16px;
-  padding: 8px 16px;
+  top: -24px;
+  bottom: -24px;
+  left: -24px;
+  right: -24px;
+  padding: 24px 24px;
   display: inline-block;
   color: #ffffff;
   pointer-events: none;
 
   /*
-    The highlight box is padded 16px on each side so the glow is not clipped, so the
-    text occupies 16px .. (100% - 16px). --fill is a UNITLESS 0..1 fraction of the
-    syllable, so the edge must sweep that padded gap out. Using `16px + var(--fill)`
+    The highlight box is padded 24px on each side so the glow is not clipped, so the
+    text occupies 24px .. (100% - 24px). --fill is a UNITLESS 0..1 fraction of the
+    syllable, so the edge must sweep that padded gap out. Using `24px + var(--fill)`
     against the padded width made the reveal finish the word far too early
-    (roughly at fill = textWidth / (textWidth + 32px)).
+    (roughly at fill = textWidth / (textWidth + 48px)).
+
+    The leading edge stays opaque from 0px instead of fading transparent -> black
+    across the left padding: that fade cut the glyph's own left glow into a hard
+    vertical wall wherever a sung syllable begins at the very start of a line
+    ("Drink", "you"), while the trailing edge feathers 4px/12px. Starting opaque
+    lets the left glow spread exactly like the top, bottom and trailing spread.
   */
   -webkit-mask-image: linear-gradient(
     to right,
-    transparent 0px,
-    #000 16px,
-    #000 calc(16px + (100% - 32px) * var(--fill, 0)),
-    rgba(0, 0, 0, 0.40) calc(16px + (100% - 32px) * var(--fill, 0) + 4px),
-    transparent calc(16px + (100% - 32px) * var(--fill, 0) + 12px),
+    #000 0px,
+    #000 calc(24px + (100% - 48px) * var(--fill, 0)),
+    rgba(0, 0, 0, 0.40) calc(24px + (100% - 48px) * var(--fill, 0) + 4px),
+    transparent calc(24px + (100% - 48px) * var(--fill, 0) + 12px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
-    transparent 0px,
-    #000 16px,
-    #000 calc(16px + (100% - 32px) * var(--fill, 0)),
-    rgba(0, 0, 0, 0.40) calc(16px + (100% - 32px) * var(--fill, 0) + 4px),
-    transparent calc(16px + (100% - 32px) * var(--fill, 0) + 12px),
+    #000 0px,
+    #000 calc(24px + (100% - 48px) * var(--fill, 0)),
+    rgba(0, 0, 0, 0.40) calc(24px + (100% - 48px) * var(--fill, 0) + 4px),
+    transparent calc(24px + (100% - 48px) * var(--fill, 0) + 12px),
     transparent 100%
   );
 
@@ -1462,6 +1576,27 @@ body.align-right #lyrics-container .line-secondary {
     0 0 4px #ffffff,
     0 0 12px rgba(255, 255, 255, 0.78),
     0 0 30px rgba(255, 255, 255, 0.32);
+}
+
+/* =========================================================
+   Line-by-line mode (body.line-sync, see applyLineSyncMode)
+   The wipe is a guess on line-timed tracks, so the mode collapses it: every
+   syllable on the live line shows its highlight at full, and lines the
+   playhead left behind keep the settled passed look. The JS still drives the
+   same state classes — this only changes what they paint.
+   ========================================================= */
+body.line-sync .line.is-active .syllable .syllable-highlight {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  -webkit-mask-image: none;
+  mask-image: none;
+  text-shadow:
+    0 0 6px rgba(255, 255, 255, 0.32),
+    0 0 20px rgba(255, 255, 255, 0.15);
+}
+body.line-sync .line.is-active .syllable .syllable-base {
+  color: rgba(255, 255, 255, 0.42);
 }
 
 /* Passed syllable: the intense glow gracefully decays into this soft settle */
@@ -2328,6 +2463,76 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   color: var(--text-muted);
 }
 
+/* Collapsible groups: every page opens as a stack of summary rows you can scan,
+   instead of every control at once. The rows stay DIRECT children of the group —
+   the settings search lifts them in and out of the group node — so collapsing is
+   a class here rather than a wrapper element in the markup. */
+.sp-group.collapsed > :not(.sp-group-title) {
+  display: none;
+}
+
+.sp-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sp-group-toggle:hover {
+  color: var(--icon-hot);
+}
+
+.sp-group-toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.sp-group-caret {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  color: var(--text-muted);
+  transition: transform var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+
+.sp-group:not(.collapsed) .sp-group-caret {
+  transform: rotate(90deg);
+}
+
+.sp-group-toggle:hover .sp-group-caret {
+  color: var(--icon-hot);
+}
+
+/* The collapsed row still says where the group stands, so closing it hides
+   controls, not information. */
+.sp-group-sum {
+  margin-left: auto;
+  min-width: 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: rgba(255, 255, 255, 0.42);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-group:not(.collapsed) .sp-group-sum {
+  opacity: 0.7;
+}
+
 .qp-row {
   display: flex;
   align-items: center;
@@ -2603,6 +2808,226 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
 }
 
 /* =========================================================
+   Spicy Lyrics API key configuration card
+   ========================================================= */
+
+.spicy-key-card {
+  margin: 4px 10px 0;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: border-color var(--dur-2) var(--ease-fluid);
+}
+
+.spicy-key-card:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.spicy-key-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spicy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--ui-font);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background var(--dur-2) var(--ease-fluid), color var(--dur-2) var(--ease-fluid), border-color var(--dur-2) var(--ease-fluid);
+}
+
+.spicy-badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.spicy-badge.is-connected {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.spicy-badge.is-warning {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.spicy-badge.is-error {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.spicy-key-status {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spicy-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-sm);
+  padding: 2px 4px 2px 10px;
+  transition: border-color var(--dur-2) var(--ease-fluid), box-shadow var(--dur-2) var(--ease-fluid);
+}
+
+.spicy-input-wrap:focus-within {
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+.spicy-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: rgba(255, 255, 255, 0.95);
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+}
+
+.spicy-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.spicy-btn {
+  height: 26px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-2) var(--ease-fluid), border-color var(--dur-2) var(--ease-fluid), transform var(--dur-1) var(--ease-fluid);
+}
+
+.spicy-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.spicy-btn:active {
+  transform: scale(0.96);
+}
+
+.spicy-eye {
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.spicy-eye:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.spicy-eye .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.spicy-btn-save {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.25);
+  font-weight: 600;
+}
+
+.spicy-btn-save:hover {
+  background: rgba(255, 255, 255, 0.26);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.spicy-btn-clear {
+  color: rgba(255, 140, 140, 0.85);
+  border-color: rgba(255, 100, 100, 0.2);
+}
+
+.spicy-btn-clear:hover {
+  background: rgba(255, 100, 100, 0.15);
+  color: #ffb4b4;
+  border-color: rgba(255, 100, 100, 0.4);
+}
+
+.spicy-key-feedback {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  min-height: 16px;
+  line-height: 1.4;
+  display: none;
+}
+
+.spicy-key-feedback.visible {
+  display: block;
+}
+
+.spicy-key-feedback.is-error {
+  color: #fca5a5;
+}
+
+.spicy-key-feedback.is-success {
+  color: #6ee7b7;
+}
+
+.spicy-key-hint {
+  font-family: var(--ui-font);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.spicy-key-hint a {
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--dur-2) var(--ease-fluid);
+}
+
+.spicy-key-hint a:hover {
+  color: #ffffff;
+}
+
+/* =========================================================
    Local TTML library
    The management surface for the user's own lyric files: the same glass and
    row language as the rest of the sheet, with a list dense enough to hold a
@@ -2809,6 +3234,166 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   font-family: var(--ui-font);
 }
 
+/* =========================================================
+   Font library
+   The picker for the overlay's own typefaces. Same row language as the lyric
+   library above, with one deliberate difference: each row's name is drawn IN the
+   face it names, because a font list you cannot see the fonts in is a list of
+   file names. The list is not height-capped the way the lyric one is — it holds
+   faces rather than files, and a nested scrollbar inside the sheet's own
+   scrolling body is worse than a longer panel.
+   ========================================================= */
+
+.font-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 0;
+}
+
+.font-act {
+  flex: 1 1 auto;
+  height: 26px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.86);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-2) var(--ease-fluid),
+    border-color var(--dur-2) var(--ease-fluid),
+    color var(--dur-2) var(--ease-fluid),
+    transform var(--dur-1) var(--ease-fluid);
+}
+
+.font-act:hover:not(:disabled) {
+  background: var(--hover-surface);
+  border-color: rgba(255, 255, 255, 0.20);
+}
+
+.font-act:active:not(:disabled) {
+  transform: scale(0.97);
+  background: var(--active-surface);
+}
+
+.font-act:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+/* The one face in use for a job. Filled rather than merely tinted: the buttons
+   sit in a row of near-identical pills and the difference has to read at a
+   glance, not by comparing label text. */
+.font-act.is-active {
+  background: rgba(120, 200, 140, 0.20);
+  border-color: rgba(120, 200, 140, 0.36);
+  color: #dcf8e5;
+}
+
+.font-act-danger:hover:not(:disabled) {
+  border-color: rgba(255, 130, 130, 0.45);
+  color: #ffd8d8;
+}
+
+.font-status {
+  padding: 5px 10px 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.74);
+  font-family: var(--ui-font);
+}
+
+.font-status:empty {
+  display: none;
+}
+
+.font-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+}
+
+.font-list-head {
+  padding: 2px 12px 3px;
+  font-size: 9.5px;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+  font-family: var(--ui-font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: var(--r-md);
+}
+
+.font-row:hover {
+  background: var(--hover-surface);
+}
+
+.font-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.font-row-name {
+  /* Larger than a list label on purpose: this line is the specimen. */
+  font-family: var(--ui-font);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-row-name.is-unreadable {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.font-row-sub {
+  margin-top: 1px;
+  font-size: 9.5px;
+  color: var(--text-muted);
+  /* Never the specimen: the file name and size have to stay legible, and a
+     display face makes them unreadable. */
+  font-family: var(--ui-font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.font-row-actions .font-act {
+  flex: 0 0 auto;
+  height: 23px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
 .sp-hint code {
   padding: 0 3px;
   border-radius: var(--r-xs);
@@ -2817,7 +3402,9 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
 }
 
 .reduce-motion .ttml-act,
-.reduce-motion .ttml-row {
+.reduce-motion .ttml-row,
+.reduce-motion .font-act,
+.reduce-motion .font-row {
   transition: none;
 }
 
@@ -2834,6 +3421,31 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   .ttml-act {
     height: 23px;
     font-size: 10px;
+  }
+
+  /* A short window is where the list has to fight for its height: the rows lose
+     their specimen size and the file line first, so the buttons (the part you
+     came for) stay. */
+  .font-row-name {
+    font-size: 13px;
+  }
+
+  .font-act {
+    height: 23px;
+    font-size: 10px;
+  }
+}
+
+/* Narrow: the row keeps the name and its buttons, and the meta line goes. A
+   three-button row plus a truncated name is still usable; a meta line squeezed
+   to three characters is not. */
+@media (max-width: 420px) {
+  .font-row-sub {
+    display: none;
+  }
+
+  .font-row-name {
+    font-size: 14px;
   }
 }
 

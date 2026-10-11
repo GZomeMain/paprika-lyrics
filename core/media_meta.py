@@ -83,6 +83,18 @@ def album_for_search(meta: MediaMeta) -> str:
     return cleaned
 
 
+def build_track_core(meta: MediaMeta, app_id: str) -> str:
+    """The part of a track's identity that never arrives late: who and what.
+
+    A player publishes the title first and fills in the album and the duration
+    later (a browser does it seconds in), so a change in title or artist is a
+    different song while a change in the other two may only be metadata
+    catching up. The bridge treats a core match with a different full signature
+    as a refinement to confirm before it reloads anything.
+    """
+    return f"{app_id}:::{meta.raw_title}:::{meta.raw_artist}"
+
+
 def build_track_signature(meta: MediaMeta, app_id: str) -> str:
     """Stable identity of the playing track.
 
@@ -91,4 +103,4 @@ def build_track_signature(meta: MediaMeta, app_id: str) -> str:
     track's lyrics without a reload.
     """
     duration = int(meta.duration_ms or 0)
-    return f"{app_id}:::{meta.raw_title}:::{meta.raw_artist}:::{meta.album}:::{duration}"
+    return f"{build_track_core(meta, app_id)}:::{meta.album}:::{duration}"
