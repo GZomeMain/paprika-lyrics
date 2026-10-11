@@ -84,8 +84,7 @@ exe = EXE(
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
-    entitlements_file=None,
-    # icon="assets/spicy.ico",   # Add a real .ico before shipping a release.
+    icon="assets/icon.ico",
 )
 
 coll = COLLECT(
