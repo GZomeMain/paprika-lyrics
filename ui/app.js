@@ -4,6 +4,13 @@ const DEFAULT_LATENCY_MS = 800;
 let isPlaying = false;
 let renderLoopActive = false;
 let playheadMs = 0;
+// The position the WIPE is painted from. While playing it only ever moves
+// forward: a soft correction that lands behind the fade, or a stale player
+// number that slips through, must not re-sweep letters already sung. A real
+// backward move arrives as a glide/snap (see window.syncPlayhead): a snap resets
+// it outright, and a glide — a move the user made in the player, whose whole
+// travel is meant to be seen — carries it in either direction until it lands.
+let renderMs = 0;
 let latencyOffsetMs = DEFAULT_LATENCY_MS;
 let lastTick = performance.now();
 let lyrics = [];
@@ -11,6 +18,18 @@ let lyricDom = [];
 let currentTrackKey = "";
 
 let targetDriftMs = 0;
+
+// A seek the bridge measured and asked the UI to travel to (see syncPlayhead):
+// while this window is open the wipe eases from where it was to the new position
+// instead of cutting to it, the drift decays on a shorter tau so the travel
+// finishes inside the window, and the two transient lyric effects a sweep would
+// otherwise trip — the break countdown and a moment's grade — are held off.
+// Zero means no glide is in flight.
+let glideUntilMs = 0;
+
+function syncGlideInFlight() {
+  return glideUntilMs > 0 && performance.now() < glideUntilMs;
+}
 
 // Wall-clock anchored playhead. The position is derived from an anchor plus a
 // decaying drift correction, so an irregular/stalled animation frame can never
@@ -25,6 +44,23 @@ const MAX_GAP_BRIDGE_MS = 700;
 function predictedPlayhead() {
   return anchorPosMs + (performance.now() - anchorWallMs) + targetDriftMs;
 }
+
+// A soft report that is behind the wipe by more than this is not drift the eye
+// can follow — it is a parked or stale player number (the bridge labels it
+// 'hold'; see window.syncPlayhead). Absorbing a large backward report in full
+// rewound the wipe over letters it had already sung, which is the "lyrics loop
+// on a few letters" report. Only this much of a backward soft report is taken.
+const SOFT_BACK_MAX_MS = 90;
+// There is deliberately no "the source has gone quiet, so park the lyrics" guard
+// here. There was one: 12s with nothing but holds froze the wipe at its last
+// position, on the theory that a silent source must not run the lyrics off the
+// end of the song. In practice a held projection is not silence at all — it is
+// the bridge still reporting while the player has not refreshed its timeline,
+// which is routine for a browser — so the freeze landed mid-song and only a
+// play/pause edge (which re-anchors) brought the lyrics back: the "the lyrics
+// are basically paused, and pausing/unpausing fixes it" report. Running on this
+// side's own 1x clock is what the bridge's 'hold' mode is documented to expect,
+// and a track's own length bounds it.
 
 // Motion style + chorus detection state live up here because syncSettingsPanel()
 // runs at boot, before the variant engine further down is initialized.
@@ -44,6 +80,9 @@ const Settings = {
   },
   set(key, value) {
     try { localStorage.setItem('sl_' + key, value); } catch (e) {}
+  },
+  remove(key) {
+    try { localStorage.removeItem('sl_' + key); } catch (e) {}
   }
 };
 
@@ -137,6 +176,30 @@ let lastDisplayedSecond = -1;
 let lastRenderEnd = 0;
 let latencySaveTimer = null;
 
+// Auto latency (opt-in). Declared up here with the other state that
+// syncSettingsPanel() reads at boot: the panel runs before the settings
+// functions further down are reached, so this must not live below them (the
+// same reason motionStyle sits above the variant engine).
+let autoLatency = Settings.get('autoLatency', 'off');
+let lastAutoLatencyMs = 0;
+// Built-in starting offset for fresh tracks (host DEFAULT/UNCACHED baseline).
+// On by default so existing installs behave exactly as before; turning it off
+// opens fresh tracks at true 0ms unless auto latency fires or the user nudges.
+// Saved per-track nudges always win either way.
+let useDefaultLatency = Settings.get('useDefaultLatency', 'on') !== 'off';
+// The track an auto offset opened on. A later Ctrl+[/] nudge on that same track
+// is the residual error of the auto estimate for this player, so it teaches the
+// per-player bias (see window.adjustLatency). Cleared on every load.
+let lastAutoTrackKey = "";
+// Wall-clock stamp of the track change whose lyrics are still being fetched.
+// showLoading sets it; loadLyrics consumes it.
+let lyricLoadStartedAt = 0;
+// Below the floor the number is fetch jitter, not lateness; above the ceiling it
+// is a stall or a cold cache that says nothing about sync, and compensating for
+// it would park the lyrics seconds off.
+const AUTO_LATENCY_MIN_MS = 100;
+const AUTO_LATENCY_MAX_MS = 8000;
+
 const container = document.getElementById('lyrics-container');
 // One play glyph per mode, each with its own transport row: the card's on-art
 // row and the split panel's art row.
@@ -149,32 +212,561 @@ const playBtns = [
 // lookups that used to sit here went with them.
 
 // =========================================================
-// Lyric font selection (configurable, no CSS editing required)
+// Font selection (configurable, no CSS editing required)
+// One table per job: the id is what gets stored, the label is what the settings
+// row shows, and the stack is what the stylesheet is handed — so choosing a
+// different face, or adding one, is a single entry. Beyond the two families the
+// stylesheet downloads, everything listed is a face Windows and macOS already
+// ship, so a machine that is offline still renders something deliberate.
 // =========================================================
-const FONT_STACKS = {
-  apple: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif",
-  barriecito: "'Barriecito', cursive, sans-serif"
-};
-// The sans stack is the default: it is readable at every tempo and has real
-// multi-script glyph coverage. Barriecito is a decorative display face whose
-// CJK/Cyrillic/Arabic fall back to a mismatched system font mid-line, so it is
-// the option, not the default. An existing saved preference still wins.
-let lyricFontName = 'apple';
+const LYRIC_FONTS = [
+  // The sans stack is the default: readable at every tempo, with real
+  // multi-script glyph coverage.
+  { id: 'apple', label: 'System', weight: '700',
+    stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" },
+  // A sung line in a serif is a different mood entirely, and the sweep distances
+  // are remeasured on every change, so nothing about the motion is hard-coded.
+  { id: 'serif', label: 'Serif', weight: '700',
+    stack: "Georgia, Cambria, 'Times New Roman', Times, serif" },
+  { id: 'rounded', label: 'Rounded', weight: '700',
+    stack: "'Trebuchet MS', 'Segoe UI', Verdana, system-ui, sans-serif" },
+  // Barriecito is naturally thick at weight 400, and its CJK/Cyrillic/Arabic
+  // fall back to a mismatched system font mid-line — the option, not the default.
+  { id: 'barriecito', label: 'Barriecito', weight: '400',
+    stack: "'Barriecito', cursive, sans-serif" },
+];
+const UI_FONTS = [
+  { id: 'inter', label: 'Inter',
+    stack: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" },
+  { id: 'system', label: 'System',
+    stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" },
+  { id: 'serif', label: 'Serif',
+    stack: "Georgia, Cambria, 'Times New Roman', Times, serif" },
+  { id: 'mono', label: 'Mono',
+    stack: "'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace" },
+];
+
+function fontById(table, id, fallback) {
+  return table.find((f) => f.id === id) || table.find((f) => f.id === fallback) || table[0];
+}
+
+// =========================================================
+// Fonts (Settings -> Fonts)
+//
+// One list of faces, and the faces live in a folder on disk that the host owns
+// (core/font_library.py) — not as base64 blobs inside this window's settings
+// store. That store is quotad per origin and a font is megabytes, which is why
+// the version that kept them here had to cap imports at eight files and could
+// lose a large one silently by the next launch. A folder has no cap, so the list
+// is simply what is in it; each face's bytes are fetched once, registered with
+// the FontFace API for as long as the window is open, and never persisted here.
+//
+// A FACE is the unit, not a table. The lyric and interface tables are separate
+// (they need their own ids and weights), so one imported file is registered into
+// both and shows as one row — and the stock 'System' face, which is two ids in
+// two tables with one stack, is one row rather than two identical ones.
+// =========================================================
+const BUILTIN_FACES = [
+  { id: 'system', label: 'System', lyricId: 'apple', uiId: 'system' },
+  { id: 'serif', label: 'Serif', lyricId: 'serif', uiId: 'serif' },
+  { id: 'rounded', label: 'Rounded', lyricId: 'rounded' },
+  { id: 'barriecito', label: 'Barriecito', lyricId: 'barriecito' },
+  { id: 'mono', label: 'Mono', uiId: 'mono' },
+  { id: 'inter', label: 'Inter', uiId: 'inter' },
+];
+const DEFAULT_LYRIC_FACE = 'system';
+const DEFAULT_UI_FACE = 'inter';
+
+let fontLibrary = null;        // the host's last snapshot; null before the first reply
+let fontsReady = false;        // whether the folder has been read at all yet
+let fontBusy = false;
+let fontStatusText = "";
+let fontRemoveArmed = "";
+let fontListSig = "";          // what the list currently shows, so a sync that
+                               // changes nothing does not rebuild it
+const fontFaceState = new Map();     // family id -> 'ready' | 'failed'
+const fontFacePromises = new Map();  // family id -> in-flight registration
+
+function fontBridge(name, ...args) {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api || typeof api[name] !== 'function') return Promise.resolve(null);
+  try { return Promise.resolve(api[name](...args)); }
+  catch (err) { return Promise.reject(err); }
+}
+
+function customStackFor(id) {
+  return `'${String(id).replace(/'/g, "")}', 'Segoe UI', system-ui, sans-serif`;
+}
+
+function fontEntries() {
+  return (fontLibrary && Array.isArray(fontLibrary.entries) ? fontLibrary.entries : []);
+}
+
+// A face's own name: what its file calls the family, plus what the file says it is
+// beyond that. Only the family travels for a plain regular face, because "Georgia
+// Regular" is noise — but Georgia's bold, italic and bold-italic files all report
+// the family "Georgia" too, and without the rest of the name the list shows the
+// same row four times with only the file name underneath to tell them apart.
+function faceDisplayName(entry) {
+  const family = String((entry && entry.label) || "");
+  const sub = String((entry && entry.subfamily) || "").trim();
+  if (!sub) return family;
+  const lowered = sub.toLowerCase();
+  if (lowered === "regular" || lowered === "normal" || lowered === "book") return family;
+  if (lowered === family.toLowerCase()) return family;
+  return family ? family + " " + sub : sub;
+}
+
+// Every face the overlay can draw in: the stock ones, then the folder.
+function fontCatalog() {
+  const faces = BUILTIN_FACES.map((face) => ({
+    id: face.id, label: face.label, builtin: true,
+    // The table ids travel with the face: they are how its stack and weight are
+    // looked up, and a face that lost them would silently draw in the default.
+    lyricId: face.lyricId, uiId: face.uiId,
+    roles: { lyrics: !!face.lyricId, interface: !!face.uiId },
+  }));
+  for (const entry of fontEntries()) {
+    faces.push({ id: entry.id, label: faceDisplayName(entry), builtin: false,
+                 file: entry.file, entry,
+                 roles: { lyrics: true, interface: true } });
+  }
+  return faces;
+}
+
+function faceById(id) {
+  if (!id) return null;
+  return fontCatalog().find((f) => f.id === id) || null;
+}
+
+function fontEntry(id) {
+  return fontEntries().find((e) => e.id === id) || null;
+}
+
+// The stack a face is drawn with for one job. Built-ins come from the tables
+// (they are also what the rest of the overlay reads), imports from their own id,
+// with a real face after them so a font missing a glyph still reads.
+function faceStack(face, role) {
+  if (!face) return '';
+  if (!face.builtin) return customStackFor(face.id);
+  const tableId = role === 'lyrics' ? face.lyricId : face.uiId;
+  const table = role === 'lyrics' ? LYRIC_FONTS : UI_FONTS;
+  const found = table.find((f) => f.id === tableId);
+  return found ? found.stack : '';
+}
+
+// Fetches and registers one folder font. Once per face per window: the bytes are
+// megabytes, they are not cached anywhere local, and a row preview asks for the
+// same one the row's buttons will apply.
+function ensureFontFace(id) {
+  if (fontFaceState.get(id) === 'ready') return Promise.resolve(true);
+  const pending = fontFacePromises.get(id);
+  if (pending) return pending;
+  const entry = fontEntry(id);
+  if (!entry) return Promise.resolve(false);
+  const promise = fontBridge('font_data', entry.file).then((dataUrl) => {
+    if (!dataUrl || String(dataUrl).indexOf('data:') !== 0) throw new Error('no font data');
+    const weight = String(entry.weight || 400);
+    const face = new FontFace(id, `url(${dataUrl})`,
+      { weight, style: entry.style === 'italic' ? 'italic' : 'normal' });
+    return face.load().then(() => {
+      document.fonts.add(face);
+      // The tables are how the rest of the overlay asks for a face, so an import
+      // joins them the moment it is registered — with the weight the file itself
+      // declares, so a regular face is drawn rather than synthesized bold.
+      if (!LYRIC_FONTS.some((f) => f.id === id)) {
+        LYRIC_FONTS.push({ id, label: faceDisplayName(entry), weight,
+                           stack: customStackFor(id), custom: true });
+      }
+      if (!UI_FONTS.some((f) => f.id === id)) {
+        UI_FONTS.push({ id, label: faceDisplayName(entry),
+                        stack: customStackFor(id), custom: true });
+      }
+      fontFaceState.set(id, 'ready');
+      return true;
+    });
+  }).catch(() => {
+    fontFaceState.set(id, 'failed');
+    return false;
+  });
+  fontFacePromises.set(id, promise);
+  return promise;
+}
+
+// Drops a face from the tables and the document, so the family a removed file
+// had been registered under cannot keep answering after its bytes are gone.
+function unregisterFace(id) {
+  for (const table of [LYRIC_FONTS, UI_FONTS]) {
+    const i = table.findIndex((f) => f.id === id);
+    if (i >= 0) table.splice(i, 1);
+  }
+  try {
+    for (const face of document.fonts) {
+      if (face && face.family === id) document.fonts.delete(face);
+    }
+  } catch (e) {}
+  fontFaceState.delete(id);
+  fontFacePromises.delete(id);
+}
+
+function setFontStatus(text) {
+  fontStatusText = text || "";
+  const el = document.getElementById('qp-font-status');
+  if (el && el.textContent !== fontStatusText) el.textContent = fontStatusText;
+  // The list header is part of the same sentence ("3 fonts in your folder"), so
+  // a new status and a stale header must not be able to sit together.
+  renderFontPanel();
+}
+
+function applyFontSnapshot(snapshot, status) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  fontLibrary = snapshot;
+  if (status) fontStatusText = status;
+  fontListSig = "";      // the folder changed: the next render rebuilds for real
+  renderFontPanel();
+}
+
+// Reads the folder. A missing bridge (this page opened in a plain browser) is not
+// an error: the sheet then shows the stock faces and the import rows say so.
+function refreshFonts() {
+  return fontBridge('font_list')
+    .then((snapshot) => { applyFontSnapshot(snapshot, ""); })
+    .catch(() => {})
+    .then(() => { fontsReady = true; renderFontPanel(); });
+}
+
+// A one-time handover of the fonts the previous version kept as data URLs inside
+// this window's settings, so "my imported font is gone" is not the experience of
+// updating. The old key is cleared only once the host confirms it wrote them.
+function adoptLegacyFonts() {
+  let raw = null;
+  try { raw = Settings.get('customFonts', null); } catch (e) { raw = null; }
+  if (!raw) return Promise.resolve();
+  let parsed = [];
+  try { parsed = JSON.parse(raw) || []; } catch (e) { parsed = []; }
+  const entries = (Array.isArray(parsed) ? parsed : [])
+    .filter((f) => f && typeof f.dataUrl === 'string' && f.dataUrl.indexOf('data:') === 0)
+    .map((f) => ({ name: String(f.label || f.id || 'font'),
+                   legacyId: String(f.id || ''),
+                   dataUrl: f.dataUrl }));
+  if (!entries.length) { Settings.remove('customFonts'); return Promise.resolve(); }
+  return fontBridge('font_adopt', entries).then((snapshot) => {
+    if (!snapshot) return;          // no host: leave the old key where it is
+    Settings.remove('customFonts');
+    applyFontSnapshot(snapshot, snapshot.status);
+  }).catch(() => {});
+}
+
+// One mutation path, so busy state, the returned snapshot and the status line
+// are handled in exactly one place.
+function fontRun(name, args, busyLabel) {
+  if (fontBusy) return Promise.resolve();
+  fontBusy = true;
+  fontListSig = "";
+  renderFontPanel();
+  if (busyLabel) setFontStatus(busyLabel);
+  return fontBridge(name, ...args)
+    .then((snapshot) => { applyFontSnapshot(snapshot, snapshot && snapshot.status); })
+    .catch((err) => {
+      setFontStatus('That did not work: ' + (err && err.message ? err.message : err));
+    })
+    .then(() => { fontBusy = false; renderFontPanel(); });
+}
+
+function importFonts() {
+  // The native picker blocks until the user chooses; the row says so rather than
+  // looking frozen.
+  return fontRun('font_import', [], 'Waiting for the file picker…');
+}
+
+function revealFonts() {
+  fontBridge('font_reveal', "").catch(() => {});
+}
+
+// Applies a face to one job, registering its bytes first when it is an import.
+function chooseFace(face, role) {
+  if (!face) return Promise.resolve();
+  const apply = role === 'lyrics' ? applyFont : applyUiFont;
+  if (face.builtin || fontFaceState.get(face.id) === 'ready') {
+    apply(face.id);
+    return Promise.resolve();
+  }
+  return ensureFontFace(face.id).then((ok) => {
+    if (ok) apply(face.id);
+    else setFontStatus('Could not load ' + face.label + ' — the file may not be a readable font.');
+  });
+}
+
+function removeFace(face) {
+  if (!face || face.builtin) return Promise.resolve();
+  // Two-step confirm instead of a modal: the sheet is already a full-window
+  // dialog and a native confirm() inside the webview would freeze it.
+  if (fontRemoveArmed !== face.id) {
+    fontRemoveArmed = face.id;
+    renderFontPanel();
+    setFontStatus('Click Remove again to move '
+      + ((face.entry && face.entry.name) || face.label) + ' to the font folder’s .trash.');
+    return Promise.resolve();
+  }
+  fontRemoveArmed = "";
+  const id = face.id;
+  return fontRun('font_remove', [face.file]).then(() => {
+    unregisterFace(id);
+    // Whatever was drawing with it falls back to a stock face rather than keeping
+    // a family whose bytes are gone.
+    if (lyricFontName === id) applyFont(DEFAULT_LYRIC_FACE);
+    if (uiFontName === id) applyUiFont(DEFAULT_UI_FACE);
+    renderFontPanel();
+  });
+}
+
+function formatFontSize(bytes) {
+  const kb = Math.max(1, Math.round((Number(bytes) || 0) / 1024));
+  return kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB';
+}
+
+// Draws the face's own name in the face itself, once its bytes are here. The
+// preview IS the choice: a font list that cannot show you the font is a list of
+// file names. A file that will not load says so on its row instead of quietly
+// standing in for a face it is not.
+function applyFacePreview(face, nameEl, subEl) {
+  const stack = faceStack(face, 'lyrics') || faceStack(face, 'interface');
+  if (face.builtin) {
+    nameEl.style.fontFamily = stack;
+    return;
+  }
+  const failed = () => {
+    nameEl.classList.add('is-unreadable');
+    subEl.textContent = 'Could not be read as a font';
+  };
+  if (fontFaceState.get(face.id) === 'failed') { failed(); return; }
+  ensureFontFace(face.id).then((ok) => {
+    if (!ok) { failed(); return; }
+    nameEl.style.fontFamily = stack;
+  });
+}
+
+function fontRow(face) {
+  const row = document.createElement('div');
+  row.className = 'font-row';
+  row.dataset.face = face.id;
+
+  const main = document.createElement('div');
+  main.className = 'font-row-main';
+  const name = document.createElement('div');
+  name.className = 'font-row-name';
+  name.textContent = face.label;
+  name.title = face.builtin ? face.label + ' — built in'
+                             : ((face.entry && face.entry.name) || face.label);
+  const sub = document.createElement('div');
+  sub.className = 'font-row-sub';
+  sub.textContent = face.builtin ? 'Built in'
+    : [face.entry && face.entry.name, formatFontSize(face.entry && face.entry.size)]
+        .filter(Boolean).join(' · ');
+  main.appendChild(name);
+  main.appendChild(sub);
+  row.appendChild(main);
+
+  const actions = document.createElement('div');
+  actions.className = 'font-row-actions';
+  // A face is only offered the jobs it can hold: a dead button on the Interface
+  // row of a lyrics-only face would read as a broken feature.
+  ['lyrics', 'interface'].forEach((role) => {
+    if (!face.roles[role]) return;
+    const active = (role === 'lyrics' ? lyricFontName : uiFontName) === face.id;
+    const button = document.createElement('button');
+    button.className = 'font-act';
+    button.dataset.action = role;
+    button.textContent = role === 'lyrics' ? 'Lyrics' : 'Interface';
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.title = (active ? 'In use for the ' : 'Use for the ') + role;
+    button.disabled = fontBusy;
+    button.onclick = () => chooseFace(face, role);
+    actions.appendChild(button);
+  });
+
+  if (!face.builtin) {
+    const remove = document.createElement('button');
+    const armed = fontRemoveArmed === face.id;
+    remove.className = 'font-act font-act-danger';
+    remove.dataset.action = 'remove';
+    remove.textContent = armed ? 'Confirm' : 'Remove';
+    remove.title = 'Move this file to the font folder’s .trash';
+    remove.disabled = fontBusy;
+    remove.onclick = () => removeFace(face);
+    actions.appendChild(remove);
+  }
+
+  row.appendChild(actions);
+  applyFacePreview(face, name, sub);
+  return row;
+}
+
+function renderFontPanel() {
+  const listEl = document.getElementById('qp-font-list');
+  const statusEl = document.getElementById('qp-font-status');
+  if (!listEl) return;
+  if (statusEl && statusEl.textContent !== fontStatusText) statusEl.textContent = fontStatusText;
+
+  const faces = fontCatalog();
+  const imports = faces.filter((f) => !f.builtin);
+  const signature = JSON.stringify([fontBusy, fontRemoveArmed, fontStatusText,
+    lyricFontName, uiFontName,
+    faces.map((f) => [f.id, f.label, f.builtin ? 1 : 0])]);
+  if (signature === fontListSig) return;
+  fontListSig = signature;
+
+  listEl.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'font-list-head';
+  head.textContent = imports.length
+    ? imports.length + (imports.length === 1 ? ' font' : ' fonts') + ' in your font folder'
+    : 'No imported fonts yet — Add font… copies one into your font folder.';
+  if (fontLibrary && fontLibrary.dir) head.title = fontLibrary.dir;
+  listEl.appendChild(head);
+  faces.forEach((face) => listEl.appendChild(fontRow(face)));
+}
+
+
+let lyricFontName = 'system';
+let savedLineSync = null;
+try {
+  const _ls = Settings.get('lineSync', null);
+  if (_ls) savedLineSync = _ls;
+} catch (e) {}
+let uiFontName = 'inter';
+
 function applyFont(name) {
-  lyricFontName = FONT_STACKS[name] ? name : 'apple';
-  document.documentElement.style.setProperty('--lyric-font-family', FONT_STACKS[lyricFontName]);
-  // Barriecito is naturally thick at weight 400; the sans needs 700.
-  document.documentElement.style.setProperty('--lyric-font-weight', lyricFontName === 'barriecito' ? '400' : '700');
+  const face = faceById(name);
+  if (face && face.roles.lyrics && (face.builtin || fontFaceState.get(face.id) === 'ready')) {
+    paintLyricFace(face);
+    return;
+  }
+  if (face && face.roles.lyrics) {
+    // An imported face: the family can only be handed to the stylesheet once its
+    // bytes are registered, so the paint lands a moment later — and takes a stock
+    // face if the file will not load.
+    ensureFontFace(face.id).then((ok) => applyFont(ok ? face.id : DEFAULT_LYRIC_FACE));
+    return;
+  }
+  // Until the folder has been read an unknown name may just be a font the host
+  // has not reported yet. Falling back then would overwrite the user's saved
+  // choice with the default on every launch.
+  if (!fontsReady) return;
+  if (name !== DEFAULT_LYRIC_FACE) applyFont(DEFAULT_LYRIC_FACE);
+}
+
+function paintLyricFace(face) {
+  const font = fontById(LYRIC_FONTS, face.builtin ? face.lyricId : face.id, 'apple');
+  lyricFontName = face.id;
+  document.documentElement.style.setProperty('--lyric-font-family', font.stack);
+  document.documentElement.style.setProperty('--lyric-font-weight', font.weight);
   Settings.set('font', lyricFontName);
-  // Glyph widths change with the family, so the sweep distances must be remeasured.
+  // Glyph widths change with the family, so the sweep distances must be remeasured —
+  // and with them whether a line still fits the column.
   rebuildLineMotion();
+  fitLyricLines();
   // The card's title/artist metrics move the clearance the lyrics must keep.
   syncLyricsClearance();
   syncSettingsPanel();
 }
 
 function cycleFont() {
-  applyFont(lyricFontName === 'barriecito' ? 'apple' : 'barriecito');
+  const faces = fontCatalog().filter((f) => f.roles.lyrics);
+  const idx = faces.findIndex((f) => f.id === lyricFontName);
+  chooseFace(faces[(idx + 1) % faces.length], 'lyrics');
+}
+
+// The interface font is its own choice: someone who wants a serif verse does not
+// necessarily want a serif settings sheet, and the chrome is read at a distance.
+function applyUiFont(name) {
+  const face = faceById(name);
+  if (face && face.roles.interface && (face.builtin || fontFaceState.get(face.id) === 'ready')) {
+    paintUiFace(face);
+    return;
+  }
+  if (face && face.roles.interface) {
+    ensureFontFace(face.id).then((ok) => applyUiFont(ok ? face.id : DEFAULT_UI_FACE));
+    return;
+  }
+  if (!fontsReady) return;
+  if (name !== DEFAULT_UI_FACE) applyUiFont(DEFAULT_UI_FACE);
+}
+
+function paintUiFace(face) {
+  const font = fontById(UI_FONTS, face.builtin ? face.uiId : face.id, 'inter');
+  uiFontName = face.id;
+  document.documentElement.style.setProperty('--ui-font', font.stack);
+  Settings.set('uiFont', uiFontName);
+  syncSettingsPanel();
+}
+
+// =========================================================
+// Line-sync mode (Settings -> Lyrics -> Line-by-line)
+// For tracks whose timing came from LRCLIB (line starts only, no true
+// syllables), the per-word wipe is synthesized from a timing model — a
+// guess, however musical. Line-by-line instead lights the whole active line
+// at once and dims what passed: honest about what the source actually knows.
+// Auto (default) keeps the wipe for syllable-synced tracks and switches to
+// line lighting for line-timed ones; On/Off force it either way.
+const LINESYNC_MODES = ['auto', 'on', 'off'];
+let lineSyncMode = 'auto';
+let lineSyncActive = false;
+
+function trackIsLineTimed() {
+  if (!lyrics || lyrics.length === 0) return false;
+  let timed = 0;
+  for (let i = 0; i < lyrics.length; i++) {
+    const line = lyrics[i];
+    if (!line.words || line.words.length === 0) continue;
+    // A real syllable-synced line staggers its words across the line span;
+    // a synthesized one clusters every word start at (or near) the line start.
+    let staggered = false;
+    for (let w = 1; w < line.words.length; w++) {
+      const prev = line.words[w - 1];
+      const cur = line.words[w];
+      if (cur.startTimeMs > prev.startTimeMs + 120) { staggered = true; break; }
+    }
+    if (staggered) timed++;
+  }
+  // A track counts as line-timed when fewer than a quarter of its worded
+  // lines carry real stagger — tolerant of the odd spoken intro over true sync.
+  const worded = lyrics.filter((l) => l.words && l.words.length > 1).length;
+  if (worded === 0) return true;
+  return (timed / worded) < 0.25;
+}
+
+function resolveLineSync() {
+  const want = lineSyncMode === 'on' || (lineSyncMode === 'auto' && trackIsLineTimed());
+  if (want === lineSyncActive) return;
+  lineSyncActive = want;
+  document.body.classList.toggle('line-sync', want);
+  // Re-derive every visible state under the new mode; the next tick keeps it.
+  lastActiveSig = "";
+  if (lyrics.length > 0) renderProgress((isPlaying ? predictedPlayhead() : playheadMs) + latencyOffsetMs);
+  syncSettingsPanel();
+}
+
+function applyLineSyncMode(mode) {
+  if (!LINESYNC_MODES.includes(mode)) mode = 'auto';
+  lineSyncMode = mode;
+  Settings.set('lineSync', mode);
+  resolveLineSync();
+  // The preference changed even when the derived lighting did not (e.g. Off
+  // to Auto on a syllable-synced track): resolveLineSync returns early then
+  // without repainting the panel, so the row would keep showing the old mode.
+  syncSettingsPanel();
+}
+
+function cycleLineSync() {
+  applyLineSyncMode(LINESYNC_MODES[(LINESYNC_MODES.indexOf(lineSyncMode) + 1) % LINESYNC_MODES.length]);
+}
+
+function cycleUiFont() {
+  const faces = fontCatalog().filter((f) => f.roles.interface);
+  const idx = faces.findIndex((f) => f.id === uiFontName);
+  chooseFace(faces[(idx + 1) % faces.length], 'interface');
 }
 
 // =========================================================
@@ -262,6 +854,9 @@ function applyLayoutState() {
   const splitActive = layoutMode === 'split' && isFullscreen;
   document.body.classList.toggle('layout-split', splitActive);
   document.body.classList.remove('layout-split-suppressed');
+  // Fullscreen multiplies the lyric size (1.7x) and the layouts move the column, so what
+  // fitted a moment ago may not fit now — and a line that was shrunk may not need to be.
+  fitLyricLines();
   // Switching layout takes one art wrap out of the rendering tree and puts the
   // other in, which fires no mouseleave for the one that left: the on-art layout
   // button sits ON the sleeve, so leaning it and then clicking that button is two
@@ -418,6 +1013,7 @@ function applyMiniState() {
   resetTilt();                 // the card is going away; its lean goes with it
   syncWindowDrag();   // the mini bar is a drag surface too
   syncLyricsClearance();
+  fitLyricLines();    // mini has its own gutters, and therefore its own column width
   wakeRenderLoop();   // entering/leaving mini animates the scroller's padding
 }
 
@@ -677,6 +1273,103 @@ function toggleTranslations() {
 }
 
 // =========================================================
+// Auto latency (opt-in)
+// =========================================================
+// Some players never tell Windows where playback is, so the overlay has no clock
+// but its own. For the SMTC case the resolve report reads "no timeline from
+// player"; the bridge then hands `loadLyrics` an initial elapsed of 0, and
+// because `loadLyrics` re-anchors the playhead at that moment, the whole fetch
+// happens outside the song's clock. Every render is fed
+// `playheadMs + latencyOffsetMs`.
+//
+// The fetch duration alone is NOT the correction: the song kept playing while
+// the lyrics were loading AND while Windows noticed the track change (the
+// bridge polls ~0.6s idle, plus the handover quiet period when apps contend),
+// minus the part of the fetch that ran before the audio actually started. So
+// the estimate is fetch time + a fixed detection pad (one poll beat), plus a
+// per-player learned trim:
+//
+//   raw = fetchMs + AUTO_DETECT_PAD_MS + trim(player)
+//
+// `trim` starts at 0 and learns from the user's own Ctrl+[/] nudges: nudging a
+// track that opened on an auto offset says the estimate was off by that much
+// for this player, so the bias absorbs half the nudge (a half-step, not a full
+// jump, so one rough nudge cannot swing the next song). It is stored beside the
+// toggle in localStorage, keyed by player app id, and it only ever moves the
+// auto suggestion — never a value the user chose.
+//
+// Derived per load and never saved as the track offset — it is a measurement,
+// not a preference the user expressed — and it may only replace the host's
+// DEFAULT offset for a track, never one the user nudged (see
+// `offsetIsDefault`). With a live timeline it does nothing at all: the 1 Hz
+// position pushes already correct the clock, and a load-time offset would
+// fight them.
+const AUTO_DETECT_PAD_MS = 600;
+const AUTO_TRIM_KEY_PREFIX = 'autoLatencyTrim_';
+const AUTO_TRIM_MAX_MS = 2000;
+
+function autoLatencyEligible() {
+  return autoLatency === 'on'
+    && !!transportState
+    && transportState.timeline === false;
+}
+
+// The player we are following, or "" when unknown. The bridge pushes it with
+// the transport state; without it all players would share one trim and teach
+// each other their errors.
+function autoLatencyPlayer() {
+  return (transportState && transportState.app) ? String(transportState.app) : "";
+}
+
+function autoTrimKey(player) {
+  return AUTO_TRIM_KEY_PREFIX + (player || 'unknown');
+}
+
+function getAutoTrim(player) {
+  const raw = parseFloat(Settings.get(autoTrimKey(player), '0'));
+  if (isNaN(raw)) return 0;
+  return Math.max(-AUTO_TRIM_MAX_MS, Math.min(AUTO_TRIM_MAX_MS, raw));
+}
+
+function setAutoTrim(player, value) {
+  Settings.set(autoTrimKey(player),
+    String(Math.max(-AUTO_TRIM_MAX_MS, Math.min(AUTO_TRIM_MAX_MS, Math.round(value)))));
+}
+
+// Rounded to the stepper's 50ms grid, so the value Settings shows is the value
+// being used: a derived offset the UI cannot display is worse than no offset.
+function snapAutoLatency(ms) {
+  return Math.round(Math.max(0, Math.min(AUTO_LATENCY_MAX_MS, ms)) / 50) * 50;
+}
+
+// The measured fetch duration plus detection pad and learned player trim, as an
+// offset for this load — or null when it must not apply. Always consumes the
+// stamp, so a reload of the same track (which never went through showLoading)
+// cannot reuse a stale start.
+function takeAutoLatency(offsetIsDefault) {
+  const startedAt = lyricLoadStartedAt;
+  lyricLoadStartedAt = 0;
+  if (!startedAt || !offsetIsDefault || !autoLatencyEligible()) return null;
+  const loadMs = performance.now() - startedAt;
+  if (loadMs < AUTO_LATENCY_MIN_MS || loadMs > AUTO_LATENCY_MAX_MS) return null;
+  const raw = loadMs + AUTO_DETECT_PAD_MS + getAutoTrim(autoLatencyPlayer());
+  return snapAutoLatency(raw);
+}
+
+function cycleAutoLatency() {
+  autoLatency = autoLatency === 'on' ? 'off' : 'on';
+  Settings.set('autoLatency', autoLatency);
+  if (autoLatency === 'off') { lastAutoLatencyMs = 0; lastAutoTrackKey = ""; }
+  syncSettingsPanel();
+}
+
+function cycleDefaultLatency() {
+  useDefaultLatency = !useDefaultLatency;
+  Settings.set('useDefaultLatency', useDefaultLatency ? 'on' : 'off');
+  syncSettingsPanel();
+}
+
+// =========================================================
 // Quick settings panel: the one collapsed entry point for
 // sync, bottom bar, translations, and font.
 // =========================================================
@@ -703,7 +1396,10 @@ function updateLatencyUI() {
 
 function syncSettingsPanel() {
   setValueText(document.querySelector('#qp-trans .qp-state'), showSecondary ? 'On' : 'Off');
-  setValueText(document.querySelector('#qp-font .qp-state'), lyricFontName === 'barriecito' ? 'Barriecito' : 'Apple');
+  setValueText(document.querySelector('#qp-font .qp-state'), (faceById(lyricFontName) || { label: 'System' }).label);
+  setValueText(document.querySelector('#qp-ui-font .qp-state'), (faceById(uiFontName) || { label: 'Inter' }).label);
+  setValueText(document.getElementById('qp-linesync-state'), lineSyncMode.charAt(0).toUpperCase() + lineSyncMode.slice(1));
+  renderFontPanel();
   setValueText(document.querySelector('#qp-motion .qp-state'), reducedMotion ? 'Reduced' : 'Full');
   setValueText(document.getElementById('qp-motion-style-state'), motionStyle.charAt(0).toUpperCase() + motionStyle.slice(1));
   setValueText(document.getElementById('qp-beat-state'), BEAT_LABELS[beatMode] || 'Subtle');
@@ -720,9 +1416,16 @@ function syncSettingsPanel() {
   setValueText(document.getElementById('qp-card-position-state'),
     cardPosition === 'center' ? 'Center' : 'Left');
   setValueText(document.getElementById('qp-hover-fade-state'), HOVER_FADE_LABELS[hoverFade] || 'Off');
+  // Off, or On plus the offset the last track-load derived, so a silently
+  // applied offset is never invisible to the user it is meant to help.
+  setValueText(document.getElementById('qp-auto-latency-state'),
+    autoLatency !== 'on' ? 'Off'
+      : (lastAutoLatencyMs ? `On \u00b7 ${lastAutoLatencyMs > 0 ? '+' : ''}${lastAutoLatencyMs}ms` : 'On'));
+  setValueText(document.getElementById('qp-default-latency-state'), useDefaultLatency ? 'On' : 'Off');
   setValueText(document.getElementById('qp-opacity-state'), OPACITY_LABELS[opacityIndex] || 'Off');
   updateLatencyUI();
   renderDiagnostics();
+  syncSettingsGroupSummaries();
 }
 
 // =========================================================
@@ -988,9 +1691,11 @@ function startMomentEngine() {
 
 function updateMoment(ms) {
   const body = document.body;
-  if (momentsMode === 'off' || reducedMotion || miniMode || !isPlaying) {
-    // Paused, minimized or off: park the grade without tearing the plan down, so
-    // resuming does not need a re-render to come back.
+  if (momentsMode === 'off' || reducedMotion || miniMode || !isPlaying
+      || syncGlideInFlight()) {
+    // Paused, minimized, off, or sweeping between two places in the song: park
+    // the grade without tearing the plan down, so resuming does not need a
+    // re-render to come back.
     if (body.classList.contains('moment-live')) releaseMomentGrade();
     return;
   }
@@ -1113,7 +1818,43 @@ function buildDustField() {
     el.style.setProperty('--mw', `${mote.drift.toFixed(2)}rem`);
     field.appendChild(el);
   }
+  applyMoteTints();
   return field;
+}
+
+// Which of the cover's two region tints each mote carries. The mote's own
+// vertical place decides the half (an upper mote sits in front of the upper
+// half of the artwork), with a hash so motes near the middle do not form a hard
+// seam between the two hues. Written as an index, not a colour: when the cover
+// changes only these two numbers flip — no per-mote colour arithmetic.
+function moteTintIndex(mote) {
+  const seam = mote.y + (dustHash(Math.round(mote.y * 1000), 7) - 0.5) * 0.3;
+  return seam < 0.5 ? 0 : 1;
+}
+
+// Re-tint every mote from --mote-a / --mote-b. Called when either side changes:
+// a new cover, or a rebuild of the field itself.
+let moteTintCache = ['', '', 0];
+function applyMoteTints() {
+  const field = document.getElementById('dust-field');
+  if (!field) return;
+  const root = document.documentElement;
+  const tints = [
+    root.style.getPropertyValue('--mote-a').trim(),
+    root.style.getPropertyValue('--mote-b').trim(),
+  ];
+  if (tints[0] === moteTintCache[0] && tints[1] === moteTintCache[1] &&
+      field.childElementCount === moteTintCache[2]) return;
+  moteTintCache = [tints[0], tints[1], field.childElementCount];
+  for (const el of field.children) {
+    const my = parseFloat(el.style.getPropertyValue('--my')) / 100;
+    const idx = moteTintIndex({ y: my });
+    // No palette (a grey cover, or no cover yet): the theme accent does the
+    // lighting, exactly as before this palette existed.
+    const tint = tints[idx];
+    if (tint) el.style.setProperty('--mote-c', tint);
+    else el.style.removeProperty('--mote-c');
+  }
 }
 
 // Same three states as Beat sync and Big moments, deliberately: one intensity
@@ -1176,7 +1917,48 @@ function setTilt(x, y) {
   root.style.setProperty('--tilt-y', y.toFixed(3));
 }
 
-function resetTilt() { setTilt(0, 0); }
+function resetTilt() {
+  // A release is not a position: drop whatever the pointer left queued, or the
+  // next frame would lean the sleeve straight back out.
+  pendingTilt = null;
+  // A release also ends the hover, and the hover is what owns the cached rect.
+  // Every caller is a moment where the art moved (a layout change, the mini bar,
+  // reduced motion), so the measurement is stale by definition and the next
+  // pointer move re-measures once — the same cost as a fresh hover.
+  tiltRects.clear();
+  setTilt(0, 0);
+}
+
+// The newest pointer sample, published once per frame. A pointer can move several
+// times per frame and each `mousemove` used to write two custom properties on the
+// root — which every element inherits — so a fast pointer cost several restyles
+// per frame. One write per frame is the most the screen can show anyway.
+let pendingTilt = null;
+let tiltFrame = 0;
+function scheduleTilt(x, y) {
+  pendingTilt = { x: x, y: y };
+  if (tiltFrame) return;
+  tiltFrame = requestAnimationFrame(() => {
+    tiltFrame = 0;
+    const v = pendingTilt;
+    pendingTilt = null;
+    if (v) setTilt(v.x, v.y);
+  });
+}
+
+// The wrap's rect, measured once per hover rather than once per move: a rect read
+// inside a move handler forces a layout, and while a song is playing the lyric
+// engine is writing styles on every frame — which is exactly when the lean used
+// to crawl. Resizes and scrolling invalidate it.
+const tiltRects = new Map();
+function tiltRectFor(wrap) {
+  let rect = tiltRects.get(wrap);
+  if (!rect || !rect.width) {
+    rect = wrap.getBoundingClientRect();
+    tiltRects.set(wrap, rect);
+  }
+  return rect;
+}
 
 // Deliberately NOT a registered property: a mode change is a deliberate act and
 // Off should be immediate, while the pointer's own value is the thing that eases.
@@ -1192,13 +1974,19 @@ function initArtTilt() {
   const wraps = [document.getElementById('float-art-wrap'), document.querySelector('.side-art-wrap')];
   for (const wrap of wraps) {
     if (!wrap) continue;
+    // Measured once on the way in, so the move handler runs no layout at all.
+    wrap.addEventListener('mouseenter', () => { tiltRects.delete(wrap); tiltRectFor(wrap); });
     wrap.addEventListener('mousemove', (event) => {
       if (tiltMode === 'off' || reducedMotion || miniMode) return;
-      const v = tiltVector(event.clientX, event.clientY, wrap.getBoundingClientRect());
-      setTilt(v.x, v.y);
+      const v = tiltVector(event.clientX, event.clientY, tiltRectFor(wrap));
+      scheduleTilt(v.x, v.y);
     });
     wrap.addEventListener('mouseleave', resetTilt);
   }
+  // Anything that moves the wrap out from under the cached rect: a resize, or the
+  // lyrics scrolling in the pane beside it.
+  window.addEventListener('resize', () => tiltRects.clear());
+  window.addEventListener('scroll', () => tiltRects.clear(), true);
   // The pointer leaves the sleeve without a mouseleave when the window loses
   // focus — Chromium does not synthesise one for a subtree that is still laid out
   // — so Alt-Tab with the pointer parked on the card used to leave it leaning for
@@ -1421,6 +2209,9 @@ function refreshTtml() {
 function applyTtmlSnapshot(snapshot, status) {
   ttmlSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
   renderTtmlPanel();
+  // The Local lyrics group counts this snapshot while it is closed, and this is
+  // the one funnel every library change comes through.
+  syncSettingsGroupSummaries();
   if (status !== undefined) setTtmlStatus(status);
 }
 
@@ -1636,6 +2427,131 @@ document.addEventListener('click', (e) => {
   else if (action === 'remove') removeTtml(row.dataset.file);
 });
 
+// =========================================================
+// Spicy Lyrics API Key Settings Controller
+// =========================================================
+let spicyKeyVisible = false;
+let spicyKeyBusy = false;
+
+function refreshSpicyApiKey() {
+  if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_spicy_api_key) {
+    return Promise.resolve();
+  }
+  return window.pywebview.api.get_spicy_api_key()
+    .then((res) => {
+      applySpicyKeyState(res);
+    })
+    .catch(() => {});
+}
+
+function applySpicyKeyState(res) {
+  const badge = document.getElementById('spicy-key-badge');
+  const status = document.getElementById('spicy-key-status');
+  const input = document.getElementById('spicy-key-input');
+  if (!badge || !status || !input) return;
+
+  const isSet = Boolean(res && res.set);
+  badge.classList.remove('is-connected', 'is-warning', 'is-error');
+  if (isSet) {
+    badge.classList.add('is-connected');
+    badge.textContent = 'Configured';
+    status.textContent = res.masked ? res.masked : 'Syllable sync active';
+    if (!input.dataset.editing && res.key) {
+      input.value = res.key;
+    }
+  } else {
+    badge.textContent = 'Not configured';
+    status.textContent = 'Using LRCLIB line fallback';
+    if (!input.dataset.editing) {
+      input.value = '';
+    }
+  }
+  // The group's closed row reads this badge, so it has to follow it.
+  syncSettingsGroupSummaries();
+}
+
+function saveSpicyApiKey() {
+  const input = document.getElementById('spicy-key-input');
+  if (!input || spicyKeyBusy) return;
+
+  const keyVal = input.value.trim();
+  spicyKeyBusy = true;
+  setSpicyFeedback('Saving key…', 'is-info');
+
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.set_spicy_api_key) {
+    window.pywebview.api.set_spicy_api_key(keyVal)
+      .then((res) => {
+        spicyKeyBusy = false;
+        input.dataset.editing = '';
+        if (res && res.verified) {
+          setSpicyFeedback(res.status || 'Key saved & verified!', 'is-success');
+        } else if (res && res.key_set) {
+          setSpicyFeedback(res.status || 'Key saved.', 'is-warning');
+        } else {
+          setSpicyFeedback(res.status || 'Key cleared.', 'is-info');
+        }
+        refreshSpicyApiKey();
+      })
+      .catch((err) => {
+        spicyKeyBusy = false;
+        setSpicyFeedback('Failed to save key: ' + (err && err.message ? err.message : err), 'is-error');
+      });
+  } else {
+    spicyKeyBusy = false;
+    setSpicyFeedback('Native bridge unavailable in browser mode.', 'is-error');
+  }
+}
+
+function clearSpicyApiKey() {
+  const input = document.getElementById('spicy-key-input');
+  if (input) {
+    input.value = '';
+    input.dataset.editing = '';
+  }
+  saveSpicyApiKey();
+}
+
+function toggleSpicyKeyVisibility() {
+  const input = document.getElementById('spicy-key-input');
+  if (!input) return;
+  spicyKeyVisible = !spicyKeyVisible;
+  input.type = spicyKeyVisible ? 'text' : 'password';
+}
+
+function setSpicyFeedback(text, modifier) {
+  const fb = document.getElementById('spicy-key-feedback');
+  if (!fb) return;
+  fb.className = 'spicy-key-feedback visible' + (modifier ? ' ' + modifier : '');
+  fb.textContent = text;
+  if (!modifier || modifier === 'is-success' || modifier === 'is-info') {
+    setTimeout(() => {
+      if (fb.textContent === text) {
+        fb.classList.remove('visible');
+      }
+    }, 4500);
+  }
+}
+
+function initSpicyKeySettings() {
+  const saveBtn = document.getElementById('spicy-key-save');
+  const clearBtn = document.getElementById('spicy-key-clear');
+  const toggleBtn = document.getElementById('spicy-key-toggle');
+  const input = document.getElementById('spicy-key-input');
+
+  if (saveBtn) saveBtn.addEventListener('click', saveSpicyApiKey);
+  if (clearBtn) clearBtn.addEventListener('click', clearSpicyApiKey);
+  if (toggleBtn) toggleBtn.addEventListener('click', toggleSpicyKeyVisibility);
+  if (input) {
+    input.addEventListener('input', () => { input.dataset.editing = 'true'; });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveSpicyApiKey();
+      }
+    });
+  }
+}
+
 // The settings page owns the whole window, so there is nothing to anchor it to
 // and no click-outside to close it: it opens over everything and closes from its
 // own button, Escape, or Ctrl+, again.
@@ -1645,6 +2561,134 @@ let settingsLastFocus = null;
 // the set-once work (the TTML library) should not need finding again. The saved
 // value is validated against the markup rather than trusted, the way motionStyle
 // is, so a stale key from an older build cannot hide every page.
+// =========================================================
+// Collapsible settings groups
+// Every page opens as a stack of summary rows you can scan, and each one
+// expands in place. The rows are NOT moved into a wrapper: the settings search
+// lifts rows in and out of the group node, so a group's children have to stay
+// exactly where they are. Collapsing is therefore a class on the group (see
+// .sp-group.collapsed in the stylesheet).
+// =========================================================
+const SP_GROUP_SUMMARY = {
+  window: () => settingsGroupStateText('qp-layout-state'),
+  sync: () => settingsGroupStateText('qp-latency'),
+  lyrics: () => settingsGroupStateText('qp-linesync-state'),
+  fonts: () => settingsGroupStateText('qp-font-state'),
+  'spicy-lyrics-api': () => settingsGroupStateText('spicy-key-badge'),
+  // The library's status line is transient by design, so the row counts what
+  // the panel would list instead.
+  'local-lyrics': () => {
+    const entries = ttmlSnapshot && Array.isArray(ttmlSnapshot.entries)
+      ? ttmlSnapshot.entries.length : 0;
+    return entries ? entries + (entries === 1 ? ' file' : ' files') : '';
+  },
+  motion: () => settingsGroupStateText('qp-motion-style-state'),
+};
+
+function settingsGroupStateText(id) {
+  const el = document.getElementById(id);
+  return el ? (el.textContent || '').trim() : '';
+}
+
+function settingsGroupSlug(name) {
+  return String(name || '').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function settingsGroupNode(slug) {
+  return document.querySelector('#qp-body .sp-group[data-group="' + slug + '"]');
+}
+
+function settingsGroupOpen(slug) {
+  return Settings.get('spGroup_' + slug, '0') === '1';
+}
+
+function applySettingsGroup(slug, open, persist) {
+  const group = settingsGroupNode(slug);
+  if (!group) return;
+  group.classList.toggle('collapsed', !open);
+  const toggle = group.querySelector('.sp-group-toggle');
+  if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  // Restoring a group at boot must not rewrite the state it is restoring.
+  if (persist) Settings.set('spGroup_' + slug, open ? '1' : '0');
+}
+
+function toggleSettingsGroup(slug) {
+  const group = settingsGroupNode(slug);
+  if (group) applySettingsGroup(slug, group.classList.contains('collapsed'), true);
+}
+
+// A closed group still says where it stands, using the state the panel sync
+// already keeps, so closing a group hides controls and not information.
+function syncSettingsGroupSummaries() {
+  for (const [slug, read] of Object.entries(SP_GROUP_SUMMARY)) {
+    const out = document.getElementById('sp-group-sum-' + slug);
+    if (!out) continue;
+    const text = read() || '';
+    if (out.textContent !== text) out.textContent = text;
+  }
+}
+
+// Built from the sheet's own markup at boot, so a group added to any page is a
+// dropdown without new markup to keep in step.
+function initSettingsGroups() {
+  for (const group of document.querySelectorAll('#qp-body .sp-panel .sp-group')) {
+    const title = group.querySelector('.sp-group-title');
+    if (!title || group.dataset.group) continue;
+    // A group that says so in the markup stays open, with no toggle at all. The
+    // Diagnostics page is the case: its one row already carries the disclosure
+    // (Resolve report → Show / Hide), so a dropdown on the heading would open
+    // onto a single row that has a chevron of its own. Declared in the markup
+    // (data-static) because which group that is is a fact about the page, not a
+    // rule the script should hold.
+    if (group.hasAttribute('data-static')) continue;
+    const name = title.textContent.trim();
+    const slug = settingsGroupSlug(name);
+    if (!slug) continue;
+    group.dataset.group = slug;
+    group.dataset.groupName = name;
+    if (!group.id) group.id = 'sp-group-' + slug;
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'sp-group-toggle';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-controls', group.id);
+    const caret = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    caret.setAttribute('class', 'sp-group-caret');
+    caret.setAttribute('viewBox', '0 0 24 24');
+    caret.setAttribute('fill', 'none');
+    caret.setAttribute('stroke', 'currentColor');
+    caret.setAttribute('stroke-width', '2.4');
+    caret.setAttribute('stroke-linecap', 'round');
+    caret.setAttribute('stroke-linejoin', 'round');
+    caret.setAttribute('aria-hidden', 'true');
+    const stem = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    stem.setAttribute('d', 'M9 5l7 7-7 7');
+    caret.appendChild(stem);
+    const label = document.createElement('span');
+    label.className = 'sp-group-name';
+    label.textContent = name;
+    const sum = document.createElement('span');
+    sum.className = 'sp-group-sum';
+    sum.id = 'sp-group-sum-' + slug;
+    toggle.appendChild(caret);
+    toggle.appendChild(label);
+    toggle.appendChild(sum);
+    // The title keeps its place as the group's first child; only its text moves
+    // into the toggle, so the search still reads a heading off the group.
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSettingsGroup(slug);
+    });
+    title.textContent = '';
+    title.appendChild(toggle);
+    // Closed unless this group was opened before: the sheet opening short is
+    // the point of the change.
+    applySettingsGroup(slug, settingsGroupOpen(slug), false);
+  }
+  syncSettingsGroupSummaries();
+}
+
 let settingsTab = 'window';
 
 function openSettingsTab(id) {
@@ -1716,7 +2760,11 @@ function settingsSearchableRows() {
         el.classList.contains('qp-row') || el.classList.contains('ttml-bar') ||
         el.classList.contains('ttml-status') || el.classList.contains('ttml-current') ||
         el.classList.contains('ttml-list') || el.classList.contains('sp-hint'));
-      if (rows.length) out.push({ title: title ? title.textContent.trim() : '', group, rows });
+      // The heading is named by the group itself, not by reading the title's
+      // text: the title now carries a toggle whose summary the heading must not
+      // pick up ("Sync+600ms").
+      const name = group.dataset.groupName || (title ? title.textContent.trim() : '');
+      if (rows.length) out.push({ title: name, group, rows });
     }
   }
   return out;
@@ -1896,6 +2944,7 @@ function openSettings(open) {
     // "Confirm" button they never pressed this session.
     ttmlRemoveArmed = "";
     refreshTtml();
+    refreshSpicyApiKey();
     // Re-applied on open, not only at boot: the page shown is read from the same
     // key every time, so a sheet reopened after a search is the page it was on.
     const search = document.getElementById('qp-search');
@@ -1957,7 +3006,8 @@ function toggleSettings(e) {
 
 document.addEventListener('keydown', (e) => {
   // Escape backs out of whatever is on top: the settings sheet first, then the
-  // mini player — a lyrics-only window has no other way out but its own bar.
+  // Render Studio, then the mini player — a lyrics-only window has no other way
+  // out but its own bar.
   if (e.key === 'Escape') {
     // Escape backs out of whatever is on top, in the order a native player
     // would: the settings sheet, then the mini player, then fullscreen itself.
@@ -1993,6 +3043,19 @@ window.addEventListener('resize', () => {
 // A resize can re-wrap the track title, which changes how far the lyrics must
 // stay clear of the floating card.
 window.addEventListener('resize', syncLyricsClearance);
+
+// ...and it re-wraps the lyrics themselves, so a narrower column may now need a line fitted
+// that did not before (or may let one back to its full size). The text re-wraps by itself
+// while the window is being dragged, so this only has to settle afterwards: a trailing
+// debounce, not a pass per frame.
+let lyricFitTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(lyricFitTimer);
+  lyricFitTimer = setTimeout(() => {
+    lyricFitTimer = 0;
+    fitLyricLines();
+  }, 140);
+});
 
 // =========================================================
 // Ctrl + Wheel Zoom (18px - 60px) with persistence
@@ -2038,6 +3101,9 @@ function applyZoom(size) {
   try {
     localStorage.setItem('lyric_font_size', lyricFontSize);
   } catch (e) {}
+  // A bigger lyric size can push a word past the column; a smaller one can let a fitted
+  // line back to its full size.
+  fitLyricLines();
 }
 
 // Initialize persisted preferences.
@@ -2046,6 +3112,8 @@ let motionPref = 'full';
 try {
   const savedFont = Settings.get('font', null);
   if (savedFont) lyricFontName = savedFont;
+  const savedUiFont = Settings.get('uiFont', null);
+  if (savedUiFont) uiFontName = savedUiFont;
   showSecondary = Settings.get('secondary', '1') !== '0';
   motionPref = Settings.get('motion', osPrefersReducedMotion ? 'reduced' : 'full');
   const savedLayout = Settings.get('layout', 'compact');
@@ -2073,8 +3141,20 @@ try {
   }
 } catch (e) {}
 reducedMotion = motionPref === 'reduced';
+// The font folder is read before the saved faces are applied: an imported face can
+// only be registered once the library has told us its file exists. The legacy
+// handover runs between the two, so a font carried over can be applied in the same
+// pass.
+refreshFonts().then(() => adoptLegacyFonts()).then(() => { applyFont(lyricFontName); applyUiFont(uiFontName); });
+if (savedLineSync) lineSyncMode = LINESYNC_MODES.includes(savedLineSync) ? savedLineSync : 'auto';
 applyZoom(lyricFontSize);
+// A custom face is registered after its bytes arrive, and its metrics are what the fit is
+// measured in: refit once the browser has the real font rather than the fallback's.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => fitLyricLines()).catch(() => {});
+}
 applyFont(lyricFontName);
+applyUiFont(uiFontName);
 applyLyricAlign();
 applySecondaryVisibility();
 applyMotionPreference();
@@ -2092,7 +3172,9 @@ initArtTilt();
 initCursorIdle();
 pushHoverFadeSettingWhenReady();
 initSettingsTabs();
+initSettingsGroups();
 initSettingsSearch();
+initSpicyKeySettings();
 openSettingsTab(Settings.get('settingsTab', 'window'));
 
 window.addEventListener('wheel', (e) => {
@@ -2226,6 +3308,86 @@ function clampAccentToLight(rgb) {
 
 window.extractAccent = extractAccent;
 
+// The air takes TWO tints, one per vertical half of the cover, so motes share
+// the hue of the artwork region they float in front of rather than one accent
+// everywhere (reported: "they're only orange"). Same buckets as extractAccent,
+// but the winner is read per half and NOT clamped to the light band: the mote
+// dial in CSS does its own lightness work against the gradient behind it.
+function extractPalette(pixels) {
+  if (!pixels || !pixels.length) return null;
+  const HUE_BUCKETS = 12;
+  const rows = ACCENT_GRID;
+  const picks = [];
+  for (let half = 0; half < 2; half++) {
+    const weight = new Array(HUE_BUCKETS).fill(0);
+    const sum = Array.from({ length: HUE_BUCKETS }, () => [0, 0, 0, 0]);
+    for (let y = half * rows / 2; y < (half + 1) * rows / 2; y++) {
+      for (let x = 0; x < rows; x++) {
+        const i = (y * rows + x) * 4;
+        if (i + 3 >= pixels.length) continue;
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+        if (pixels[i + 3] < 128) continue;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const chroma = max - min;
+        if (chroma < 32 || max < 32 || min > 224) continue;
+        let hue;
+        if (max === r) hue = ((g - b) / chroma + 6) % 6;
+        else if (max === g) hue = (b - r) / chroma + 2;
+        else hue = (r - g) / chroma + 4;
+        const bucket = Math.floor((hue * 60) / (360 / HUE_BUCKETS)) % HUE_BUCKETS;
+        weight[bucket] += chroma;
+        const s = sum[bucket];
+        s[0] += r; s[1] += g; s[2] += b; s[3] += 1;
+      }
+    }
+    let best = -1;
+    for (let i = 0; i < HUE_BUCKETS; i++) {
+      if (weight[i] > 0 && (best < 0 || weight[i] > weight[best])) best = i;
+    }
+    if (best < 0) { picks.push(null); continue; }
+    const s = sum[best];
+    picks.push({
+      r: Math.round(s[0] / s[3]),
+      g: Math.round(s[1] / s[3]),
+      b: Math.round(s[2] / s[3]),
+    });
+  }
+  return picks;
+}
+window.extractPalette = extractPalette;
+
+// The mote tints must read AGAINST the blurred artwork behind them (reported:
+// "lighter or a bit darker than the gradient colour of the area"). A darker
+// region wants a lighter mote and a bright region a darker one, so each tint is
+// pushed away from its region's own luminance by the same amount every time —
+// decided HERE, once per track, rather than per mote in CSS.
+function offsetTintAgainstRegion(rgb, regionLuma) {
+  const f = (v) => v / 255;
+  const l = 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b);
+  // Toward white when the region is dark, toward black when it is bright; the
+  // 0.16 step is a hint of contrast, not a new colour.
+  const step = regionLuma < 0.45 ? 0.16 : -0.12;
+  const mix = (v) => Math.round(255 * Math.min(1, Math.max(0, f(v) + step)));
+  return `rgb(${mix(rgb.r)} ${mix(rgb.g)} ${mix(rgb.b)})`;
+}
+window.offsetTintAgainstRegion = offsetTintAgainstRegion;
+
+// Average luminance of one vertical half of the artwork grid, 0..1, for the
+// region contrast above.
+function halfRegionLuma(pixels, half) {
+  let total = 0, count = 0;
+  for (let y = half * ACCENT_GRID / 2; y < (half + 1) * ACCENT_GRID / 2; y++) {
+    for (let x = 0; x < ACCENT_GRID; x++) {
+      const i = (y * ACCENT_GRID + x) * 4;
+      if (i + 3 >= pixels.length) continue;
+      total += (0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2]) / 255;
+      count += 1;
+    }
+  }
+  return count ? total / count : 0;
+}
+window.halfRegionLuma = halfRegionLuma;
+
 // Downscale the thumbnail, read it back, publish. Every failure path is a no-op
 // that leaves the accent where it was: a cover the canvas refuses is a reason to
 // keep the current light, never a reason to throw inside a track change.
@@ -2239,14 +3401,27 @@ function applyCoverAccent(url) {
   const image = new Image();
   image.onload = () => {
     let rgb = null;
+    let tints = null;
     try {
       const ctx = accentCanvas.getContext('2d', { willReadFrequently: true });
       ctx.clearRect(0, 0, ACCENT_GRID, ACCENT_GRID);
       ctx.drawImage(image, 0, 0, ACCENT_GRID, ACCENT_GRID);
-      rgb = extractAccent(ctx.getImageData(0, 0, ACCENT_GRID, ACCENT_GRID).data);
+      const pixels = ctx.getImageData(0, 0, ACCENT_GRID, ACCENT_GRID).data;
+      rgb = extractAccent(pixels);
+      // The air's two region tints ride the same read: one canvas scan per
+      // track change, no second image decode.
+      const palette = extractPalette(pixels);
+      if (palette && palette.some(Boolean)) {
+        tints = palette.map((pick, half) => (
+          pick ? offsetTintAgainstRegion(pick, halfRegionLuma(pixels, half)) : null));
+      }
     } catch (e) { rgb = null; }
     if (!rgb) return;
     document.documentElement.style.setProperty('--art-accent', `rgb(${rgb.r} ${rgb.g} ${rgb.b})`);
+    const root = document.documentElement;
+    if (tints && tints[0]) root.style.setProperty('--mote-a', tints[0]); else root.style.removeProperty('--mote-a');
+    if (tints && tints[1]) root.style.setProperty('--mote-b', tints[1]); else root.style.removeProperty('--mote-b');
+    applyMoteTints();
   };
   image.src = url;
 }
@@ -2261,7 +3436,12 @@ window.setCoverArt = function(url, isHiRes) {
 
   if (!url) {
     // No artwork at all: the theme's own lamp, not the last track's colour.
-    document.documentElement.style.removeProperty('--art-accent');
+    // The air's palette goes too — its tints describe a cover that isn't there.
+    const root = document.documentElement;
+    root.style.removeProperty('--art-accent');
+    root.style.removeProperty('--mote-a');
+    root.style.removeProperty('--mote-b');
+    applyMoteTints();
     if (currentCoverLayer) {
       const el = currentCoverLayer;
       currentCoverLayer = null;
@@ -2439,11 +3619,12 @@ if (container) {
   }, { passive: true });
 }
 
-function toggleSimpMusicPlay() {
+function togglePlayback() {
   if (window.pywebview && window.pywebview.api) {
     window.pywebview.api.toggle_playback();
   }
 }
+const toggleSimpMusicPlay = togglePlayback;
 
 function skipNext() {
   if (window.pywebview && window.pywebview.api && window.pywebview.api.skip_next) {
@@ -2499,8 +3680,9 @@ function updateArtProgress(ms) {
     const thumb = document.getElementById('art-thumb');
     if (thumb) thumb.style.left = pct.toFixed(2) + '%';
   }
-  const artDurEl = document.getElementById('art-duration-display');
-  if (artDurEl && sideTotalMs > 0) artDurEl.textContent = formatTimeShort(sideTotalMs);
+  // The total is `setTrackDuration`'s to write, and only its: a tick that painted
+  // the length here would let a render that never consulted the host put a number
+  // on screen — and the two writers could disagree about the format.
   const artNowEl = document.getElementById('art-timer-display');
   if (artNowEl) artNowEl.textContent = formatTimeShort(ms);
 }
@@ -2578,6 +3760,7 @@ window.transportResult = function(result) {
     const back = seekRollback;
     seekRollback = null;
     playheadMs = back.ms;
+    renderMs = back.ms;
     targetDriftMs = 0;
     anchorPosMs = back.ms;
     anchorWallMs = performance.now();
@@ -2648,9 +3831,15 @@ function applySeek(targetMs) {
   // UI goes back to where playback actually is.
   seekRollback = { ms: isPlaying ? predictedPlayhead() : playheadMs };
   playheadMs = targetMs;
+  // The user's own seek is 1:1 with the pointer: the wipe may land on it, and it
+  // resets the forward-only paint.
+  renderMs = targetMs;
   targetDriftMs = 0;
   anchorPosMs = targetMs;
   anchorWallMs = performance.now();
+  // The user's own seek is 1:1 with the pointer and lands outright, so no glide
+  // of ours may still be travelling when it does.
+  glideUntilMs = 0;
   // Open the guard window against pre-seek position echoes (see syncPlayhead).
   lastUserSeekAt = performance.now();
   userScrolledRecently = false;
@@ -2813,37 +4002,89 @@ function tick() {
   const delta = now - lastTick;
   lastTick = now;
 
-  if (isPlaying) {
-    // Decay any pending drift correction, then read the position off the wall clock.
-    if (Math.abs(targetDriftMs) > 1) {
-      // Time-based exponential decay (tau ≈ 250 ms), so the ease completes in
-      // about a second whatever the display's refresh rate. The old per-frame
-      // 12% decay finished in 2–6 frames — a yank, not an ease — and its depth
-      // silently depended on 60 vs 144 Hz.
-      targetDriftMs -= targetDriftMs * Math.min(1, delta / 250);
-    } else {
-      targetDriftMs = 0;
+  let springSettled = false;
+  try {
+    if (isPlaying) {
+      // Decay any pending drift correction, then read the position off the wall clock.
+      const gliding = syncGlideInFlight();
+      let landingGlide = false;
+      if (glideUntilMs > 0 && !gliding) {
+        // A gliding seek's travel window has closed: land whatever is left, so the
+        // wipe ends exactly where the bridge said it is rather than trailing it by
+        // the tail of an exponential that never quite reaches zero.
+        anchorPosMs += targetDriftMs;
+        targetDriftMs = 0;
+        glideUntilMs = 0;
+        // This frame is the tail of that same travel, so it may paint backwards
+        // exactly as the frames inside the window did.
+        landingGlide = true;
+      }
+      if (Math.abs(targetDriftMs) > 1) {
+        // Time-based exponential decay (tau ≈ 250 ms), so the ease completes in
+        // about a second whatever the display's refresh rate. The old per-frame
+        // 12% decay finished in 2–6 frames — a yank, not an ease — and its depth
+        // silently depended on 60 vs 144 Hz. A glide uses a shorter tau: its whole
+        // travel is meant to be over inside SYNC_GLIDE_MS, and anything still
+        // outstanding when that window closes is landed outright above.
+        const tau = gliding ? SYNC_GLIDE_TAU_MS : 250;
+        targetDriftMs -= targetDriftMs * Math.min(1, delta / tau);
+      } else {
+        targetDriftMs = 0;
+      }
+
+      playheadMs = predictedPlayhead();
+      // The wipe only ever moves forward while playing: a soft correction that
+      // lands behind the fade, or a stale player number that slips through, must
+      // not re-sweep letters already sung. A snap, a seek and a track load each
+      // reset it outright (see syncPlayhead / applySeek / loadLyrics).
+      //
+      // A glide is the one exception, and it has to be: it is a move the user made
+      // in the player, which the bridge measured and bounded, and its whole travel
+      // is meant to be seen. Held forward-only, a seek BACKWARDS left the wipe
+      // pinned where it was and the lyrics never followed the player at all — the
+      // "I moved the progress bar and the lyrics did not update" report. So while
+      // a glide is in flight the wipe rides the eased position in either
+      // direction, and the frame that lands it paints the landed position.
+      if (gliding || landingGlide) renderMs = playheadMs;
+      else if (playheadMs > renderMs) renderMs = playheadMs;
+      updateTimer(playheadMs);
+      if (lyrics.length > 0) {
+        renderProgress(renderMs + latencyOffsetMs);
+      }
     }
 
-    playheadMs = predictedPlayhead();
-    updateTimer(playheadMs);
-    if (lyrics.length > 0) {
-      renderProgress(playheadMs + latencyOffsetMs);
-    }
+    springSettled = updateSpringScroll(delta);
+  } catch (err) {
+    // One thrown frame used to kill the whole animation loop: the rAF chain was
+    // never re-scheduled and renderLoopActive stayed true, so every later
+    // wakeRenderLoop() became a no-op and the overlay only ever came back on a
+    // direct repaint (pausing, clicking a lyric, a seek) — which is exactly the
+    // "it fixes when I pause or click" report. A bad frame must never cost the
+    // user their lyrics: say so once, keep the loop alive.
+    reportRenderLoopError(err);
   }
-
-  const springSettled = updateSpringScroll(delta);
 
   // Idle parking: when playback is stopped AND the spring has settled, nothing
   // below this point can change until an event (play, seek, media sync) wakes
   // the loop again — so stop scheduling frames instead of burning 60-144 Hz on
   // a static overlay. `lastTick = now` above means the wake-up frame sees a
-  // sane delta. Any state-changing path calls wakeRenderLoop().
+  // sane delta. Any state-changing path calls wakeRenderLoop(). A frame that
+  // threw leaves `springSettled` false, so the loop keeps running and heals.
   if (!isPlaying && springSettled) {
     renderLoopActive = false;
     return;
   }
   requestAnimationFrame(tick);
+}
+
+// Reports the first failing frame (and only the first of each kind), so a broken
+// frame is visible without spamming the log 60 times a second.
+let renderLoopErrorLogged = '';
+function reportRenderLoopError(err) {
+  const msg = (err && (err.stack || err.message)) || String(err);
+  if (msg === renderLoopErrorLogged) return;
+  renderLoopErrorLogged = msg;
+  console.error('[paprika] render frame failed; the loop was kept alive:', err);
 }
 
 // Idempotent: safe to call from any event path, as often as it likes.
@@ -2871,9 +4112,14 @@ window.showLoading = function(title, artist) {
   if (sideArtistEl) sideArtistEl.textContent = artist;
 
   playheadMs = 0;
+  renderMs = 0;
   targetDriftMs = 0;
   anchorPosMs = 0;
   anchorWallMs = performance.now();
+  // Start of the window auto-latency measures: this is the track change, so the
+  // interval to loadLyrics is the time the audio plays before the lyrics (and
+  // the song's clock) exist on screen.
+  lyricLoadStartedAt = performance.now();
   lastDisplayedSecond = -1;
   // Fresh track: clear per-second throttle state so the on-art/side fills
   // always repaint, even if the new track starts at the same second.
@@ -2912,9 +4158,18 @@ window.showLoading = function(title, artist) {
   }
 };
 
+// Scripts that write no spaces between words: one character is one syllable, and a token in
+// one of them can be split there. Latin and every other spaced script is left alone.
+const SPACELESS_SCRIPT = /[\u0E00-\u0E7F\u0E80-\u0EFF\u1000-\u109F\u1780-\u17FF\u3040-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/;
+
 function splitWordSyllables(token) {
   const clean = token.replace(/[^a-zA-Z]/g, '');
-  if (clean.length <= 3) return [token];
+  if (clean.length <= 3) {
+    // A space-less token has to be given its syllable boundaries, or it is one unbreakable
+    // run: too long for the column and it can only be scaled down (unreadably so) instead
+    // of wrapping onto the next row at its own characters, which is how it is read anyway.
+    return SPACELESS_SCRIPT.test(token) ? Array.from(token) : [token];
+  }
 
   const parts = [];
   const matches = [...token.matchAll(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]+(?=$|[^aeiouy]))?/gi)];
@@ -3341,10 +4596,6 @@ function anticipationBias(sylDom, ms) {
   const lead = start - ms;
   if (lead <= 0 || lead > ANTICIPATION_MS) return 0;
   return (1 - lead / ANTICIPATION_MS) ** 2;
-}
-
-function anticipationFor(sylDom, ms) {
-  return leanTransform(anticipationBias(sylDom, ms), leanAmp());
 }
 
 // The lean is handed over to the sung motion, not dropped at the door. A waiting
@@ -3897,6 +5148,14 @@ function closeGapChip() {
 function updateGapIndicator(ms) {
   if (!container) return;
 
+  // A gliding seek sweeps the playhead across lyrics nobody is hearing, so a
+  // break the sweep passes through is not a break anyone is waiting out: keep
+  // the countdown out of it (and take down one that is already showing).
+  if (syncGlideInFlight()) {
+    if (gapChip) closeGapChip();
+    return;
+  }
+
   let nextIdx = -1;
   let singing = false;
   for (let i = 0; i < lyrics.length; i++) {
@@ -3993,7 +5252,134 @@ function resetAllLines() {
   lastActiveSig = "";
 }
 
-window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, trackKey, savedLatencyOffset, plan) {
+// =========================================================
+// Fitting a line to the column
+//
+// The lyric column CLIPS sideways (`#lyrics-container` is `overflow-x: clip`), so a run the
+// column cannot hold simply loses its tail with no way to reach it — "a word or two goes
+// beyond the screen". Wrapping already covers every run with a space in it. What is left
+// cannot be broken by any CSS: the syllables are `inline-block`s inside an `inline-flex`
+// word, so a long word and a line-synced line in a script that writes no spaces at all
+// (Japanese, Chinese) are each ONE run.
+//
+// Two remedies, one per thing that overflows:
+//
+//   * a WORD wider than the whole column wraps between its syllables at full size, as a
+//     block of its own (`.is-wrapped`, see .word-group in style.css), and
+//   * a single SYLLABLE wider than the row it is on — which no break can help — is scaled,
+//     through `--line-fit`, a ratio multiplied into the shared lyric size for that line
+//     only (see .line in style.css), so the translation and backing-vocal layers follow it
+//     and a zoom, a fullscreen multiplier or a font change keeps composing on top.
+//
+// Both are decided from canvas metrics: the DOM lays an inline-block syllable out by its own
+// advance width, which is what `measureText` returns for it, so no line has to be laid out
+// to be fitted — the half of a 400-line song that `content-visibility: auto` is deliberately
+// skipping stays skipped. The translation layer is not measured: it is real text with
+// `overflow-wrap: anywhere`, so it breaks rather than overflowing whatever the script.
+const LYRIC_FIT_HEADROOM = 0.93;   // slack for the active line's 1.025 scale and a sung syllable's pop
+const LYRIC_FIT_MIN = 0.05;        // a floor only so a pathological line cannot reach 0
+let lyricFitCanvas = null;         // one canvas, reused: allocating one per pass is the whole cost
+
+// The width of each word (the sum of its syllables) and of the widest single syllable, in px
+// at the size the line would have unfitted.
+function lyricFitMetrics(ctx, lDom, sizePx, italic, spacingEm) {
+  // `letterSpacing` on a canvas context is Chromium 99+; where it is missing the spacing
+  // is added by hand, so the estimate is never the smaller of the two.
+  const spaced = 'letterSpacing' in ctx;
+  ctx.font = `${italic ? 'italic ' : ''}${ctx.lyricWeight} ${sizePx}px ${ctx.lyricFamily}`;
+  if (spaced) ctx.letterSpacing = (spacingEm * sizePx) + 'px';
+
+  const words = [];
+  let widest = 0;
+  for (const word of (lDom && lDom.words) || []) {
+    let total = 0;
+    for (const syl of word.syllables) {
+      const text = syl.text || '';
+      if (!text) continue;
+      const width = ctx.measureText(text).width
+        + (spaced ? 0 : spacingEm * sizePx * Array.from(text).length);
+      total += width;
+      if (width > widest) widest = width;
+    }
+    words.push(total);
+  }
+  return { words, widest };
+}
+
+// Fits every line to the column it is in. Idempotent and cheap: no line is laid out, and a
+// line that already fits is never written to (a song must not change size line by line).
+function fitLyricLines() {
+  const container = document.getElementById('lyrics-container');
+  if (!container || !lyricDom || !lyricDom.length) return;
+  const sample = lyricDom.find((l) => l && l.element && l.element.parentElement === container);
+  if (!sample) return;
+
+  // The column and the type it is measured in: one style read and one width read for the
+  // whole pass, not one per line.
+  const info = getComputedStyle(sample.element);
+  const baseSize = parseFloat(info.fontSize) / (sample.fit || 1);
+  const column = sample.element.clientWidth;
+  if (!baseSize || !isFinite(baseSize) || !column) return;   // folded away: nothing to fit to
+
+  const ctx = lyricFitCanvas || (lyricFitCanvas = document.createElement('canvas').getContext('2d'));
+  ctx.lyricFamily = info.fontFamily;
+  ctx.lyricWeight = info.fontWeight;
+  const spacingEm = 0.01;   // .line's letter-spacing, in em
+  ctx.font = `${info.fontWeight} ${baseSize}px ${info.fontFamily}`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = (spacingEm * baseSize) + 'px';
+  const spacePx = ctx.measureText(' ').width || baseSize * 0.25;
+  // The widths depend on the type, never on the column, so they are cached per line and
+  // reused for every resize: dragging a window edge would otherwise re-measure a whole
+  // song on each frame (24ms for 400 lines, measured), to answer a question whose answer
+  // only changes when the COLUMN changed.
+  const typeKey = `${baseSize}|${info.fontFamily}|${info.fontWeight}`;
+  for (const lDom of lyricDom) {
+    if (!lDom || !lDom.element) continue;
+    const sizePx = baseSize * (lDom.isBackground ? 0.72 : 1);
+    const lineKey = typeKey + (lDom.isBackground ? '|italic' : '');
+    if (lDom.fitKey !== lineKey) {
+      lDom.fitMetrics = lyricFitMetrics(ctx, lDom, sizePx, lDom.isBackground, spacingEm);
+      lDom.fitKey = lineKey;
+    }
+    const metrics = lDom.fitMetrics;
+    // A word wider than the whole column gets its own block and wraps between syllables.
+    // Toggled rather than rebuilt, and only when the answer changes, so a resize that
+    // changes nothing writes nothing: `word.element` holds the syllables the wipe and the
+    // motion work on, and moving them would rebuild what this is protecting.
+    const words = lDom.words || [];
+    for (let w = 0; w < words.length; w++) {
+      const want = metrics.words[w] > column;
+      if (want !== !!words[w].wrapped) {
+        words[w].wrapped = want;
+        words[w].element.classList.toggle('is-wrapped', want);
+      }
+    }
+    // A syllable can also be pushed past the column by the space in front of it: the space
+    // box is preserved, it hangs at the end of the row it lands on, and the word after it
+    // is then laid out from there — so a word that only fits when it STARTS the row does
+    // not fit at all (measured at 330x380: a 269px word in a 270px column, laid out 9px
+    // over the edge). One space of slack is what that costs, and a line whose widest
+    // syllable is within a space of the column is fitted for it.
+    const usable = Math.max(1, column - spacePx);
+    const widest = metrics.widest;
+    const fit = widest > usable ? (usable * LYRIC_FIT_HEADROOM) / widest : 1;
+    const current = lDom.fit || 1;
+    if (fit < 1) {
+      // Only write when the ratio moves: a resize that changed nothing else must not
+      // rewrite hundreds of inline styles.
+      const wanted = Math.max(LYRIC_FIT_MIN, fit);
+      if (Math.abs(current - wanted) > 0.001) {
+        lDom.element.style.setProperty('--line-fit', wanted.toFixed(4));
+        lDom.fit = wanted;
+      }
+    } else if (current !== 1) {
+      lDom.element.style.removeProperty('--line-fit');
+      lDom.fit = 1;
+    }
+  }
+}
+
+window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, trackKey, savedLatencyOffset, plan, offsetIsDefault) {
   wakeRenderLoop();
   try {
     const titleEl = document.getElementById('title');
@@ -4012,10 +5398,36 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
     currentTrackMeta = { title: title || "", artist: artist || "" };
     if (document.body.classList.contains('settings-open')) refreshTtml();
     latencyOffsetMs = (typeof savedLatencyOffset === 'number' && !isNaN(savedLatencyOffset)) ? savedLatencyOffset : DEFAULT_LATENCY_MS;
+    // Kill-switch for the built-in starting offset: with default latency off, a
+    // fresh track (no saved per-track nudge) opens at true 0ms instead of the
+    // host's DEFAULT/UNCACHED baseline. Auto latency below can still add its
+    // measured offset on top — the switch only silences the static default.
+    if (!offsetIsDefault) {
+      // Saved per-track nudge: always wins, switch or no switch.
+    } else if (!useDefaultLatency) {
+      latencyOffsetMs = 0;
+    }
+    // Auto latency runs last, so it can only ever replace the host's DEFAULT for
+    // this track — never an offset the user chose, and never with a live
+    // timeline to correct against. See takeAutoLatency.
+    lastAutoLatencyMs = 0;
+    lastAutoTrackKey = "";
+    const autoOffset = takeAutoLatency(offsetIsDefault);
+    if (typeof autoOffset === 'number') {
+      latencyOffsetMs = autoOffset;
+      lastAutoLatencyMs = autoOffset;
+      // Remember which track opened on the auto value: a later manual nudge on
+      // this same track is the measured residual for this player, and teaches
+      // the trim (see window.adjustLatency). Any other track's nudge is just a
+      // preference and must not move it.
+      lastAutoTrackKey = currentTrackKey || "";
+    }
     if (window.renderLatencySlider) window.renderLatencySlider();
     syncSettingsPanel();
 
     playheadMs = typeof initialElapsedMs === 'number' ? initialElapsedMs : 0;
+    // A new track is a landing: the wipe may start anywhere.
+    renderMs = playheadMs;
     targetDriftMs = 0;
     anchorPosMs = playheadMs;
     anchorWallMs = performance.now();
@@ -4106,6 +5518,7 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
         e.preventDefault();
         const targetSeekMs = Math.max(0, line.startTimeMs - latencyOffsetMs);
         playheadMs = targetSeekMs;
+        renderMs = targetSeekMs;
         targetDriftMs = 0;
         anchorPosMs = targetSeekMs;
         anchorWallMs = performance.now();
@@ -4244,17 +5657,35 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
     applySecondaryVisibility();
     // The card now shows this track's title/artist, so its height may have changed.
     syncLyricsClearance();
+    // A new track must paint at its own elapsed and scroll to its own line even
+    // while paused: the render loop exits when playback stops, and without this
+    // the fresh lyrics sit at the inherited playhead of the PREVIOUS song — off
+    // screen, unsynced — until the user clicks a line (which forces a hydrated
+    // render at the click position). Seeding the active window before painting
+    // keeps the paused render one-shot: this paints once, then sleeps again.
     updateLineDepthOfField([0]);
-    scrollToActiveCluster([0]);
-    // renderProgress materializes (and measures) its own window, then paints it.
     renderProgress(playheadMs + latencyOffsetMs);
+    if (activeLineIdx >= 0 && lyricDom[activeLineIdx]) {
+      scrollToActiveCluster([activeLineIdx]);
+      updateLineDepthOfField();
+    } else {
+      scrollToActiveCluster([0]);
+    }
+    // Every line is fitted to the column before the first paint: a line whose widest
+    // word does not fit would otherwise be clipped for the user who is looking at it.
+    fitLyricLines();
     fadeInView();
+    // A fresh payload may change what the track's timing actually is;
+    // re-resolve the line lighting under the (persisted) preference now
+    // that the lines exist and the first paint has landed.
+    resolveLineSync();
   } catch (err) {
     console.error("Error in loadLyrics:", err);
   }
 };
 
 window.setPlaybackState = function(playing) {
+  const wasPlaying = isPlaying;
   wakeRenderLoop();   // paused->playing resumes the loop; the reverse closes the chip
   const now = performance.now();
 
@@ -4264,11 +5695,31 @@ window.setPlaybackState = function(playing) {
     anchorWallMs = now;
     targetDriftMs = 0;
   } else if (!playing && isPlaying) {
-    // Pausing: freeze at the wall-clock position before we stop advancing.
-    playheadMs = predictedPlayhead();
+    // Pausing: freeze at the wall-clock position before we stop advancing, and
+    // collapse any correction that was still easing in — a paused overlay has no
+    // sweep left to hide it in, so a pending drift would sit there visibly wrong.
+    // Freeze at whichever of the two is further along, so the painted position
+    // never steps backwards because a capped correction was still pending.
+    playheadMs = Math.max(predictedPlayhead(), renderMs);
+    targetDriftMs = 0;
+    anchorPosMs = playheadMs;
+    anchorWallMs = now;
+  }
+
+  if (playing !== isPlaying) {
+    // A play/pause edge is a landing the bridge also snaps: the wipe may move on it.
+    renderMs = playheadMs;
   }
 
   isPlaying = playing;
+  // The bridge pushes this AFTER loadLyrics on a track change, so a song that
+  // starts playing arrives while the loop still believes the previous track's
+  // paused state. A freshly resumed transport must paint at the seeded
+  // playhead now — not sit frozen until the next heartbeat or click — and a
+  // freshly paused one must not keep advancing on the old anchor.
+  if (isPlaying && !wasPlaying && lyrics.length > 0) {
+    renderProgress(playheadMs + latencyOffsetMs);
+  }
   // A paused transport stops the render loop, and the countdown chip is only ever
   // taken down from inside it — so pausing mid-break used to leave a chip sitting
   // there with its count frozen. Close it on the pause transition instead; the
@@ -4282,54 +5733,115 @@ window.setPlaybackState = function(playing) {
   lastTick = now;
 };
 
-// Wall-clock instant of the last user-initiated seek, and how long the bridge's
-// position readings are distrusted afterwards. Windows takes a few hundred ms to
-// dispatch a seek into the player, during which the reported position is still
-// the PRE-seek one — obeying it snapped the lyrics back to where they came from
-// before jumping to the target.
+// Wall-clock instant of the last user-initiated seek, and how long position
+// reports are distrusted afterwards. Only the UI's OWN optimistic move needs
+// this: the bridge suppresses the player's post-seek echo itself (it knows when
+// it sent the seek and when the player agreed), but a report it read in the
+// meantime can still arrive here, and obeying it would snap the lyrics back to
+// where the seek came from.
 const SEEK_GUARD_MS = 900;
 let lastUserSeekAt = -Infinity;
 
-window.syncPlayhead = function(ms) {
+// A position report this close to where the lyrics already are is sub-frame
+// noise: taking it would micro-slew the wipe for nothing. Past SYNC_SNAP_MS the
+// correction is a move rather than drift, and the lyrics land on it instead of
+// gliding through the song to reach it.
+const SYNC_IGNORE_MS = 50;
+const SYNC_SNAP_MS = 1200;
+
+// How long a 'glide' takes, and the decay it uses to get there. The bridge sends
+// 'glide' for a move it measured as a seek inside the song: the audio is already
+// at the new position, so this is the wipe catching up, and the whole of it is
+// meant to be over in about a third of a second. A shorter tau than the soft
+// path's is what makes that true — the ease is ~97% done by then rather than
+// 63% — and whatever is left when the window closes is landed outright in tick().
+const SYNC_GLIDE_MS = 320;
+const SYNC_GLIDE_TAU_MS = 90;
+
+// Position report from the bridge. `mode` says how to take it, because only the
+// bridge sees the sequence of the player's samples:
+//
+//   * 'snap' — playback moved somewhere the lyrics must land on now: a track
+//     change, a player skip, a play/pause edge, the first reading of a track, or
+//     a move too large for the eye to follow;
+//   * 'glide' — a real move inside the song (a seek the user made in the player)
+//     that the wipe should travel to, so it reads as catching up with the audio
+//     rather than as a hard cut;
+//   * 'soft' — ordinary drift it measured, absorbed as a decaying correction;
+//   * 'hold' — the clock had no FRESH sample and is reporting its leashed
+//     projection (core.timeline.Reading.held). It is an estimate, not a
+//     correction: obeying it dragged the wipe back to a parked number on every
+//     poll, which stalled real-time sync on players that publish rarely or
+//     blank their timeline (a browser after a site-side seek, SimpMusic) and
+//     re-swept the syllables it had already passed. On a hold the UI simply
+//     keeps projecting; the next real sample corrects it.
+//
+// This side used to guess the classification from a threshold, and every guess it
+// got wrong reset the lyrics mid-song (a stale snapshot read as a big jump
+// backwards repeated the current line until the next click).
+window.syncPlayhead = function(ms, mode) {
   if (typeof ms !== 'number' || isNaN(ms)) return;
-  wakeRenderLoop();   // a paused overlay must still obey external corrections
 
   const now = performance.now();
+
+  // A held number is an estimate, never a correction: obeying it dragged the wipe
+  // back to a parked projection on every poll (the "loops on a few letters"
+  // report). The wipe keeps its own 1x projection instead — and a hold is no
+  // reason to stop that clock either, which is why there is no park on this side:
+  // a held source is a live one, just with no fresh timeline to report yet.
+  if (mode === 'hold') return;
+
   if (now - lastUserSeekAt < SEEK_GUARD_MS) return;   // pre-seek echo: ignore
 
+  // A glide is a move the bridge already measured and bounded, so it is neither
+  // noise to drop nor a jump to escalate on this side's coarser threshold.
+  const glide = mode === 'glide';
   const predicted = isPlaying ? predictedPlayhead() : playheadMs;
-  if (ms <= 0 && predicted > 2000) return;
-
   const diff = ms - predicted;
+  // Forward only. A large BACKWARD soft report is the parked/stale case the cap
+  // below absorbs — escalating it to a snap is what made the wipe jump back over
+  // letters it had already sung.
+  const snap = mode === 'snap' || (!glide && diff > SYNC_SNAP_MS);
+  // The bridge reports on every poll, so a report that agrees with where the wipe
+  // already is has nothing to say: dropping it here is what keeps a paused
+  // overlay parked instead of being woken twice a second for no reason.
+  if (!snap && !glide && Math.abs(diff) < SYNC_IGNORE_MS) return;
 
-  if (Math.abs(diff) > 900) {
-    // Hard correction (seek / large drift): re-anchor and clear stale lyric states.
-    anchorPosMs = ms;
+  wakeRenderLoop();   // a real correction, even on a paused overlay, must repaint now
+
+  if (!snap && isPlaying) {
+    // Ease toward the report without ever jumping: keep the trajectory where it
+    // is and let the drift decay onto the new anchor. A backward soft report
+    // larger than the cap is a parked or stale number, not drift the eye can
+    // follow, so only a capped step back is taken — the wipe is never walked
+    // backwards over letters it has already sung.
+    const cur = predictedPlayhead();
+    const target = (!glide && diff < -SOFT_BACK_MAX_MS) ? cur - SOFT_BACK_MAX_MS : ms;
+    anchorPosMs = target;
     anchorWallMs = now;
-    targetDriftMs = 0;
-    playheadMs = ms;
-    updateTimer(playheadMs);
-    resetAllLines();
-    renderProgress(playheadMs + latencyOffsetMs);
-  } else if (Math.abs(diff) > 75) {
-    // Small correction: re-anchor to the reported position, but ease the
-    // *display* into it. The anchor absorbs the full correction now (the
-    // trajectory is fixed and never reverts) and a cancelling drift term decays,
-    // so the wipe glides across the gap instead of stepping. Folding the diff
-    // into the decaying drift alone — the old behaviour — applied the
-    // correction and then took it back, so any steady offset (a stale SMTC
-    // snapshot, a brief buffering stall) re-triggered on every one-second
-    // heartbeat and the lyric stuttered, visibly slowing, once per second.
-    anchorPosMs += diff;
-    anchorWallMs = now;
-    targetDriftMs = -diff;
-    if (!isPlaying) {
-      // Paused there is no advancing wipe to ease: land directly.
-      targetDriftMs = 0;
-      playheadMs = anchorPosMs;
-      updateTimer(playheadMs);
-    }
+    targetDriftMs = cur - target;
+    // Only a glide that is actually going to travel opens the window.
+    if (glide) glideUntilMs = now + SYNC_GLIDE_MS;
+    return;
   }
+
+  // A paused overlay has no advancing wipe to ease, and a snap means the
+  // playhead really is somewhere else — land on it now.
+  glideUntilMs = 0;
+  targetDriftMs = 0;
+  playheadMs = ms;
+  renderMs = ms;        // a landing is the one place the wipe may move backwards
+  lastDisplayedSecond = -1;
+  lastSideFillSecond = -1;
+  lastArtFillSecond = -1;
+  updateTimer(ms);
+  // A paused move must repaint the words too, not just the timer — otherwise a
+  // seek landing while paused left the highlight frozen until the next
+  // pause/resume edge. Clearing the window signature is the cheap half of the
+  // snap path: renderProgress rewrites the lines around the window only, and
+  // jitter never reaches here, dropped above by SYNC_IGNORE_MS.
+  lastActiveSig = "";
+  if (lyrics.length > 0) renderProgress(ms + latencyOffsetMs);
 };
 
 function renderProgress(ms) {
@@ -4391,7 +5903,10 @@ function renderProgress(ms) {
     const next = lyricDom[activeLineIdx + 1];
     const growsSomewhere = (l) => l && l.words.some(w => w.syllables.some(s => s.variant && s.variant.grows));
     const wantPart = growsSomewhere(lyricDom[activeLineIdx]);
-    const activeEl = lyricDom[activeLineIdx].element;
+    // Guarded: a stale activeLineIdx (a rebuilt list, a resize) used to throw
+    // here and take the whole render loop down with it.
+    const activeLineDom = lyricDom[activeLineIdx];
+    const activeEl = activeLineDom && activeLineDom.element;
     if (activeEl) activeEl.classList.toggle('has-growing', wantPart);
     if (prev && prev.element) prev.element.classList.toggle('part-up', wantPart);
     if (next && next.element) next.element.classList.toggle('part-down', wantPart);
@@ -4513,6 +6028,17 @@ window.adjustLatency = function(deltaMs) {
   if (typeof deltaMs !== 'number' || isNaN(deltaMs)) return;
 
   latencyOffsetMs = Math.max(-3000, Math.min(3000, latencyOffsetMs + deltaMs));
+  // A nudge on a track that opened on the auto offset is the residual error of
+  // the auto estimate for this player — fold half of it into the per-player
+  // trim so the next song on the same player opens closer. Half, not all: a
+  // single rough keypress should improve the estimate, not swing it. Nudges on
+  // any other track are personal preference and leave the trim alone.
+  if (lastAutoTrackKey && currentTrackKey
+      && currentTrackKey === lastAutoTrackKey
+      && autoLatencyEligible()) {
+    const player = autoLatencyPlayer();
+    setAutoTrim(player, getAutoTrim(player) + deltaMs / 2);
+  }
   if (window.renderLatencySlider) window.renderLatencySlider();
   syncSettingsPanel();
 

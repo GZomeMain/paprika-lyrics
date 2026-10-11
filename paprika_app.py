@@ -85,6 +85,7 @@ try:
     from core.smtc import SmtcBridge
     from core.hotkeys import GlobalHotkeyManager
     from core.ttml_library import TTML_LIBRARY
+    from core.font_library import FONT_LIBRARY
     from core import native_window
 except ImportError as exc:
     _fatal(f"Failed to load a core module: {exc}\n" + DEPENDENCY_HINT)
@@ -818,6 +819,98 @@ class WindowApi:
         snapshot["status"] = status
         return snapshot
 
+    # =====================================================================
+    # Local font library (the Fonts group's whole API)
+    #
+    # Same contract as the lyric library: every call returns the whole snapshot,
+    # so the sheet renders from one source of truth and a mutation cannot leave
+    # the list describing a folder that is no longer there. The one difference is
+    # `font_data` — the bytes travel on demand, one face at a time, because a
+    # folder of fonts is megabytes and the list is sent on every panel sync.
+    # =====================================================================
+    def font_list(self) -> dict:
+        """The folder, as the settings list shows it."""
+        return self._font_snapshot("")
+
+    def font_import(self) -> dict:
+        """
+        Opens a native file picker and copies the chosen fonts in.
+
+        Multi-select on purpose: importing faces is a curation step, not a
+        one-at-a-time one, and there is no cap to count against. The dialog is
+        the part that cannot be unit-tested or driven from the UI, so its failure
+        is reported in the same `status` string the panel renders.
+        """
+        try:
+            files = self.window.create_file_dialog(
+                webview.FileDialog.OPEN,
+                directory=str(FONT_LIBRARY.ensure_dir()),
+                allow_multiple=True,
+                file_types=('Fonts (*.ttf;*.otf;*.woff;*.woff2)', 'All files (*.*)'),
+            )
+        except Exception as exc:
+            return self._font_snapshot(
+                f"File picker unavailable ({exc}). Use “Open folder” instead.")
+
+        if not files:
+            return self._font_snapshot("")
+
+        report = FONT_LIBRARY.add_files(files)
+        added = report.get("added", [])
+        failed = report.get("failed", [])
+        skipped = report.get("skipped", [])
+        parts = []
+        if added:
+            parts.append(f"Added {len(added)} font{'s' if len(added) != 1 else ''}")
+        if skipped:
+            parts.append(f"{len(skipped)} already in the library")
+        for item in failed:
+            parts.append(f"{item.get('name')}: {item.get('reason')}")
+        return self._font_snapshot(" · ".join(parts) if parts else "Nothing imported.")
+
+    def font_adopt(self, entries=None) -> dict:
+        """
+        Takes over fonts the older, store-based importer kept inside the UI.
+
+        The overlay finds them in its settings once and hands them over; this is
+        what stops "my imported font is gone" for anyone who used the previous
+        version before it cleared that key.
+        """
+        report = FONT_LIBRARY.adopt(entries or [])
+        added = report.get("added", [])
+        status = (f"Moved {len(added)} font{'s' if len(added) != 1 else ''} into the library"
+                  if added else "")
+        return self._font_snapshot(status)
+
+    def font_remove(self, file: str = "") -> dict:
+        """Moves a font to the folder's .trash and forgets it."""
+        result = FONT_LIBRARY.remove_file(file or "")
+        status = (f"Removed {result.get('name')} (moved to .trash)" if result.get("ok")
+                  else str(result.get("reason")))
+        return self._font_snapshot(status)
+
+    def font_data(self, file: str = "") -> str:
+        """One font's bytes as a data URL, or '' when it cannot be read."""
+        try:
+            return FONT_LIBRARY.data(file or "")
+        except Exception as exc:
+            print(f"[Paprika Lyrics] Could not read a font: {exc}")
+            return ""
+
+    def font_reveal(self, file: str = "") -> bool:
+        """Opens the font folder (or selects one font in it) in Explorer."""
+        return FONT_LIBRARY.reveal(file or "")
+
+    def _font_snapshot(self, status: str) -> dict:
+        try:
+            snapshot = FONT_LIBRARY.snapshot()
+        except Exception as exc:
+            print(f"[Paprika Lyrics] Could not read the font library: {exc}")
+            snapshot = {"dir": str(FONT_LIBRARY.directory), "count": 0,
+                        "entries": [], "trash": 0}
+        snapshot["status"] = status
+        return snapshot
+
     def toggle_playback(self):
         SMTC_BRIDGE.toggle_playback()
 
@@ -1036,6 +1129,12 @@ if __name__ == '__main__':
         api.ttml_bind,
         api.ttml_set_enabled,
         api.ttml_remove,
+        api.font_list,
+        api.font_import,
+        api.font_adopt,
+        api.font_remove,
+        api.font_reveal,
+        api.font_data,
         api.get_spicy_api_key,
         api.set_spicy_api_key
     )

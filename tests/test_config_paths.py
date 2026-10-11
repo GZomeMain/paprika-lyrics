@@ -34,6 +34,7 @@ def _load_config_isolated(env_text: str, environ: dict | None = None) -> dict:
             "print(json.dumps({"
             "'base': str(config.BASE_DIR),"
             "'ttml': str(config.TTML_DIR),"
+            "'fonts': str(config.FONT_DIR),"
             "'webview': str(config.WEBVIEW_PROFILE_DIR),"
             "'key': config.SPICY_API_KEY,"
             "'ttl': config.CACHE_TTL_SECONDS,"
@@ -53,19 +54,21 @@ def _load_config_isolated(env_text: str, environ: dict | None = None) -> dict:
 class EnvFileLoadingTests(unittest.TestCase):
     """.env must actually configure the paths it advertises.
 
-    The two path settings are read at import, *before* anything else, so the
-    loader has to run ahead of them. When it ran after, `.env` was honoured for
-    the API key but silently ignored for SPICY_TTML_DIR / SPICY_WEBVIEW_DIR —
-    a setting the README tells the user to put in `.env`.
+    The path settings are read at import, *before* anything else, so the loader
+    has to run ahead of them. When it ran after, `.env` was honoured for the API
+    key but silently ignored for SPICY_TTML_DIR / SPICY_WEBVIEW_DIR — settings
+    the README tells the user to put in `.env`.
     """
 
-    def test_env_file_sets_both_paths(self):
+    def test_env_file_sets_every_path_setting(self):
         out = _load_config_isolated("""
             SPICY_TTML_DIR=E:/Lyrics/ttml
             SPICY_WEBVIEW_DIR=E:/Temp/webview
+            SPICY_FONT_DIR=E:/Fonts
         """)
         self.assertEqual(Path(out["ttml"]).as_posix(), "E:/Lyrics/ttml")
         self.assertEqual(Path(out["webview"]).as_posix(), "E:/Temp/webview")
+        self.assertEqual(Path(out["fonts"]).as_posix(), "E:/Fonts")
 
     def test_env_file_still_sets_the_settings_it_already_did(self):
         # The regression guard for the fix: moving the loader must not cost the
@@ -84,16 +87,19 @@ class EnvFileLoadingTests(unittest.TestCase):
             """
             SPICY_TTML_DIR=E:/from-file
             SPICY_WEBVIEW_DIR=E:/from-file
+            SPICY_FONT_DIR=E:/from-file
             SPICY_API_KEY=key-from-file
             """,
             environ={
                 "SPICY_TTML_DIR": "E:/from-shell",
                 "SPICY_WEBVIEW_DIR": "E:/from-shell",
+                "SPICY_FONT_DIR": "E:/from-shell",
                 "SPICY_API_KEY": "key-from-shell",
             },
         )
         self.assertEqual(Path(out["ttml"]).as_posix(), "E:/from-shell")
         self.assertEqual(Path(out["webview"]).as_posix(), "E:/from-shell")
+        self.assertEqual(Path(out["fonts"]).as_posix(), "E:/from-shell")
         self.assertEqual(out["key"], "key-from-shell")
 
     def test_a_missing_env_file_leaves_the_defaults(self):
@@ -103,6 +109,7 @@ class EnvFileLoadingTests(unittest.TestCase):
         base = Path(out["base"])
         self.assertEqual(Path(out["ttml"]), base / "ttml")
         self.assertEqual(Path(out["webview"]), base / ".webview")
+        self.assertEqual(Path(out["fonts"]), base / "fonts")
 
 
 class EnvQuoteHandlingTests(unittest.TestCase):
@@ -170,15 +177,40 @@ class FrozenPathTests(unittest.TestCase):
         src = (BASE_DIR / "config.py").read_text(encoding="utf-8")
         self.assertIn("INDEX_HTML_PATH = UI_DIR / \"index.html\"", src)
         self.assertIn("UI_DIR = RESOURCE_DIR", src)
-        for name in ("CACHE_FILE", "TTML_DIR", "WEBVIEW_PROFILE_DIR"):
+        for name in ("CACHE_FILE", "TTML_DIR", "FONT_DIR", "WEBVIEW_PROFILE_DIR"):
             line = next(l for l in src.splitlines() if l.startswith(name))
             self.assertIn("DATA_DIR", line, f"{name} must be written beside the app")
 
-    def test_the_ttml_library_uses_the_data_dir_for_its_gitignore(self):
-        # The library writes a `.gitignore` when its folder is inside the app
+    def test_the_libraries_use_the_data_dir_for_their_gitignore(self):
+        # Both libraries write a `.gitignore` when their folder is inside the app
         # folder; against the temp bundle that guard would never fire.
-        src = (BASE_DIR / "core" / "ttml_library.py").read_text(encoding="utf-8")
-        self.assertIn("DATA_DIR in self.directory.resolve().parents", src)
+        for module in ("ttml_library.py", "font_library.py"):
+            src = (BASE_DIR / "core" / module).read_text(encoding="utf-8")
+            self.assertIn("DATA_DIR in self.directory.resolve().parents", src,
+                          f"{module} must keep its folder out of git")
+
+
+class FontDirTests(unittest.TestCase):
+    """The font library's folder, and the promise that it is not committed.
+
+    Fonts are the user's own files (and megabytes each), so the folder has to sit
+    beside the app with the cache and the lyric library, and stay out of git.
+    """
+
+    def test_the_font_folder_sits_beside_the_app(self):
+        self.assertEqual(config.FONT_DIR.parent, BASE_DIR)
+
+    def test_the_font_folder_is_gitignored(self):
+        ignored = (BASE_DIR / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn(f"{config.FONT_DIR.name}/", ignored)
+
+    def test_the_sheet_imports_into_the_library_the_host_owns(self):
+        # Wiring that cannot be exercised without a live window: the sheet must
+        # go through the host's folder rather than back to the store it used.
+        src = (BASE_DIR / "ui" / "app.js").read_text(encoding="utf-8")
+        for call in ("font_list", "font_import", "font_remove", "font_reveal", "font_data"):
+            self.assertIn(f"'{call}'", src, f"the sheet never calls {call}")
+        self.assertNotIn("CUSTOM_FONT_LIMIT", src)
 
 
 class WritableDataDirTests(unittest.TestCase):

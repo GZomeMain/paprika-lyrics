@@ -31,6 +31,7 @@ class CacheManager:
             # per-track choice of file. Kept apart from `lyrics` because a local
             # file is authoritative and re-read from disk, never cached.
             "ttml": {"files": {}, "bindings": {}},
+            "settings": {},
         }
         if not self.filepath.exists():
             return default_structure
@@ -357,5 +358,22 @@ class CacheManager:
         with self._lock:
             mini = self._data.get("window", {}).get("mini") or {}
             return dict(mini)
+
+    # =========================================================================
+    # Persistent User Settings (Key-Value)
+    # =========================================================================
+    def get_setting(self, key: str, default=None):
+        with self._lock:
+            settings = self._data.setdefault("settings", {})
+            return settings.get(key, default)
+
+    def set_setting(self, key: str, value):
+        with self._lock:
+            settings = self._data.setdefault("settings", {})
+            if value is None:
+                settings.pop(key, None)
+            else:
+                settings[key] = value
+            self._schedule_save(delay=0.4)
 
 CACHE = CacheManager()

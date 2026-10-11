@@ -1,1 +1,1 @@
-"""Core processing modules for SimpMusic Paprika Lyrics."""
+"""Core processing modules for Paprika Lyrics."""

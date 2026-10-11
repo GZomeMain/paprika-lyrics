@@ -134,9 +134,9 @@ def _unquote(value: str) -> str:
 # Environment Loader (.env fallback)
 #
 # Called BEFORE any setting below reads os.environ: the settings that come from
-# the environment include the two paths directly under this block, so loading
-# the file afterwards silently ignored SPICY_TTML_DIR / SPICY_WEBVIEW_DIR there
-# while honouring them everywhere else.
+# the environment include the paths directly under this block (SPICY_TTML_DIR,
+# SPICY_FONT_DIR, SPICY_WEBVIEW_DIR), so loading the file afterwards silently
+# ignored them there while honouring them everywhere else.
 def _load_env():
     env_file = DATA_DIR / ".env"
     if not env_file.exists():
@@ -168,6 +168,13 @@ INDEX_HTML_PATH = UI_DIR / "index.html"
 # folder is git-ignored) and movable with SPICY_TTML_DIR for a shared or
 # hand-curated collection.
 TTML_DIR = Path(os.getenv("SPICY_TTML_DIR") or (DATA_DIR / "ttml"))
+# The local font library: the .ttf/.otf/.woff/.woff2 faces the user imported for
+# the lyrics or the interface. Files on disk, not blobs in the WebView's settings
+# store — that store is quotad per origin and a font is megabytes, so storing
+# them there is what forced a hard 8-font cap and could lose a large import
+# silently. Beside the cache like the TTML library (git-ignored) and movable with
+# SPICY_FONT_DIR for a hand-curated collection.
+FONT_DIR = Path(os.getenv("SPICY_FONT_DIR") or (DATA_DIR / "fonts"))
 # The Edge WebView2 user-data folder, which is what makes the UI's settings
 # (localStorage) survive a relaunch. pywebview's private_mode default is True,
 # which hands WebView2 a throwaway temp profile, so every preference the user
@@ -288,7 +295,7 @@ BASE_URL = os.getenv("SPICY_BASE_URL", "https://api.spicylyrics.org")
 #
 # Not to be confused with PARSER_VERSION below: that one versions the CACHED
 # PAYLOAD FORMAT and exists to invalidate caches, not to describe the release.
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 # Operational Constants
 # Bumped to 10: LRCLIB fallback lines now carry musical word timing (BPM/

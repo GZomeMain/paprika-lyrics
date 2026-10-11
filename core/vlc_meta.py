@@ -11,7 +11,6 @@ polling and command dispatch live in core/vlc_source.py and paprika_app.py.
 from __future__ import annotations
 
 import base64
-import re
 from dataclasses import dataclass
 
 from core.metadata import normalize_weak_title

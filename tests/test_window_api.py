@@ -1,3 +1,4 @@
+import base64
 import shutil
 import tempfile
 import threading
@@ -7,6 +8,7 @@ from unittest import mock
 
 import paprika_app
 import storage
+from core.font_library import FontLibrary
 from core.ttml_library import TtmlLibrary
 
 try:
@@ -59,6 +61,16 @@ class FakeCache:
         self.mini = dict(mini or {})
         self.sizes = []
         self.positions = []
+        self.settings = {}
+
+    def get_setting(self, key, default=None):
+        return self.settings.get(key, default)
+
+    def set_setting(self, key, value):
+        if value is None:
+            self.settings.pop(key, None)
+        else:
+            self.settings[key] = value
 
     def get_mini_size(self):
         return dict(self.mini)
@@ -643,6 +655,147 @@ class TtmlApiTest(unittest.TestCase):
         self.assertFalse(info_after["set"])
 
 
+@unittest.skipUnless(HAS_PYWEBVIEW, "pywebview is required for the window API")
+class FontApiTest(unittest.TestCase):
+    """The bridge surface the Fonts group drives.
+
+    Same contract as the lyric library — every call returns the whole folder back
+    — with one addition: `font_data`, because a folder of fonts is megabytes and
+    the list must stay small enough to send on every panel sync. A face's bytes
+    travel only when one is applied or previewed.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.library = FontLibrary(directory=self.tmp / "fonts")
+        self.window = FakeWindow()
+        self.bridge = mock.Mock()
+        self.api = paprika_app.WindowApi(self.window)
+        for attr, value in (("FONT_LIBRARY", self.library), ("SMTC_BRIDGE", self.bridge)):
+            patcher = mock.patch.object(paprika_app, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def font_file(self, name="face.ttf", body=b"\x00\x01\x00\x00" + b"\x00" * 32) -> str:
+        """A file the library accepts as a font. Its bytes are never parsed here,
+        so a signature and some length is all this needs."""
+        downloads = self.tmp / "downloads"
+        downloads.mkdir(exist_ok=True)
+        target = downloads / name
+        target.write_bytes(body)
+        return str(target)
+
+    def test_list_reports_the_folder(self):
+        snapshot = self.api.font_list()
+        self.assertEqual(snapshot["count"], 0)
+        self.assertEqual(snapshot["entries"], [])
+        self.assertEqual(snapshot["dir"], str(self.library.directory))
+        self.assertEqual(snapshot["status"], "")
+
+    def test_import_copies_the_chosen_files(self):
+        self.window.dialog_result = [self.font_file("one.ttf"),
+                                     self.font_file("two.woff2", b"wOF2" + b"\x00" * 16)]
+        snapshot = self.api.font_import()
+        self.assertEqual(snapshot["count"], 2)
+        self.assertIn("Added 2 fonts", snapshot["status"])
+        self.assertTrue((self.library.directory / "one.ttf").exists())
+        # The picker opens where the files will land, and takes several at once:
+        # there is no per-import cap to make one-at-a-time the safer path.
+        _args, kwargs = self.window.dialog_calls[0]
+        self.assertEqual(kwargs["directory"], str(self.library.directory))
+        self.assertTrue(kwargs["allow_multiple"])
+
+    def test_import_reports_a_face_it_already_holds(self):
+        # Choosing the same font again — where it was downloaded from, or under a
+        # fresh name — is answered by the sheet rather than adding a second row
+        # drawing the same face under the same label.
+        body = b"\x00\x01\x00\x00" + b"\x2a" * 32
+        self.window.dialog_result = [self.font_file("face.ttf", body)]
+        self.api.font_import()
+        self.window.dialog_result = [self.font_file("face-copy.ttf", body)]
+        snapshot = self.api.font_import()
+        self.assertEqual(snapshot["count"], 1)
+        self.assertIn("1 already in the library", snapshot["status"])
+
+    def test_import_cancelled_is_not_an_error(self):
+        self.window.dialog_result = None
+        snapshot = self.api.font_import()
+        self.assertEqual(snapshot["status"], "")
+        self.assertEqual(snapshot["count"], 0)
+
+    def test_import_reports_a_dialog_that_cannot_open(self):
+        self.window.dialog_result = RuntimeError("no shell")
+        snapshot = self.api.font_import()
+        self.assertIn("File picker unavailable", snapshot["status"])
+        self.assertEqual(snapshot["count"], 0)
+
+    def test_import_names_a_file_it_will_not_use(self):
+        self.window.dialog_result = [str(self.tmp / "song.mp3")]
+        (self.tmp / "song.mp3").write_bytes(b"not a font")
+        snapshot = self.api.font_import()
+        self.assertIn("song.mp3", snapshot["status"])
+        self.assertIn("not a .ttf", snapshot["status"])
+
+    def test_data_returns_one_font_at_a_time(self):
+        body = b"\x00\x01\x00\x00" + bytes(range(32))
+        self.window.dialog_result = [self.font_file("face.ttf", body)]
+        self.api.font_import()
+        url = self.api.font_data("face.ttf")
+        self.assertTrue(url.startswith("data:font/ttf;base64,"))
+        self.assertEqual(base64.b64decode(url.partition(",")[2]), body)
+        self.assertEqual(self.api.font_data("ghost.ttf"), "")
+
+    def test_data_never_raises_when_the_folder_cannot_be_read(self):
+        exploding = mock.Mock()
+        exploding.directory = self.tmp / "fonts"
+        exploding.data.side_effect = OSError("drive disconnected")
+        with mock.patch.object(paprika_app, "FONT_LIBRARY", exploding):
+            self.assertEqual(self.api.font_data("face.ttf"), "")
+
+    def test_remove_moves_the_file_to_trash(self):
+        self.window.dialog_result = [self.font_file("face.ttf")]
+        self.api.font_import()
+        snapshot = self.api.font_remove("face.ttf")
+        self.assertEqual(snapshot["count"], 0)
+        self.assertEqual(snapshot["trash"], 1)
+        self.assertIn("Removed face.ttf", snapshot["status"])
+        self.assertFalse((self.library.directory / "face.ttf").exists())
+
+    def test_removing_an_unknown_font_is_reported(self):
+        snapshot = self.api.font_remove("ghost.ttf")
+        self.assertEqual(snapshot["status"], "not in the library")
+
+    def test_adopt_takes_over_the_fonts_the_old_importer_stored(self):
+        body = b"\x00\x01\x00\x00" + b"\x2a" * 24
+        snapshot = self.api.font_adopt([
+            {"legacyId": "custom-honk-regular", "name": "Honk Regular",
+             "dataUrl": "data:font/ttf;base64," + base64.b64encode(body).decode("ascii")},
+        ])
+        self.assertEqual(snapshot["count"], 1)
+        self.assertIn("Moved 1 font", snapshot["status"])
+        self.assertEqual(snapshot["entries"][0]["id"], "custom-honk-regular")
+
+    def test_the_bridge_survives_javascript_undefined_arguments(self):
+        # pywebview serialises a missing argument as null.
+        self.assertEqual(self.api.font_list()["count"], 0)
+        self.assertEqual(self.api.font_data(None), "")
+        self.assertEqual(self.api.font_remove(None)["status"], "not in the library")
+        self.assertEqual(self.api.font_adopt(None)["count"], 0)
+
+    def test_a_broken_library_returns_an_empty_snapshot_instead_of_raising(self):
+        exploding = mock.Mock()
+        exploding.directory = self.tmp / "fonts"
+        exploding.snapshot.side_effect = OSError("drive disconnected")
+        with mock.patch.object(paprika_app, "FONT_LIBRARY", exploding):
+            snapshot = self.api.font_list()
+        self.assertEqual(snapshot["entries"], [])
+        self.assertEqual(snapshot["count"], 0)
+
+
+@unittest.skipUnless(HAS_PYWEBVIEW, "pywebview is required for the window API")
 class ShutdownTest(unittest.TestCase):
     """Teardown must not let one failing step swallow the ones behind it.
 
@@ -738,9 +891,11 @@ class ShutdownTest(unittest.TestCase):
         # block, which cannot be called from a test.
         src = (Path(__file__).resolve().parent.parent / "paprika_app.py").read_text(
             encoding="utf-8")
+        # Flattened so line wrapping is not what is under test.
+        wired = " ".join(src.split())
         self.assertIn(
             "shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)",
-            src)
+            wired)
 
 class FatalStartupErrorTest(unittest.TestCase):
     """A frozen build is windowed, so `print` goes nowhere.
