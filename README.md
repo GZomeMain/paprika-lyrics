@@ -2,50 +2,28 @@
 
 # 🎵 Paprika Lyrics
 
-### A beautiful, syllable-accurate lyrics overlay for Windows — for almost any player.
+### A syllable-accurate lyrics overlay for Windows — for almost any player.
 
 [![CI](https://github.com/GZomeMain/paprika-lyrics/actions/workflows/ci.yml/badge.svg)](https://github.com/GZomeMain/paprika-lyrics/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-blue.svg)](https://www.python.org/)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#-requirements)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#requirements)
 
-[**⬇️ Download**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) · [**Features**](#-features) · [**How it works**](#-how-it-works) · [**Setup**](#-quick-start) · [**🔑 API key**](#-add-your-spicy-lyrics-api-key)
+[**⬇️ Download**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) · [**Features**](#features) · [**Setup**](#setup) · [**API key**](#add-your-spicy-lyrics-api-key) · [**Controls**](#controls)
 
 </div>
 
 ---
 
-## 🎬 Preview
+## What it does
 
-> **📌 Add your demo here.** Drop screenshots or GIFs into [`docs/assets/`](docs/assets) and use the commented template below. A YouTube demo embeds just as easily.
+Paprika Lyrics is a lightweight, GPU-accelerated desktop overlay that turns any song into **Apple Music-style, word-by-word synced lyrics** — floating over your desktop or filling the screen.
 
-<!--
-Uncomment and point at your own files once they exist:
-
-<p align="center">
-  <img src="docs/assets/overlay-fullscreen.png" width="820" alt="Fullscreen overlay">
-</p>
-
-<p align="center">
-  <img src="docs/assets/syllable-wipe.gif" width="820" alt="Word-by-word wipe">
-</p>
-
-[![Watch the demo](https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg)](https://youtu.be/VIDEO_ID)
--->
-
----
-
-## 🎵 What it does
-
-Paprika Lyrics is a lightweight, GPU-accelerated desktop overlay that turns any song into **Apple Music-style, word-by-word synced lyrics** — floating on top of your desktop or filling the screen.
-
-It follows **whatever your PC is playing** by reading the track straight from Windows' own media controls (GSMTC). That means it works with almost anything — Spotify, YouTube / YouTube Music in a browser, SimpMusic, Foobar2000, Groove, and any other player that reports its now-playing track to Windows. Not just one app.
+It follows **whatever your PC is playing** by reading the track straight from Windows' own media controls (GSMTC). That means it works with almost anything — Spotify, YouTube / YouTube Music in a browser, SimpMusic, Foobar2000, Groove, VLC, and any other player that reports its now-playing track to Windows. Not just one app.
 
 **No audio is ever captured.** Paprika listens to the *media session*, not the music.
 
----
-
-## ✨ Features
+## Features
 
 - **🎤 Syllable-perfect lyrics** — studio-accurate, word-by-word wipes from Apple Music / community TTML via the [Spicy Lyrics API](https://developers.spicylyrics.org).
 - **🌍 Works with almost any player** — driven by the Windows media session (GSMTC), so anything that publishes now-playing just works.
@@ -58,50 +36,7 @@ It follows **whatever your PC is playing** by reading the track straight from Wi
 - **🪟 Built for Windows** — frameless overlay, always-on-top, mini player, click-through mode, native anchored resizing, and global hotkeys.
 - **⚡ Light on resources** — a small Python host driving Edge WebView2 (Chromium); every animation is transform/opacity only.
 
----
-
-## 🧱 How it works
-
-```text
-Player (Spotify · browser · SimpMusic · VLC · …)
-        │  now-playing metadata + cover art
-        ▼
-Windows Media Session (GSMTC)          core/smtc.py
-        │
-        ▼
-Lyrics pipeline                        core/lyrics.py
-   0. Local .ttml file (if bound)
-   1. On-disk cache
-   2. Spotify track-ID resolve (spotify-scraper → iTunes → Deezer)
-   3. Syllable TTML  ←———— Spicy Lyrics API
-   4. Line-synced fallback  ← LRCLIB
-        │  JSON payload
-        ▼
-Edge WebView2 overlay                  ui/ (style.css · app.js)
-   syllable wipes · spring physics · beat light · depth of field
-```
-
-### Built with
-
-| Layer | Technology |
-| --- | --- |
-| Host runtime | Python 3.10 – 3.13 |
-| Overlay window | [pywebview](https://pywebview.flowrl.com/) + Edge WebView2 (Chromium) |
-| Media session | [winsdk](https://pypi.org/project/winsdk/) (Windows Runtime / GSMTC) |
-| Networking | [`requests`](https://requests.readthedocs.io/) |
-| Windowing | `ctypes` Win32 / DWM (frameless window, global hotkeys, DPI) |
-| Lyrics sources | [Spicy Lyrics API](https://developers.spicylyrics.org) · [LRCLIB](https://lrclib.net/) · local TTML |
-
----
-
-## 📋 Requirements
-
-- **Windows 10** (1809+) or **Windows 11**, 64-bit
-- **Python 3.10 – 3.13** — only needed to run from source
-
----
-
-## 🚀 Quick start
+## Quick start
 
 ```bash
 # 1. Get the code
@@ -111,7 +46,7 @@ cd paprika-lyrics
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Add your Spicy Lyrics API key (see the section below)
+# 3. Add your Spicy Lyrics API key (see below)
 copy .env.example .env
 
 # 4. Run it
@@ -122,9 +57,12 @@ Play any track in your player and the overlay picks it up automatically.
 
 > **Recommended:** `pip install spotify-scraper` improves Spotify track-ID matching. It is optional and guarded — everything still works without it.
 
----
+## Requirements
 
-## 🔑 Add your Spicy Lyrics API key
+- **Windows 10** (1809+) or **Windows 11**, 64-bit
+- **Python 3.10 – 3.13** — only needed to run from source
+
+## Add your Spicy Lyrics API key
 
 The key unlocks **syllable-level** (word-by-word) lyrics. Without it the app still runs and falls back to line-synced lyrics — so this step is optional, but it is the whole point. 💫
 
@@ -136,12 +74,12 @@ The key unlocks **syllable-level** (word-by-word) lyrics. Without it the app sti
 
 **2. Put it in the app**
 
-- **In the App (Easiest):** Press <kbd>Ctrl + ,</kbd> (or click the gear icon on the album art) → switch to the **Lyrics** tab → paste your secret key into the **Spicy Lyrics API** box and click **Save**.
+- **In the app (easiest):** Press <kbd>Ctrl + ,</kbd> (or click the gear on the album art) → switch to the **Lyrics** tab → paste your secret key into the **Spicy Lyrics API** box and click **Save**.
 - **Or via `.env` file:** Create a file named `.env` next to `paprika_app.py` (or beside `PaprikaLyrics.exe` if running the packaged build; copy [`.env.example`](.env.example)):
 
 ```env
 SPICY_API_KEY="sl_sk_your_key_here"
-SPICY_BASE_URL="https://api.spicylyrics.org"
+SPICY_BASE_URL=https://api.spicylyrics.org
 ```
 
 - A real environment variable (`SPICY_API_KEY`) always outranks the `.env` file.
@@ -153,57 +91,43 @@ Open **Settings → Diagnostics → Resolve report**. It shows `API key: Set` on
 
 Every optional setting (`SPICY_TTML_DIR`, `SPICY_FONT_DIR`, `SPICY_WEBVIEW_DIR`, `SPICY_CACHE_TTL_SECONDS`, `SPICY_DEBUG`) is documented with its default in [`.env.example`](.env.example).
 
----
-
-## 🎮 Controls
+## Controls
 
 | Action | Shortcut / Gesture |
 | --- | --- |
-| Nudge lyrics later / earlier | `Ctrl + [` / `Ctrl + ]` (system-wide, ±50 ms) |
-| Zoom lyric size | `Ctrl + Mouse wheel` |
-| Move / resize window | Drag the top strip, or any edge/corner |
-| Open settings | `Ctrl + ,` (or the gear on the cover art) |
-| Toggle translations | `T` |
-| Click-through (ignore the mouse) | `Ctrl + Shift + T` |
-| Peek (hand the mouse back) | `Ctrl + Shift + M` |
-| Close panel / leave mini player | `Esc` |
+| Nudge lyrics later / earlier | <kbd>Ctrl + [</kbd> / <kbd>Ctrl + ]</kbd> (system-wide, ±50 ms) |
+| Zoom lyric size | <kbd>Ctrl + Mouse wheel</kbd> |
+| Move / resize window | Drag the top strip, or any edge / corner |
+| Open settings | <kbd>Ctrl + ,</kbd> (or the gear on the cover art) |
+| Toggle translations | <kbd>T</kbd> |
+| Click-through (ignore the mouse) | <kbd>Ctrl + Shift + T</kbd> |
+| Peek (hand the mouse back) | <kbd>Ctrl + Shift + M</kbd> |
+| Close panel / leave mini player | <kbd>Esc</kbd> |
 | Play · pause · seek | On-cover transport and seek bars |
 
 Sync offsets are saved **per song**, so a track only ever needs nudging once.
 
----
-
-## 🗂️ Local lyrics (`.ttml`)
+## Local lyrics (`.ttml`)
 
 For tracks the online lookup gets wrong, keep your own Apple / AMLL `.ttml` files:
 
 - Drop files into the `ttml/` folder (or **Settings → Local lyrics → Import files…**), then press **Rescan**.
-- A file is applied automatically only when its own metadata names the **same title _and_ artist**; a hand-bound file always wins.
+- A file is applied automatically only when its own metadata names the **same title and artist**; a hand-bound file always wins.
 - Point the library somewhere else with `SPICY_TTML_DIR` in `.env`.
 
----
+## Fonts
 
-## 🔤 Fonts
+**Settings → Fonts** lists every face the overlay can draw in — the stock ones, then whatever you imported:
 
-Settings → **Fonts** lists every face the overlay can draw in — the stock ones, then whatever you
-imported:
-
-- **Add font…** opens a file picker and takes several files at once. The chosen files are **copied
-  into your fonts folder** (`fonts/` beside the app, or `SPICY_FONT_DIR`), so an import survives a
-  restart and there is no cap on how many you keep.
-- Each row is drawn **in the face it names**: pick by looking rather than by reading file names. The
-  face in use for the Lyrics or the Interface is marked on its row, and one click moves that job.
-- **Remove** moves a file to `fonts/.trash` — a management action, not a delete, so the file can be
-  dragged back in.
-- A file whose bytes will not load (a renamed download, a corrupt font) is listed as unreadable
-  rather than applied or silently ignored.
+- **Add font…** opens a file picker and takes several files at once. The chosen files are **copied into your fonts folder** (`fonts/` beside the app, or `SPICY_FONT_DIR`), so an import survives a restart and there is no cap on how many you keep.
+- Each row is drawn **in the face it names**: pick by looking rather than by reading file names. The face in use for the Lyrics or the Interface is marked on its row, and one click moves that job.
+- **Remove** moves a file to `fonts/.trash` — a management action, not a delete, so the file can be dragged back in.
+- A file whose bytes will not load (a renamed download, a corrupt font) is listed as unreadable rather than applied or silently ignored.
 - **Open folder** shows the folder in Explorer, where you can also drop fonts in yourself.
 
 Imports are registered at runtime, so a new face applies the moment you pick it — no restart.
 
----
-
-## 📦 Build a standalone `.exe`
+## Build a standalone `.exe`
 
 No Python required by whoever runs it.
 
@@ -214,27 +138,23 @@ python -m PyInstaller PaprikaLyrics.spec --noconfirm
 
 The result is `dist/PaprikaLyrics/` — a **onedir** build, so ship the whole folder. It is unsigned, so Windows SmartScreen warns on first run (*More info → Run anyway*). Everything the app **writes** (`.env`, `.webview/`, `ttml/`, `fonts/`, `spotify_cache.json`) lives **beside** the executable, never inside the bundle.
 
----
-
-## ❓ Troubleshooting
+## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
 | Lyrics are line-synced, not word-by-word | The track has no syllable sync, or your API key is missing. Check **Settings → Resolve report**. |
-| Lyrics are slightly ahead / behind | Nudge with `Ctrl + [` / `Ctrl + ]` (saved per song), or use the latency rail. |
+| Lyrics are slightly ahead / behind | Nudge with <kbd>Ctrl + [</kbd> / <kbd>Ctrl + ]</kbd> (saved per song), or use the latency rail. |
 | Song shows `--:--` and the seek bar does nothing | Your player doesn't publish a length to Windows (SimpMusic does this), or has blanked its timeline while the next item opens. That's the player, not the overlay — the length is re-announced as soon as it publishes one, including on a player that only reports it a moment after the title. |
-| I can't click the overlay | It's in click-through mode — press `Ctrl + Shift + T`. |
+| I can't click the overlay | It's in click-through mode — press <kbd>Ctrl + Shift + T</kbd>. |
 | I want to reset all settings | Delete the `.webview/` folder. |
 
----
-
-## 🙏 Credits
+## Credits
 
 - **[Spicy Lyrics API](https://developers.spicylyrics.org)** — syllable-synced TTML payloads.
 - **[LRCLIB](https://lrclib.net/)** — open, community lyric database (line-sync fallback).
 - **[pywebview](https://pywebview.flowrl.com/)** — the WebView2 window container.
 - **[SimpMusic](https://github.com/brahmkshatriya/SimpMusic)** — a great open-source YouTube Music client, and one of the players this overlay is tested against.
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE). Use it, fork it, ship it. No warranty.
