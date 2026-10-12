@@ -398,6 +398,96 @@ class LocalTtmlPipelineTest(unittest.TestCase):
         self.assertNotIn("Local TTML", source)
 
 
+class SpicySkipReasonTest(unittest.TestCase):
+    """
+    The resolve report has to say WHY syllable-synced lyrics were skipped.
+
+    Three different failures look identical in the overlay, which shows line
+    timing either way: a key the user has not added, a resolver that stopped
+    resolving, and a song Spicy has no lyric for. That is how a released build
+    could fall back to LRCLIB for every single track while the settings card
+    still said the key was set, so each reason is named in the report.
+    """
+
+    def setUp(self):
+        import core.lyrics as L
+        self.L = L
+        self.originals = {
+            "library": L.TTML_LIBRARY,
+            "get_lyrics": L.CACHE.get_lyrics,
+            "set_lyrics": L.CACHE.set_lyrics,
+            "fetch_lrclib": L.fetch_lrclib,
+            "fetch_spicy": L.fetch_spicy_with_id,
+            "resolve": L.resolve_spotify_track_id,
+            "key": L.get_spicy_api_key,
+        }
+        # The local library and the cache are out of the way: this is about the
+        # online pipeline's report, not about which source won.
+        L.TTML_LIBRARY = SimpleNamespace(resolve=lambda *a, **k: None)
+        L.CACHE.get_lyrics = lambda *a, **k: None
+        L.CACHE.set_lyrics = lambda *a, **k: None
+        L.fetch_lrclib = lambda *a, **k: [
+            {"text": "line", "startTimeMs": 1, "endTimeMs": 2, "words": []}]
+
+    def tearDown(self):
+        L = self.L
+        L.TTML_LIBRARY = self.originals["library"]
+        L.CACHE.get_lyrics = self.originals["get_lyrics"]
+        L.CACHE.set_lyrics = self.originals["set_lyrics"]
+        L.fetch_lrclib = self.originals["fetch_lrclib"]
+        L.fetch_spicy_with_id = self.originals["fetch_spicy"]
+        L.resolve_spotify_track_id = self.originals["resolve"]
+        L.get_spicy_api_key = self.originals["key"]
+
+    def _pipeline(self, *, key, track_id, spicy):
+        self.L.get_spicy_api_key = lambda: key
+        self.L.resolve_spotify_track_id = lambda *a, **k: track_id
+        self.L.fetch_spicy_with_id = lambda *a, **k: spicy
+        return self.L.fetch_lyrics("Song", "Artist", 200_000)
+
+    def test_missing_key_is_named(self):
+        _lines, source, _tid, diag = self._pipeline(key="", track_id="tid", spicy=([], None))
+        self.assertEqual(source, "LRCLIB")
+        self.assertEqual(diag["resolve"], "no-key")
+
+    def test_unresolved_track_id_is_named(self):
+        """The case a released exe hit for every track: key fine, no id found."""
+        _lines, source, _tid, diag = self._pipeline(key="sl_sk_x", track_id=None, spicy=([], None))
+        self.assertEqual(source, "LRCLIB")
+        self.assertEqual(diag["resolve"], "no-track-id")
+
+    def test_a_track_spicy_has_no_lyric_for_is_named(self):
+        _lines, source, _tid, diag = self._pipeline(key="sl_sk_x", track_id="tid", spicy=([], None))
+        self.assertEqual(source, "LRCLIB")
+        self.assertEqual(diag["resolve"], "no-lyrics")
+
+    def test_a_spicy_hit_names_no_reason_and_forwards_the_track_length(self):
+        seen = {}
+        self.L.get_spicy_api_key = lambda: "sl_sk_x"
+
+        def fake_resolve(title, artist, album=None, duration_ms=None):
+            seen["duration_ms"] = duration_ms
+            return "tid"
+
+        self.L.resolve_spotify_track_id = fake_resolve
+        self.L.fetch_spicy_with_id = lambda *a, **k: (
+            [{"text": "x", "startTimeMs": 1, "endTimeMs": 2, "words": []}],
+            "Spicy (Apple Music)")
+
+        _lines, source, _tid, diag = self.L.fetch_lyrics("Song", "Artist", 200_000)
+
+        self.assertEqual(source, "Spicy (Apple Music)")
+        self.assertEqual(diag["resolve"], "")
+        # The tie-break between Spotify's search hits needs the playing length.
+        self.assertEqual(seen["duration_ms"], 200_000)
+
+    def test_the_report_defaults_to_naming_no_reason(self):
+        self.assertEqual(_build_diagnostics("LRCLIB", "hit", [])["resolve"], "")
+        self.assertEqual(
+            _build_diagnostics("LRCLIB", "hit", [], resolve="no-track-id")["resolve"],
+            "no-track-id")
+
+
 class MetadataSourceDiagnosticsTest(unittest.TestCase):
     def test_album_and_metadata_surface(self):
         diag = _build_diagnostics("LRCLIB", "miss", [], 0, None,

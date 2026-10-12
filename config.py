@@ -288,6 +288,13 @@ def set_spicy_api_key(key: str) -> dict:
 SPICY_API_KEY = get_spicy_api_key()
 BASE_URL = os.getenv("SPICY_BASE_URL", "https://api.spicylyrics.org")
 
+# A real, long-lived public Spotify track id, used by Settings to prove a saved
+# key works. The lyrics endpoint is the only check this API has — there is no
+# health route — and `/v1/lyrics/test` is not one: "test" is a malformed track
+# id, so it answers `400 invalid_track_id` for every key, valid or not, which
+# made a working key look broken.
+SPICY_PROBE_TRACK_ID = "0VjIjW4GlUZAMYd2vXMi3b"
+
 # The application version — the single source of truth for it. It is reported in
 # the in-app resolve report (Settings → Resolve report), so a bug report can name
 # the build it came from, and it is what a release tag should match. Bump it when
@@ -295,7 +302,7 @@ BASE_URL = os.getenv("SPICY_BASE_URL", "https://api.spicylyrics.org")
 #
 # Not to be confused with PARSER_VERSION below: that one versions the CACHED
 # PAYLOAD FORMAT and exists to invalidate caches, not to describe the release.
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2-rc1"
 
 # Operational Constants
 # Bumped to 10: LRCLIB fallback lines now carry musical word timing (BPM/

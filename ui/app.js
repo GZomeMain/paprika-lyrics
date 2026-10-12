@@ -2025,6 +2025,17 @@ window.setDiagnostics = function(diag) {
   renderDiagnostics();
 };
 
+// Why the syllable-synced lookup was skipped, when it was. The Python resolver
+// reports exactly one of these, and the row is left out entirely when Spicy
+// supplied the lyrics, so a healthy report is not padded with an empty line.
+// 'no-track-id' is the interesting one: an API key is set but no Spotify id
+// could be resolved, which means every track is quietly falling back to LRCLIB.
+const RESOLVE_LABELS = {
+  'no-key': 'Spicy skipped \u00b7 no API key',
+  'no-track-id': 'no Spotify track id found',
+  'no-lyrics': 'Spicy has no lyrics for this track'
+};
+
 function renderDiagnostics() {
   const box = document.getElementById('qp-info-body');
   if (!box) return;
@@ -2041,6 +2052,8 @@ function renderDiagnostics() {
     ['Lines', d.lines === undefined || d.lines === null ? '\u2014' : String(d.lines)],
     ['Syllables', d.syllables === undefined || d.syllables === null ? '\u2014' : String(d.syllables)],
     ['API key', d.api_key === undefined ? '\u2014' : (d.api_key ? 'Set' : 'Missing')],
+    // Rendered only when the resolver reported one: see RESOLVE_LABELS.
+    ...(d.resolve ? [['Resolution', RESOLVE_LABELS[d.resolve] || d.resolve]] : []),
     // What the player itself reports about its transport. "no timeline from
     // player" means the playhead and the duration cannot come from GSMTC — the
     // lyrics still scroll on the local clock, and a seek cannot be confirmed.

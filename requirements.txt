@@ -10,9 +10,13 @@
 pywebview==6.2.1
 winsdk==1.0.0b10
 requests==2.32.3
-# Optional: spotify-scraper>=0.9.0
-#   core/resolver.py imports it behind a guard (SPOTIFY_SCRAPER_AVAILABLE) and
-#   degrades to the other resolution tiers without it. It is not installed here
-#   because its `data-scraper` dependency currently has no installable release
-#   for our Python matrix (3.10-3.13), which would fail `pip install -r`.
-# spotify-scraper>=0.9.0
+# Optional: spotifyscraper >= 3.9.2, which is what `spotify_scraper` on PyPI
+#   is called (the project is AliAkhtari78/SpotifyScraper).
+#   A second Spotify track-ID lookup, imported behind a guard
+#   (core.resolver.SPOTIFY_SCRAPER_AVAILABLE) and tried FIRST when present.
+#   Deliberately not pinned: nothing needs it, because core/resolver.py resolves
+#   track IDs itself over `requests` alone — the tier a packaged exe runs — and
+#   pinning it would put an HTML scraper and httpx inside every shipped build for
+#   a fallback that is already covered. Install it for a source checkout with
+#   `pip install spotifyscraper==3.9.2` and it takes its usual place in front.
+# spotifyscraper==3.9.2

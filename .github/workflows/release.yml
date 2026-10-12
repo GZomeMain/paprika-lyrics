@@ -51,6 +51,11 @@ jobs:
         run: |
           Compress-Archive -Path dist/PaprikaLyrics/* -DestinationPath dist/PaprikaLyrics-windows-x64.zip
 
+      # A tag with a suffix (`v0.2.2-rc1`) is published as a GitHub PRE-release, a
+      # plain one (`v0.2.2`) as a normal release — so a build for people to try
+      # before it is the release is a naming decision rather than a second
+      # workflow. The tag check keeps a manual `workflow_dispatch` run on a
+      # branch (where ref_name is a branch, and dashes are common) out of it.
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -58,5 +63,5 @@ jobs:
             dist/PaprikaLyrics-windows-x64.zip
             dist-onefile/PaprikaLyrics.exe
           draft: false
-          prerelease: false
+          prerelease: ${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-') }}
           generate_release_notes: true
