@@ -179,6 +179,19 @@ class FolderTests(LibraryTestCase):
             lib.ensure_dir()
             self.assertTrue((lib.directory / ".gitignore").is_file())
 
+    def test_a_data_dir_spelled_another_way_still_counts_as_inside(self):
+        # DATA_DIR is whatever the environment hands over, and it need not be
+        # canonical: the CI runner's TEMP is the 8.3 short form
+        # (`C:\Users\RUNNER~1\AppData\Local\Temp`), so the folder and the app
+        # folder were compared as `...\RUNNER~1\...\fonts` against
+        # `C:\Users\runneradmin\...`, the guard missed, and no marker was
+        # written — CI went red on a machine whose profile path merely had a
+        # short form. `..` is the portable way to spell a non-canonical path.
+        with mock.patch.object(font_library, "DATA_DIR", self.tmp / ".." / self.tmp.name):
+            lib = FontLibrary(directory=self.tmp / "fonts")
+            lib.ensure_dir()
+            self.assertTrue((lib.directory / ".gitignore").is_file())
+
     def test_a_folder_outside_the_app_is_left_alone(self):
         self.lib.ensure_dir()
         self.assertFalse((self.lib.directory / ".gitignore").exists())
