@@ -14,7 +14,13 @@ A frameless Windows overlay that reads the media session, not your audio — so 
 
 [**⬇️ Download**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) · [Highlights](#highlights) · [Quick start](#quick-start) · [Controls](#controls) · [Under the hood](#under-the-hood) · [API key](#your-spicy-lyrics-api-key)
 
-<img src="docs/assets/overlay-fullscreen.png" width="1040" alt="Paprika Lyrics in split view: blurred album-art room, sleeve on the left, live lyric column on the right">
+
+
+
+
+https://github.com/user-attachments/assets/a7742822-d07c-44d5-af01-a0a6c11ce916
+
+
 
 </div>
 
@@ -41,7 +47,11 @@ For songs with syllable timing it wipes word-by-word and per-syllable. For every
 - **🪶 Quiet by default** — every long-running effect animates `transform` / `opacity`, honours reduced motion, and stops entirely when you pause.
 
 <p align="center">
-  <img src="docs/assets/overlay-windowed.png" width="700" alt="Windowed overlay: album sleeve, on-cover transport, and live lyrics">
+  
+
+https://github.com/user-attachments/assets/012b4529-e955-418c-9458-6a6155e81ee5
+
+
 </p>
 
 ## Quick start
