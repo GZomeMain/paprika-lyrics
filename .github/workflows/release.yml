@@ -36,6 +36,16 @@ jobs:
       - name: Build standalone executable
         run: python -m PyInstaller PaprikaLyrics.spec --noconfirm
 
+      # The same spec, one setting changed: a single self-contained exe as a
+      # second download. The folder build is the better experience and the one
+      # the README recommends, but "just give me the exe" is a real request and
+      # a bare exe lifted out of the folder build cannot start without the
+      # _internal/ folder beside it, so a zip-only release cannot answer it.
+      - name: Build single-file executable
+        env:
+          PL_ONEFILE: '1'
+        run: python -m PyInstaller PaprikaLyrics.spec --noconfirm --distpath dist-onefile
+
       - name: Create release zip
         shell: pwsh
         run: |
@@ -44,7 +54,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/PaprikaLyrics-windows-x64.zip
+          files: |
+            dist/PaprikaLyrics-windows-x64.zip
+            dist-onefile/PaprikaLyrics.exe
           draft: false
           prerelease: false
           generate_release_notes: true

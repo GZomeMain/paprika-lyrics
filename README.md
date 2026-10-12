@@ -207,18 +207,21 @@ For tracks the online lookup gets wrong, keep your own Apple / AMLL `.ttml` file
 
 ```bash
 pip install pyinstaller
-python -m PyInstaller PaprikaLyrics.spec --noconfirm
+python -m PyInstaller PaprikaLyrics.spec --noconfirm                 # dist/PaprikaLyrics/ (folder)
+PL_ONEFILE=1 python -m PyInstaller PaprikaLyrics.spec --noconfirm    # dist/PaprikaLyrics.exe (one file)
 ```
 
-The result is `dist/PaprikaLyrics/` — a **onedir** build, so ship the whole folder. It is unsigned, so SmartScreen warns on first run (*More info → Run anyway*). `ui/` is bundled as read-only data; `.env`, `.webview/`, `ttml/`, `fonts/` and the cache are deliberately **not**, so nothing a user changes is ever unpacked into `%TEMP%`.
+The default is a **onedir** build — `dist/PaprikaLyrics/` with the exe inside it — so ship the whole folder; that is what the release zip is, and what the app is designed around. Setting `PL_ONEFILE=1` produces a **single self-contained exe** instead, which the release also attaches for anyone who wants one file: it unpacks itself into a temp folder on every launch, so it starts slower, and it is the reason both exist rather than either alone. (PowerShell: `$env:PL_ONEFILE=1` before the command.)
 
-Tagging a release (`git tag v1.0.0 && git push --tags`) runs the same suite and publishes `PaprikaLyrics-windows-x64.zip` automatically.
+Either build is unsigned, so SmartScreen warns on first run (*More info → Run anyway*). `ui/` is bundled as read-only data; `.env`, `.webview/`, `ttml/`, `fonts/` and the cache are deliberately **not**, so nothing a user changes is ever unpacked into `%TEMP%`.
+
+Tagging a release (`git tag v0.2.1 && git push origin v0.2.1`) runs the same suite and publishes `PaprikaLyrics-windows-x64.zip` and `PaprikaLyrics.exe` together.
 
 ## Development
 
 ```bash
 python -m compileall -q core config.py storage.py paprika_app.py tools
-python -m unittest discover -s tests -v        # 568 tests
+python -m unittest discover -s tests -v        # 569 tests
 node tools/run-ui-preview-regression.mjs       # the overlay's own invariants
 ```
 
