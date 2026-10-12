@@ -268,7 +268,12 @@ class FontLibrary:
             # The default folder lives beside the app (inside the project
             # checkout when run from source), so a user's own fonts must never
             # turn up in `git status`.
-            if DATA_DIR in self.directory.resolve().parents:
+            # Both sides are canonicalised first: DATA_DIR can arrive spelled
+            # any way the environment holds it — the CI runner's TEMP is the 8.3
+            # short form (`C:\Users\RUNNER~1\...`) — while `resolve()` expands
+            # the folder it is compared against, so an unresolved DATA_DIR named
+            # the same folder and still never matched.
+            if Path(DATA_DIR).resolve() in self.directory.resolve().parents:
                 marker = self.directory / ".gitignore"
                 if not marker.exists():
                     marker.write_text("*\n!.gitignore\n", encoding="utf-8")

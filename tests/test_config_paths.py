@@ -183,10 +183,13 @@ class FrozenPathTests(unittest.TestCase):
 
     def test_the_libraries_use_the_data_dir_for_their_gitignore(self):
         # Both libraries write a `.gitignore` when their folder is inside the app
-        # folder; against the temp bundle that guard would never fire.
+        # folder; against the temp bundle that guard would never fire. DATA_DIR
+        # is resolved before the compare: it can be spelled however the
+        # environment holds it — the CI runner's TEMP is the 8.3 short form —
+        # and an unresolved compare against a resolved folder never matched.
         for module in ("ttml_library.py", "font_library.py"):
             src = (BASE_DIR / "core" / module).read_text(encoding="utf-8")
-            self.assertIn("DATA_DIR in self.directory.resolve().parents", src,
+            self.assertIn("Path(DATA_DIR).resolve() in self.directory.resolve().parents", src,
                           f"{module} must keep its folder out of git")
 
 
