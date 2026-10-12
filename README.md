@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🎵 Paprika Lyrics
+<img src="assets/icon.png" width="88" alt="Paprika Lyrics: a paprika pepper with one band lit, like the syllable being sung">
+
+# Paprika Lyrics
 
 **Studio-accurate, syllable-by-syllable lyrics for whatever your PC is playing.**
 A frameless Windows overlay that reads the media session, not your audio — so Spotify, YouTube, VLC, Foobar, SimpMusic and anything else that reports now-playing all work.
