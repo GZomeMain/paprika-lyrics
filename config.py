@@ -295,7 +295,7 @@ BASE_URL = os.getenv("SPICY_BASE_URL", "https://api.spicylyrics.org")
 #
 # Not to be confused with PARSER_VERSION below: that one versions the CACHED
 # PAYLOAD FORMAT and exists to invalidate caches, not to describe the release.
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 
 # Operational Constants
 # Bumped to 10: LRCLIB fallback lines now carry musical word timing (BPM/

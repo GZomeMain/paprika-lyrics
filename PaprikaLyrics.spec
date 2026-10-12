@@ -24,7 +24,17 @@ a cache unpacked into `%TEMP%` would be recreated from nothing on every launch.
 
 `webview` ships its own platform helpers as data files (the WebView2 loader DLL
 and the .NET bridge), so those are collected explicitly rather than hoped for.
+
+**Two shapes, one spec.** Set `PL_ONEFILE=1` and the same analysis produces a
+single self-contained executable instead of the folder; the release attaches
+both. The trade-off is real and worth stating once: a onefile launch unpacks
+the whole bundle into a temp directory every time, so it starts slower, and an
+unsigned self-extracting exe attracts more antivirus attention. The switch
+lives here rather than in a second spec so that the icon, the excludes, the
+hidden imports and the collected data files cannot drift apart between them.
 """
+
+import os
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
@@ -69,11 +79,11 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
+ONEFILE = os.environ.get("PL_ONEFILE", "").strip().lower() in ("1", "true", "yes")
+
+# Both shapes take the same options, from one place, so a change here reaches
+# the folder build and the single file together.
+COMMON = dict(
     name="PaprikaLyrics",
     debug=False,
     bootloader_ignore_signals=False,
@@ -81,18 +91,30 @@ exe = EXE(
     upx=False,          # UPX-packed binaries are a false-positive magnet for AV.
     console=False,      # A console window would sit behind the overlay.
     disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
     icon="assets/icon.ico",
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="PaprikaLyrics",
-)
+if ONEFILE:
+    # The archive and every collected file ride inside the exe itself.
+    exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], **COMMON)
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        **COMMON,
+    )
+
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name="PaprikaLyrics",
+    )
