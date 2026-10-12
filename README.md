@@ -57,7 +57,7 @@ python paprika_app.py
 
 Play any track and the overlay picks it up. Prefer a prebuilt binary? Grab the zip from [Releases](https://github.com/GZomeMain/paprika-lyrics/releases/latest), unpack it and run `PaprikaLyrics.exe`.
 
-> **Optional:** `pip install spotify-scraper` improves Spotify track-ID matching. It is guarded at import — everything still works without it.
+> **Track IDs:** the lyrics API takes a Spotify track ID, not a title, so the app resolves one itself — a Spotify search over `requests` alone, which is the lookup a prebuilt exe uses. `pip install spotifyscraper==3.9.2` adds the [AliAkhtari78/SpotifyScraper](https://github.com/AliAkhtari78/SpotifyScraper) lookup, which then goes first, as it always has; it is guarded at import and nothing requires it.
 
 ## Requirements
 
@@ -81,6 +81,8 @@ SPICY_BASE_URL=https://api.spicylyrics.org
 ```
 
 A real environment variable always outranks `.env`, and `.env` is git-ignored. Confirm it took with **Settings → Diagnostics → Resolve report** (`API key: Set`).
+
+The API takes a **Spotify track ID**, not a title, so the app resolves one from the track and artist first. When a track ends up on line-synced lyrics, the same resolve report now says which step lost it: `Resolution: no Spotify track id found` is the lookup failing, `Spicy skipped · no API key` is the key, and `no lyrics for this track` is the API genuinely having none.
 
 ## Controls
 
@@ -120,7 +122,7 @@ Windows media session (GSMTC)
 core/smtc.py  ── transport, position, timeline ──┐
                                                  │
 lyric resolution  core/resolver.py               │
-   spotify-scraper → Spicy Lyrics API → LRCLIB   │
+   Spotify search → Spicy Lyrics API → LRCLIB    │
         │                                        │
         ├── core/ttml.py · core/ttml_library.py  │  Apple / AMLL syllable timing
         └── core/lyrics.py                      │
@@ -215,13 +217,13 @@ The default is a **onedir** build — `dist/PaprikaLyrics/` with the exe inside 
 
 Either build is unsigned, so SmartScreen warns on first run (*More info → Run anyway*). `ui/` is bundled as read-only data; `.env`, `.webview/`, `ttml/`, `fonts/` and the cache are deliberately **not**, so nothing a user changes is ever unpacked into `%TEMP%`.
 
-Tagging a release (`git tag v0.2.1 && git push origin v0.2.1`) runs the same suite and publishes `PaprikaLyrics-windows-x64.zip` and `PaprikaLyrics.exe` together.
+Tagging a release (`git tag v0.2.2 && git push origin v0.2.2`) runs the same suite and publishes `PaprikaLyrics-windows-x64.zip` and `PaprikaLyrics.exe` together. A tag **with a suffix** (`v0.2.2-rc1`) publishes a GitHub **pre-release** instead, so a build for people to try is a naming decision rather than a second workflow — and `config.APP_VERSION` is what that tag should spell.
 
 ## Development
 
 ```bash
 python -m compileall -q core config.py storage.py paprika_app.py tools
-python -m unittest discover -s tests -v        # 569 tests
+python -m unittest discover -s tests -v        # 590 tests
 node tools/run-ui-preview-regression.mjs       # the overlay's own invariants
 ```
 

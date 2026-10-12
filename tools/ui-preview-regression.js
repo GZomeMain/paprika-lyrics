@@ -1666,6 +1666,27 @@ async function run(label) {
   diagnostics = savedDiagnostics;
   renderDiagnostics();
 
+  // The report says WHY the syllable-synced lookup was skipped. A key that was
+  // accepted while the resolver found no Spotify id reads exactly like a song
+  // Spicy has no lyric for, and the two need different answers — so the reason
+  // is named, and the row is absent when there was nothing to explain.
+  diagnostics = { source: 'LRCLIB', resolve: 'no-track-id' };
+  renderDiagnostics();
+  const skipReport = document.getElementById('qp-info-body').textContent;
+  result.skipReasonReported = /no Spotify track id found/.test(skipReport);
+  if (!result.skipReasonReported) {
+    problems.push('the resolve report does not name a skipped Spicy lookup: ' + skipReport);
+  }
+  diagnostics = { source: 'Spicy (Apple Music)', lines: 41 };
+  renderDiagnostics();
+  result.noSkipRowOnAHealthyReport =
+    !/Resolution/.test(document.getElementById('qp-info-body').textContent);
+  if (!result.noSkipRowOnAHealthyReport) {
+    problems.push('a report that used Spicy still carries the skip row');
+  }
+  diagnostics = savedDiagnostics;
+  renderDiagnostics();
+
   // A refused seek goes back to where playback actually is; an accepted one is
   // kept, and reported as unverifiable when the player publishes no timeline.
   // The engine distrusts position reports for 900ms after a user seek (they are

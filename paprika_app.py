@@ -953,10 +953,13 @@ class WindowApi:
 
         clean_key = config.get_spicy_api_key()
         if clean_key:
-            # Quick validation check against the Spicy Lyrics API
+            # Quick validation check against the Spicy Lyrics API. The probe asks
+            # for a real track, because the API has no health route: the old
+            # `/v1/lyrics/test` is a malformed track id, so it answered 400 for
+            # every key — a working one included, which read as a suspected key.
             try:
                 from core.resolver import http_get
-                test_url = f"{config.BASE_URL}/v1/lyrics/test"
+                test_url = f"{config.BASE_URL}/v1/lyrics/{config.SPICY_PROBE_TRACK_ID}"
                 resp = http_get(test_url, headers={"Authorization": f"Bearer {clean_key}"}, timeout=3.0)
                 if resp is not None:
                     if resp.status_code in (401, 403):

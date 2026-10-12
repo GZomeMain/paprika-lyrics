@@ -181,12 +181,13 @@ def _count_syllables(lines: list[dict]) -> int:
 def _build_diagnostics(source: str, cache: str, lines: list[dict],
                        syllables: int | None = None, track_id: str | None = None,
                        album: str = "", metadata_source: str = "smtc",
-                       ttml: str = "", ttml_match: str = "") -> dict:
+                       ttml: str = "", ttml_match: str = "", resolve: str = "") -> dict:
     """
     Small, user-facing report of how this track's lyrics were obtained. Surfaced
     in the UI so a fallback to line-synced lyrics is explainable without stdout.
     `album` and `metadata_source` report what the player broadcast ("filename"
-    means a local file whose tags needed repair).
+    means a local file whose tags needed repair). `resolve` names why the
+    syllable-synced lookup was skipped, when it was (see `fetch_lyrics`).
     """
     syl = _count_syllables(lines) if syllables is None else syllables
     if not lines:
@@ -213,6 +214,9 @@ def _build_diagnostics(source: str, cache: str, lines: list[dict],
         # its own metadata matched. Empty when no local file was involved.
         "ttml": ttml,
         "ttml_match": ttml_match,
+        # Empty whenever Spicy supplied the lyrics, so a healthy report carries
+        # no extra row — the UI only renders this one when it is set.
+        "resolve": resolve,
     }
 
 
@@ -302,7 +306,9 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
     # in hand — total latency is max(LRCLIB, ID+Spicy) instead of
     # max(LRCLIB, ID) + Spicy.
     def _spicy_chain():
-        tid = resolve_spotify_track_id(title, artist, album)
+        # The duration is a tie-breaker between Spotify's search hits: the wrong
+        # pressing comes back as a 404 and costs the track its syllable timing.
+        tid = resolve_spotify_track_id(title, artist, album, duration_ms)
         if not tid:
             return tid, None
         return tid, fetch_spicy_with_id(tid, lrclib_lines=lrclib_future.result())
@@ -313,6 +319,23 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
     lines = source = None
     if spicy:
         lines, source = spicy
+
+    # Why syllable-synced lyrics were skipped, named for the resolve report. The
+    # three ways this pipeline loses them look identical from the outside — the
+    # overlay simply shows line timing — and they need different answers: a key
+    # the user can add, a track id the resolver should have found, or a song
+    # Spicy genuinely has no lyric for. Without this, a resolver that stopped
+    # resolving (every track, key or not, falling back to LRCLIB) reads exactly
+    # like "this song has no syllables".
+    resolve_note = ""
+    if not lines:
+        if not get_spicy_api_key():
+            resolve_note = "no-key"
+        elif not track_id:
+            resolve_note = "no-track-id"
+        else:
+            resolve_note = "no-lyrics"
+
     if lines:
             syl_count = _count_syllables(lines)
             CACHE.set_lyrics(lyrics_cache_key, {
@@ -338,8 +361,8 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
         })
         return lrclib_lines, "LRCLIB", track_id, _build_diagnostics(
             "LRCLIB", "miss", lrclib_lines, 0, track_id,
-            album=album, metadata_source=metadata_source)
+            album=album, metadata_source=metadata_source, resolve=resolve_note)
 
     return [], "None", track_id, _build_diagnostics(
         "None", "miss", [], 0, track_id,
-        album=album, metadata_source=metadata_source)
+        album=album, metadata_source=metadata_source, resolve=resolve_note)
