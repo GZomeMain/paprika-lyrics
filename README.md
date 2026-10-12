@@ -79,22 +79,6 @@ Play any track and the overlay picks it up. Prefer a prebuilt binary? Grab the z
 | **Runtime** | Microsoft Edge **WebView2** (preinstalled on Windows 11 and current Windows 10) |
 | **Python** | 3.10 – 3.13, only when running from source |
 
-## Your Spicy Lyrics API key
-
-The key unlocks **word-by-word** lyrics. Without it the app still runs, on line-synced lyrics — so this is optional, but it is the whole point.
-
-1. Open **[developers.spicylyrics.org](https://developers.spicylyrics.org)** → **Dashboard** → **Create an application**.
-2. Copy the **secret key** (`sl_sk_…`) — it is shown only once.
-3. Paste it **in the app**: <kbd>Ctrl</kbd> + <kbd>,</kbd> → **Lyrics** tab → **Spicy Lyrics API** → **Save**. Or put it in `.env`:
-
-```env
-SPICY_API_KEY="sl_sk_your_key_here"
-SPICY_BASE_URL=https://api.spicylyrics.org
-```
-
-A real environment variable always outranks `.env`, and `.env` is git-ignored. Confirm it took with **Settings → Diagnostics → Resolve report** (`API key: Set`).
-
-The API takes a **Spotify track ID**, not a title, so the app resolves one from the track and artist first. When a track ends up on line-synced lyrics, the same resolve report now says which step lost it: `Resolution: no Spotify track id found` is the lookup failing, `Spicy skipped · no API key` is the key, and `no lyrics for this track` is the API genuinely having none.
 
 ## Controls
 
