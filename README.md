@@ -147,20 +147,6 @@ core/beat.py beat plan   core/timeline.py syllable timeline   storage.py cache
 paprika_app.py  (pywebview host, Win32 window control, hotkeys, file dialogs)
 ```
 
-**Repository map**
-
-| Path | What lives there |
-| --- | --- |
-| `paprika_app.py` | The host: window, bridge API, hotkeys, dialogs, event loop |
-| `core/session.py` · `core/smtc.py` | Which media session is live, and its transport/position |
-| `core/resolver.py` · `core/lyrics.py` | Track → synced lyrics, tier by tier, with caching |
-| `core/ttml.py` · `core/ttml_library.py` | Syllable parsing and the local `.ttml` library |
-| `core/beat.py` | The rhythm plan: BPM, phase, per-section strength, builds, drops |
-| `core/timeline.py` | The syllable clock the UI renders against |
-| `core/native_window.py` · `core/hotkeys.py` | Win32 frame/fullscreen/drag, global shortcuts |
-| `core/font_library.py` | Importing and reading font faces (with a `.trash`, not a delete) |
-| `ui/` | The whole overlay: `index.html`, `app.js`, `style.css` |
-| `storage.py` · `config.py` | Cache, and every path and environment variable |
 
 ### The motion system
 
@@ -174,48 +160,6 @@ The overlay has one rule: **one layer, one property, one owner.** A CSS custom p
 - **Reduced motion** (Windows' own setting, or the in-app toggle) leaves every layer stock: no drift, no pulse, no air, no lean, no grade.
 - Lyrics keep their own clock: syllable state is committed on the timeline, and a correction never walks the wipe backwards over letters it has already sung.
 
-### Performance
-
-Measured on the dev machine with the beat, the wipe and the room all live (renderer counters via CDP, no GPU claims):
-
-| | |
-| --- | --- |
-| Frame pacing | p50 **13.3 ms**, no frame over 20 ms across a 2.5 s sample |
-| Main-thread task time | ~**0.5 s per 3 s** of playback (~2% scripting, ~5% style) |
-| Long-running animations | ~47, of which **37 composite on the GPU**; 28 of those are air motes |
-| Blur | a single `blur()` on one layer, scaled with the window (26 – 54 px) and overscanned so edges never erode |
-
-### Data, paths and configuration
-
-Everything the app **writes** lives beside it — never inside the bundle, never in `%TEMP%`: `.env`, `.webview/` (WebView2 profile = all persisted settings), `ttml/`, `fonts/`, `spotify_cache.json`, `logs/`.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `SPICY_API_KEY` | — | Spicy Lyrics secret key (`sl_sk_…`) |
-| `SPICY_BASE_URL` | `https://api.spicylyrics.org` | Lyrics API root (self-hosters) |
-| `SPICY_TTML_DIR` | `./ttml` | Local syllable-lyric library |
-| `SPICY_FONT_DIR` | `./fonts` | Imported font faces |
-| `SPICY_WEBVIEW_DIR` | `./.webview` | WebView2 profile — deleting it resets every setting |
-| `SPICY_CACHE_TTL_SECONDS` | `259200` (3 days) | How long a cached lyric payload stays fresh |
-| `SPICY_DEBUG` | `0` | Verbose resolver / lyrics logging |
-
-## Local lyrics (`.ttml`)
-
-For tracks the online lookup gets wrong, keep your own Apple / AMLL `.ttml` files:
-
-- Drop files into `ttml/` (or **Settings → Local lyrics → Import files…**), then **Rescan**.
-- A file is applied automatically only when its own metadata names the **same title and artist**; a hand-bound file always wins.
-- Removals go to `ttml/.trash`, so a mistake is recoverable.
-- Point the library elsewhere with `SPICY_TTML_DIR`.
-
-## Fonts
-
-**Settings → Fonts** lists every face the overlay can draw in — the stock ones, then whatever you imported:
-
-- **Add font…** takes several files at once and **copies** them into the fonts folder, so an import survives a restart (no cap on how many you keep).
-- Each row is drawn **in the face it names** — pick by looking, not by reading file names.
-- **Remove** moves a file to `fonts/.trash`; a file whose bytes will not load is listed as unreadable rather than applied or silently ignored.
-- Imports are registered at runtime: a new face applies the moment you pick it.
 
 ## Build a standalone `.exe`
 
@@ -231,15 +175,6 @@ Either build is unsigned, so SmartScreen warns on first run (*More info → Run 
 
 Tagging a release (`git tag v0.2.2 && git push origin v0.2.2`) runs the same suite and publishes `PaprikaLyrics-windows-x64.zip` and `PaprikaLyrics.exe` together. A tag **with a suffix** (`v0.2.2-rc1`) publishes a GitHub **pre-release** instead, so a build for people to try is a naming decision rather than a second workflow — and `config.APP_VERSION` is what that tag should spell.
 
-## Development
-
-```bash
-python -m compileall -q core config.py storage.py paprika_app.py tools
-python -m unittest discover -s tests -v        # 590 tests
-node tools/run-ui-preview-regression.mjs       # the overlay's own invariants
-```
-
-CI runs the suite on **Windows × Python 3.10 – 3.13** (the app is Windows-only, so a Linux runner would pass while the native paths went untested), plus a UI job that parses `app.js` and then **executes** the overlay checks in a headless Chromium over CDP at five viewports — from 1400×900 down to the smallest window the app allows.
 
 ## Troubleshooting
 
@@ -257,7 +192,6 @@ CI runs the suite on **Windows × Python 3.10 – 3.13** (the app is Windows-onl
 - **[Spicy Lyrics API](https://developers.spicylyrics.org)** — syllable-synced TTML payloads.
 - **[LRCLIB](https://lrclib.net/)** — open, community lyric database (line-sync fallback).
 - **[pywebview](https://pywebview.flowrl.com/)** — the WebView2 window container.
-- **[SimpMusic](https://github.com/brahmkshatriya/SimpMusic)** — an excellent open-source YouTube Music client, and one of the players this overlay is tested against.
 
 ## License
 
