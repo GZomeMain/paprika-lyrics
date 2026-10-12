@@ -17,8 +17,9 @@ A frameless Windows overlay that reads the media session, not your audio — so 
 
 
 
+[2026-10-12 23-22-52(1).webm](https://github.com/user-attachments/assets/daa4370a-36d6-488a-907b-60a2d2e28301)
 
-https://github.com/user-attachments/assets/a7742822-d07c-44d5-af01-a0a6c11ce916
+
 
 
 
@@ -49,7 +50,8 @@ For songs with syllable timing it wipes word-by-word and per-syllable. For every
 <p align="center">
   
 
-https://github.com/user-attachments/assets/012b4529-e955-418c-9458-6a6155e81ee5
+[2026-10-12 23-29-33.webm](https://github.com/user-attachments/assets/966caaf1-7d9f-40b9-8aa6-39bd481f4a17)
+
 
 
 </p>
