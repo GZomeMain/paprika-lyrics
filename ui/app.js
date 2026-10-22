@@ -2293,30 +2293,30 @@ class AirParticlePool {
   }
 }
 
-// --- Procedural Air Particle Geometries ---
-// 0: Hazy Bokeh Bloom Orb (deep diffuse sphere with radiant nucleus)
-// 1: Bulbous Cross / Rounded Clover Petals (flaring out with thick rounded bulbous ends)
-// 2: Diamond Crystal Sparkle (tapered 4-point ray glint with adjustable aspect ratio)
-// 3: Luminous Prism Ring (ethereal refraction ring with bright jewel nodes)
-// 4: Bulbous Spore / Dumbbell Micro-Mote (floating filament with thick bulbous ends)
-// 5: Soft Dual Nebula Cloudlet (misty double dust puff drifting in unison)
+// --- Procedural Air Particle Geometries (Clean, Cool Celestial & Botanical) ---
+// 0: Soft Stardust Mote (ethereal cosmic dust point with luminous pinpoint core)
+// 1: Ethereal Floral Blossom (delicate sakura/plum bloom with organic curved petals, stamen beads & starlight heart)
+// 2: Diamond Crystal Star (tapered 4-point radiant celestial starlight glint)
+// 3: 8-Point Celestial Cross Star (major cardinal diffraction rays with diagonal micro-glints)
 
 function drawAirBokehOrb(ctx, x, y, size, r, g, b, alpha, bloom) {
-  const rad = size * 1.5 * bloom;
+  // Refined cosmic stardust mote: clean, elegant pinpoint star with soft luminous corona
+  const rad = size * 1.35 * bloom;
   const grad = ctx.createRadialGradient(x, y, 0, x, y, rad);
-  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.42})`);
+  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.45})`);
   grad.addColorStop(0.35, `rgba(${r}, ${g}, ${b}, ${alpha * 0.20})`);
-  grad.addColorStop(0.70, `rgba(${r}, ${g}, ${b}, ${alpha * 0.07})`);
+  grad.addColorStop(0.70, `rgba(${r}, ${g}, ${b}, ${alpha * 0.05})`);
   grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.arc(x, y, rad, 0, Math.PI * 2);
   ctx.fill();
 
-  const coreRad = Math.max(1.2, size * 0.32);
+  // Crisp starlight pinpoint core
+  const coreRad = Math.max(0.9, size * 0.28);
   const coreGrad = ctx.createRadialGradient(x, y, 0, x, y, coreRad);
-  coreGrad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.65})`);
-  coreGrad.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.32})`);
+  coreGrad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.95)})`);
+  coreGrad.addColorStop(0.5, `rgba(255, 255, 255, ${alpha * 0.65})`);
   coreGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.fillStyle = coreGrad;
   ctx.beginPath();
@@ -2324,55 +2324,99 @@ function drawAirBokehOrb(ctx, x, y, size, r, g, b, alpha, bloom) {
   ctx.fill();
 }
 
-function drawAirBulbousCross(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+function drawAirEtherealFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
 
-  // Soft ambient halo
-  const haloRad = size * 1.8 * bloom;
+  // Soft ethereal floral ambient aura
+  const haloRad = size * 1.65 * bloom;
   const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
-  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.44})`);
-  halo.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.38})`);
+  halo.addColorStop(0.50, `rgba(${r}, ${g}, ${b}, ${alpha * 0.12})`);
   halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.fillStyle = halo;
   ctx.beginPath();
   ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
   ctx.fill();
 
-  // 4 bulbous lobes with prominent thicker rounded ends
-  const armDist = size * 0.85;
-  const bulbRadius = Math.max(1.8, size * (0.34 + shapeParam * 0.24));
-  const waist = Math.max(0.9, size * 0.18);
+  const petalCount = shapeParam > 0.40 ? 5 : 4; // Organic 5-petal sakura or 4-petal delicate blossom
+  const petalLen = size * 0.92;
+  const petalWidth = size * (petalCount === 5 ? 0.42 : 0.46);
 
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.82})`;
-  for (let a = 0; a < 4; a++) {
-    const angle = (a * Math.PI) / 2;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const tipX = cos * armDist;
-    const tipY = sin * armDist;
+  for (let k = 0; k < petalCount; k++) {
+    const angle = (k * Math.PI * 2) / petalCount;
+    ctx.save();
+    ctx.rotate(angle);
 
-    // Stem connecting to bulbous tip
+    // Each petal: graceful organic curve with subtle delicate sakura notch at apex
     ctx.beginPath();
-    ctx.moveTo(-sin * waist, cos * waist);
-    ctx.lineTo(tipX - sin * (bulbRadius * 0.6), tipY + cos * (bulbRadius * 0.6));
-    ctx.lineTo(tipX + sin * (bulbRadius * 0.6), tipY - cos * (bulbRadius * 0.6));
-    ctx.lineTo(sin * waist, -cos * waist);
+    ctx.moveTo(0, 0);
+
+    // Left flank curves outward
+    ctx.bezierCurveTo(
+      -petalWidth * 0.70, petalLen * 0.32,
+      -petalWidth * 0.95, petalLen * 0.70,
+      -petalWidth * 0.20, petalLen
+    );
+
+    // Subtle gentle sakura notch / indent at petal apex
+    ctx.quadraticCurveTo(0, petalLen * 0.90, petalWidth * 0.20, petalLen);
+
+    // Right flank curves back to origin
+    ctx.bezierCurveTo(
+      petalWidth * 0.95, petalLen * 0.70,
+      petalWidth * 0.70, petalLen * 0.32,
+      0, 0
+    );
     ctx.closePath();
+
+    // Petal gradient: rich tone at heart fading into translucent porcelain white at petal tip
+    const petalGrad = ctx.createLinearGradient(0, 0, 0, petalLen);
+    petalGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.76})`);
+    petalGrad.addColorStop(0.55, `rgba(${Math.min(255, r + 40)}, ${Math.min(255, g + 40)}, ${Math.min(255, b + 40)}, ${alpha * 0.60})`);
+    petalGrad.addColorStop(0.92, `rgba(255, 255, 255, ${alpha * 0.82})`);
+    petalGrad.addColorStop(1, `rgba(255, 255, 255, ${alpha * 0.65})`);
+    ctx.fillStyle = petalGrad;
     ctx.fill();
 
-    // Prominent bulbous rounded head at the end
+    // Delicate translucent petal contour rim
+    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.40})`;
+    ctx.lineWidth = Math.max(0.6, size * 0.04);
+    ctx.stroke();
+
+    // Subtle translucent inner petal vein
     ctx.beginPath();
-    ctx.arc(tipX, tipY, bulbRadius, 0, Math.PI * 2);
+    ctx.moveTo(0, petalLen * 0.14);
+    ctx.lineTo(0, petalLen * 0.66);
+    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.30})`;
+    ctx.lineWidth = Math.max(0.5, size * 0.03);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Golden / warm stamen pollen points encircling the core
+  const stamenCount = petalCount;
+  const stamenDist = size * 0.26;
+  const stamenRad = Math.max(0.7, size * 0.075);
+  ctx.fillStyle = `rgba(255, 238, 185, ${Math.min(1.0, alpha * 0.92)})`;
+  for (let s = 0; s < stamenCount; s++) {
+    const sa = (s * Math.PI * 2) / stamenCount + (Math.PI / stamenCount);
+    ctx.beginPath();
+    ctx.arc(Math.cos(sa) * stamenDist, Math.sin(sa) * stamenDist, stamenRad, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Luminous white core
-  const coreRad = Math.max(1.2, size * 0.30);
-  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.95)})`;
+  // Luminous white starlight core
+  const coreRad = Math.max(1.1, size * 0.18);
+  const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreRad * 1.8);
+  coreGrad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.98)})`);
+  coreGrad.addColorStop(0.5, `rgba(255, 248, 225, ${alpha * 0.72})`);
+  coreGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = coreGrad;
   ctx.beginPath();
-  ctx.arc(0, 0, coreRad, 0, Math.PI * 2);
+  ctx.arc(0, 0, coreRad * 1.8, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -2383,19 +2427,26 @@ function drawAirDiamondStar(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapePa
   ctx.translate(x, y);
   ctx.rotate(rot);
 
-  const haloRad = size * 1.7 * bloom;
+  // Soft celestial aura
+  const haloRad = size * 1.8 * bloom;
   const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
-  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.48})`);
-  halo.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, ${alpha * 0.16})`);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.50})`);
+  halo.addColorStop(0.40, `rgba(${r}, ${g}, ${b}, ${alpha * 0.18})`);
   halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.fillStyle = halo;
   ctx.beginPath();
   ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
   ctx.fill();
 
-  const rayLen = size * (1.3 + shapeParam * 0.5);
-  const rayWidth = Math.max(0.7, size * (0.16 + shapeParam * 0.18));
-  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.92)})`;
+  const rayLen = size * (1.35 + shapeParam * 0.45);
+  const rayWidth = Math.max(0.8, size * (0.16 + shapeParam * 0.14));
+
+  // Diamond ray fill with luminous gradient
+  const starGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, rayLen);
+  starGrad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.98)})`);
+  starGrad.addColorStop(0.40, `rgba(255, 255, 255, ${alpha * 0.85})`);
+  starGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${alpha * 0.20})`);
+  ctx.fillStyle = starGrad;
 
   // Vertical ray
   ctx.beginPath();
@@ -2417,7 +2468,8 @@ function drawAirDiamondStar(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapePa
   ctx.closePath();
   ctx.fill();
 
-  const centerRad = Math.max(1.0, size * 0.26);
+  // Pure white crystal core
+  const centerRad = Math.max(1.1, size * 0.24);
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.arc(0, 0, centerRad, 0, Math.PI * 2);
@@ -2426,140 +2478,92 @@ function drawAirDiamondStar(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapePa
   ctx.restore();
 }
 
-function drawAirPrismRing(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+function drawAirCelestialSparkle(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
 
-  const ringRad = Math.max(2.5, size * (0.8 + shapeParam * 0.3));
-  const haloRad = ringRad * 1.8 * bloom;
-
-  // Ambient halo
+  // Ethereal starlight aura
+  const haloRad = size * 1.9 * bloom;
   const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
-  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.35})`);
-  halo.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.12})`);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.52})`);
+  halo.addColorStop(0.35, `rgba(${r}, ${g}, ${b}, ${alpha * 0.20})`);
   halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.fillStyle = halo;
   ctx.beginPath();
   ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
   ctx.fill();
 
-  // Glowing ring stroke
-  ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.75})`;
-  ctx.lineWidth = Math.max(1.0, size * 0.18);
-  ctx.beginPath();
-  ctx.arc(0, 0, ringRad, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Refractive jewel nodes on the ring perimeter
-  const nodeCount = shapeParam > 0.5 ? 6 : 4;
-  const nodeRad = Math.max(1.0, size * 0.20);
+  // Primary 4 cardinal rays
+  const mainLen = size * (1.4 + shapeParam * 0.5);
+  const mainWidth = Math.max(0.7, size * 0.15);
   ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.95)})`;
-  for (let k = 0; k < nodeCount; k++) {
-    const na = (k * Math.PI * 2) / nodeCount;
-    ctx.beginPath();
-    ctx.arc(Math.cos(na) * ringRad, Math.sin(na) * ringRad, nodeRad, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
-  // Soft center glimmer
-  ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.50})`;
+  // Vertical
   ctx.beginPath();
-  ctx.arc(0, 0, Math.max(0.8, size * 0.20), 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore();
-}
-
-function drawAirBulbousSpore(ctx, x, y, size, angle, r, g, b, alpha, bloom, shapeParam) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-
-  const span = size * (1.1 + shapeParam * 0.4);
-  const endBulb = Math.max(1.6, size * (0.36 + shapeParam * 0.22)); // prominent thick bulbous ends
-  const waist = Math.max(0.8, size * 0.16);
-
-  // Soft halo around spore
-  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, span * 1.5 * bloom);
-  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.42})`);
-  halo.addColorStop(0.6, `rgba(${r}, ${g}, ${b}, ${alpha * 0.12})`);
-  halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(0, 0, span * 1.5 * bloom, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Waist connector
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.70})`;
-  ctx.beginPath();
-  ctx.moveTo(-span * 0.5, -waist);
-  ctx.lineTo(span * 0.5, -waist);
-  ctx.lineTo(span * 0.5, waist);
-  ctx.lineTo(-span * 0.5, waist);
+  ctx.moveTo(0, -mainLen);
+  ctx.quadraticCurveTo(0, 0, mainWidth, 0);
+  ctx.quadraticCurveTo(0, 0, 0, mainLen);
+  ctx.quadraticCurveTo(0, 0, -mainWidth, 0);
   ctx.closePath();
   ctx.fill();
 
-  // Two prominent bulbous ends
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.85})`;
+  // Horizontal
   ctx.beginPath();
-  ctx.arc(-span * 0.5, 0, endBulb, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(span * 0.5, 0, endBulb, 0, Math.PI * 2);
+  ctx.moveTo(-mainLen, 0);
+  ctx.quadraticCurveTo(0, 0, 0, mainWidth);
+  ctx.quadraticCurveTo(0, 0, mainLen, 0);
+  ctx.quadraticCurveTo(0, 0, 0, -mainWidth);
+  ctx.closePath();
   ctx.fill();
 
-  // White gleaming highlights inside bulb ends
-  ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.90})`;
+  // 4 diagonal secondary micro-rays (38% length)
+  const diagLen = mainLen * 0.40;
+  const diagWidth = Math.max(0.5, mainWidth * 0.65);
+  ctx.save();
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.72})`;
+
   ctx.beginPath();
-  ctx.arc(-span * 0.5, 0, endBulb * 0.45, 0, Math.PI * 2);
+  ctx.moveTo(0, -diagLen);
+  ctx.quadraticCurveTo(0, 0, diagWidth, 0);
+  ctx.quadraticCurveTo(0, 0, 0, diagLen);
+  ctx.quadraticCurveTo(0, 0, -diagWidth, 0);
+  ctx.closePath();
   ctx.fill();
+
   ctx.beginPath();
-  ctx.arc(span * 0.5, 0, endBulb * 0.45, 0, Math.PI * 2);
+  ctx.moveTo(-diagLen, 0);
+  ctx.quadraticCurveTo(0, 0, 0, diagWidth);
+  ctx.quadraticCurveTo(0, 0, diagLen, 0);
+  ctx.quadraticCurveTo(0, 0, 0, -diagWidth);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+
+  // Diamond center glint
+  const coreRad = Math.max(1.2, size * 0.22);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0, 0, coreRad, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
 }
 
+// Aliases for legacy/backward compatibility:
+function drawAirBulbousCross(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  drawAirEtherealFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam);
+}
+function drawAirPrismRing(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  drawAirCelestialSparkle(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam);
+}
+function drawAirBulbousSpore(ctx, x, y, size, angle, r, g, b, alpha, bloom, shapeParam) {
+  drawAirDiamondStar(ctx, x, y, size, angle, r, g, b, alpha, bloom, shapeParam);
+}
 function drawAirNebulaCloud(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rot);
-
-  const radA = size * (1.1 + shapeParam * 0.4) * bloom;
-  const radB = size * (0.75 + shapeParam * 0.3) * bloom;
-  const offset = size * 0.45;
-
-  // Main puff
-  const gradA = ctx.createRadialGradient(-offset * 0.5, 0, 0, -offset * 0.5, 0, radA);
-  gradA.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.45})`);
-  gradA.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.20})`);
-  gradA.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-  ctx.fillStyle = gradA;
-  ctx.beginPath();
-  ctx.arc(-offset * 0.5, 0, radA, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Companion puff
-  const gradB = ctx.createRadialGradient(offset * 0.6, -offset * 0.3, 0, offset * 0.6, -offset * 0.3, radB);
-  gradB.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.38})`);
-  gradB.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, ${alpha * 0.16})`);
-  gradB.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-  ctx.fillStyle = gradB;
-  ctx.beginPath();
-  ctx.arc(offset * 0.6, -offset * 0.3, radB, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Glowing condensation nucleus
-  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.35);
-  core.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.60})`);
-  core.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-  ctx.fillStyle = core;
-  ctx.beginPath();
-  ctx.arc(0, 0, size * 0.35, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore();
+  drawAirBokehOrb(ctx, x, y, size, r, g, b, alpha, bloom);
 }
 
 class AirParticlePipeline {
@@ -2689,36 +2693,26 @@ class AirParticlePipeline {
       let meanSize = 8;
       let reactivity = 1.0;
 
-      if (hashVal < 0.20) {
-        shapeType = 0; // Hazy Bokeh Bloom Orb: large, dreamy, out-of-focus
-        meanSize = 22.0;
-        rawSize = 14 + dustHash(i, 3) * 16;
-        reactivity = 0.35 + dustHash(i, 17) * 0.30;
-      } else if (hashVal < 0.42) {
-        shapeType = 1; // Bulbous Cross / Clover Petals with thick rounded ends
+      if (hashVal < 0.32) {
+        shapeType = 0; // Ethereal Stardust Mote
+        meanSize = 6.5;
+        rawSize = 4.0 + dustHash(i, 3) * 5.0;
+        reactivity = 0.40 + dustHash(i, 17) * 0.30;
+      } else if (hashVal < 0.60) {
+        shapeType = 2; // Diamond Crystal Sparkle Star
         meanSize = 9.5;
         rawSize = 6.0 + dustHash(i, 3) * 7.5;
-        reactivity = 0.65 + dustHash(i, 17) * 0.55;
-      } else if (hashVal < 0.62) {
-        shapeType = 2; // Diamond Crystal Sparkle: crisp starlight glint
-        meanSize = 9.0;
-        rawSize = 5.5 + dustHash(i, 3) * 7.5;
-        reactivity = 0.80 + dustHash(i, 17) * 0.70;
-      } else if (hashVal < 0.78) {
-        shapeType = 3; // Luminous Prism Ring with jewel nodes
+        reactivity = 0.80 + dustHash(i, 17) * 0.65;
+      } else if (hashVal < 0.82) {
+        shapeType = 3; // 8-Point Celestial Cross Star
         meanSize = 10.5;
         rawSize = 6.5 + dustHash(i, 3) * 8.0;
-        reactivity = 0.55 + dustHash(i, 17) * 0.50;
-      } else if (hashVal < 0.90) {
-        shapeType = 4; // Bulbous Spore / Dumbbell with thick rounded ends
-        meanSize = 6.7;
-        rawSize = 4.0 + dustHash(i, 3) * 5.5;
-        reactivity = 0.90 + dustHash(i, 17) * 0.70;
+        reactivity = 0.75 + dustHash(i, 17) * 0.60;
       } else {
-        shapeType = 5; // Soft Dual Nebula Dust Cloud
-        meanSize = 18.0;
-        rawSize = 11 + dustHash(i, 3) * 14;
-        reactivity = 0.30 + dustHash(i, 17) * 0.30;
+        shapeType = 1; // Ethereal Floral Blossom
+        meanSize = 12.5;
+        rawSize = 8.5 + dustHash(i, 3) * 8.0;
+        reactivity = 0.60 + dustHash(i, 17) * 0.50;
       }
 
       const shapeParam = dustHash(i, 18);
@@ -2797,36 +2791,26 @@ class AirParticlePipeline {
     const hashVal = Math.random();
     let rawSize = 8;
     let meanSize = 8;
-    if (hashVal < 0.20) {
-      p.shapeType[i] = 0; // Hazy Bokeh Bloom Orb
-      meanSize = 22.0;
-      rawSize = 14 + Math.random() * 16;
-      p.reactivity[i] = 0.35 + Math.random() * 0.30;
-    } else if (hashVal < 0.42) {
-      p.shapeType[i] = 1; // Bulbous Cross / Clover Petals
+    if (hashVal < 0.32) {
+      p.shapeType[i] = 0; // Ethereal Stardust Mote
+      meanSize = 6.5;
+      rawSize = 4.0 + Math.random() * 5.0;
+      p.reactivity[i] = 0.40 + Math.random() * 0.30;
+    } else if (hashVal < 0.60) {
+      p.shapeType[i] = 2; // Diamond Crystal Sparkle Star
       meanSize = 9.5;
       rawSize = 6.0 + Math.random() * 7.5;
-      p.reactivity[i] = 0.65 + Math.random() * 0.55;
-    } else if (hashVal < 0.62) {
-      p.shapeType[i] = 2; // Diamond Crystal Sparkle
-      meanSize = 9.0;
-      rawSize = 5.5 + Math.random() * 7.5;
-      p.reactivity[i] = 0.80 + Math.random() * 0.70;
-    } else if (hashVal < 0.78) {
-      p.shapeType[i] = 3; // Luminous Prism Ring
+      p.reactivity[i] = 0.80 + Math.random() * 0.65;
+    } else if (hashVal < 0.82) {
+      p.shapeType[i] = 3; // 8-Point Celestial Cross Star
       meanSize = 10.5;
       rawSize = 6.5 + Math.random() * 8.0;
-      p.reactivity[i] = 0.55 + Math.random() * 0.50;
-    } else if (hashVal < 0.90) {
-      p.shapeType[i] = 4; // Bulbous Spore / Dumbbell
-      meanSize = 6.7;
-      rawSize = 4.0 + Math.random() * 5.5;
-      p.reactivity[i] = 0.90 + Math.random() * 0.70;
+      p.reactivity[i] = 0.75 + Math.random() * 0.60;
     } else {
-      p.shapeType[i] = 5; // Soft Dual Nebula Dust Cloud
-      meanSize = 18.0;
-      rawSize = 11 + Math.random() * 14;
-      p.reactivity[i] = 0.30 + Math.random() * 0.30;
+      p.shapeType[i] = 1; // Ethereal Floral Blossom
+      meanSize = 12.5;
+      rawSize = 8.5 + Math.random() * 8.0;
+      p.reactivity[i] = 0.60 + Math.random() * 0.50;
     }
 
     p.rawSize[i] = rawSize;
@@ -3082,16 +3066,13 @@ class AirParticlePipeline {
       if (shape === 0) {
         drawAirBokehOrb(ctx, p.x[i], p.y[i], size, r, g, b, alpha, bloom);
       } else if (shape === 1) {
-        drawAirBulbousCross(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+        drawAirEtherealFlower(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       } else if (shape === 2) {
         drawAirDiamondStar(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       } else if (shape === 3) {
-        drawAirPrismRing(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
-      } else if (shape === 4) {
-        const driftAngle = Math.atan2(effVy, effVx);
-        drawAirBulbousSpore(ctx, p.x[i], p.y[i], size, driftAngle, r, g, b, alpha, bloom, param);
+        drawAirCelestialSparkle(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       } else {
-        drawAirNebulaCloud(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+        drawAirDiamondStar(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       }
     }
 
