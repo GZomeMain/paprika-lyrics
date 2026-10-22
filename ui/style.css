@@ -4226,9 +4226,10 @@ body.is-fullscreen .float-art-wrap {
   aspect-ratio: auto;
 }
 
+/* Fix jitter: keep dimensions stable so text, buttons & pill never twitch or move */
 body.is-fullscreen .float-art-wrap:hover {
-  width: 300px;
-  height: 300px;
+  width: 96px;
+  height: 96px;
 }
 
 body.is-fullscreen .track-float #title {
@@ -4255,8 +4256,8 @@ body.is-fullscreen #lyrics-container {
    is already its full size and does not move anything but itself, so the lyrics
    stay where they are. */
 body.is-fullscreen.art-hover #lyrics-container {
-  padding-top: 380px;
-  transition: padding-top var(--dur-4) var(--ease-fluid);
+  /* Prevent layout jump on hover */
+  transition: none;
 }
 
 body.layout-compact #lyrics-container,
@@ -5423,4 +5424,555 @@ body.mini #lyrics-container {
 
 .profile-create-btn {
   white-space: nowrap;
+}
+
+/* =========================================================
+   Revamped Quick Controls & Source Sidebar
+   Physics-based Spring Animations, Apple/Glassmorphism UI
+   ========================================================= */
+
+.app-sidebar.latency-rail {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translate3d(calc(100% + 16px), -50%, 0);
+  z-index: 100;
+  width: 284px;
+  max-width: calc(100vw - 24px);
+  max-height: 94vh;
+  margin: 0;
+  padding: 0;
+  border-radius: 20px 0 0 20px;
+  background: rgba(18, 18, 22, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-right: none;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.6), inset 1px 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  user-select: none;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+  /* Physics-based smooth springy exit (quicker than now) */
+  transition: transform 0.16s cubic-bezier(0.36, 0, 0.66, -0.2), opacity 0.14s ease-out;
+}
+
+body.latency-rail-hot .app-sidebar.latency-rail,
+.app-sidebar.latency-rail:hover,
+.app-sidebar.latency-rail.pinned {
+  transform: translate3d(0, -50%, 0);
+  opacity: 1;
+  pointer-events: auto;
+  /* Physics-based smooth spring entry */
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.15), opacity 0.18s ease-out;
+}
+
+.sidebar-inner.latency-rail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 14px 16px;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  max-height: 94vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-inner::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-inner::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sidebar-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4081;
+  box-shadow: 0 0 8px #ff4081;
+}
+
+.sidebar-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-tool-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  transform: scale(1.06);
+}
+
+.sidebar-tool-btn.active {
+  background: rgba(255, 183, 3, 0.25);
+  border-color: rgba(255, 183, 3, 0.5);
+  color: #ffb703;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 9px 11px;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sidebar-badge-action {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.sidebar-badge-action:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.sidebar-badge-action.active {
+  background: rgba(29, 185, 84, 0.22);
+  border-color: rgba(29, 185, 84, 0.45);
+  color: #1db954;
+}
+
+.sidebar-source-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sidebar-source-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-source-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-source-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-source-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-source-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-lock-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #ffb703;
+  background: rgba(255, 183, 3, 0.18);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.sidebar-source-track {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-lock-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.sidebar-lock-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.sidebar-lock-btn.active {
+  background: rgba(255, 183, 3, 0.22);
+  border-color: rgba(255, 183, 3, 0.45);
+}
+
+.sidebar-multi-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-sub-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.sidebar-source-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sidebar-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-source-chip:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.sidebar-profiles-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.sidebar-profile-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.sidebar-profile-chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.sidebar-profile-chip.active {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.sidebar-profile-chip .sb-chip-del {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  line-height: 1;
+  margin-left: 2px;
+  transition: color 0.15s ease;
+}
+
+.sidebar-profile-chip .sb-chip-del:hover {
+  color: #ff6b6b;
+}
+
+.sidebar-inline-add {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.sidebar-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.sidebar-input:focus {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.sidebar-btn-confirm {
+  background: #1db954;
+  border: none;
+  border-radius: 6px;
+  color: #000;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.sidebar-transport-section {
+  padding: 6px 11px;
+}
+
+.sidebar-transport-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.sidebar-media-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s cubic-bezier(0.2, 0.9, 0.35, 1);
+}
+
+.sidebar-media-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  transform: scale(1.08);
+}
+
+.sidebar-media-btn:active {
+  transform: scale(0.94);
+}
+
+.sidebar-play-btn {
+  width: 38px;
+  height: 38px;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.sidebar-play-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.sidebar-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-sync-val {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sidebar-step-btn.latency-rail-btn {
+  font-size: 10px;
+  font-weight: 700;
+  width: 32px;
+  height: 22px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.sidebar-step-btn.latency-rail-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.sidebar-sync-slider.latency-slider {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  position: relative;
+  cursor: pointer;
+}
+
+.sidebar-sync-slider .latency-slider-track {
+  display: none;
+}
+
+.sidebar-sync-slider .latency-slider-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: #1db954;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.sidebar-sync-slider .latency-slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.sidebar-toggles-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.sidebar-toggle-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-toggle-chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.sidebar-toggle-chip.active {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.sb-chip-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.sb-chip-text {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }

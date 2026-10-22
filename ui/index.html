@@ -187,7 +187,7 @@
       </div>
       <div class="track-text">
         <!-- Source & Profile interactive pill -->
-        <div class="source-pill" id="source-pill" onclick="toggleQuickProfileMenu(event)" title="Active Music Player & Profile (Click to switch)" data-no-drag>
+        <div class="source-pill" id="source-pill" onclick="window.revealSidebar()" title="Active Music Player & Profile (Click to open Sidebar)" data-no-drag>
           <span class="source-pill-dot"></span>
           <span class="source-pill-icon" id="source-pill-icon"></span>
           <span class="source-pill-source" id="source-pill-source">Media Player</span>
@@ -333,7 +333,7 @@
         </div>
         <div class="side-title" id="side-title"></div>
         <div class="side-artist" id="side-artist"></div>
-        <div class="source-pill side-source-pill" id="side-source-pill" onclick="toggleQuickProfileMenu(event)" title="Active Music Player & Profile (Click to switch)" data-no-drag>
+        <div class="source-pill side-source-pill" id="side-source-pill" onclick="window.revealSidebar()" title="Active Music Player & Profile (Click to open Sidebar)" data-no-drag>
           <span class="source-pill-dot"></span>
           <span class="source-pill-icon" id="side-source-pill-icon"></span>
           <span class="source-pill-source" id="side-source-pill-source">Media Player</span>
@@ -347,25 +347,139 @@
       </div>
     </aside>
 
-    <!-- Latency rail: hidden at the right edge, slides in on approach.
-         A vertical sync slider with small +/- steppers. -->
-    <div class="latency-rail" id="latency-rail" aria-label="Sync latency" data-no-drag>
-      <div class="latency-rail-inner">
-        <span class="latency-rail-label">Sync</span>
-        <button class="latency-rail-btn" id="latency-rail-minus" title="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50 milliseconds">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M7 12h10"/></svg>
-        </button>
-        <div class="latency-slider" id="latency-slider" title="Drag to adjust sync" data-no-drag>
-          <div class="latency-slider-track"></div>
-          <div class="latency-slider-fill" id="latency-slider-fill"></div>
-          <div class="latency-slider-thumb" id="latency-slider-thumb"></div>
+    <!-- Revamped Quick Controls & Source Sidebar (Right Edge, Physics-based Spring Slide-in) -->
+    <aside class="app-sidebar latency-rail" id="latency-rail" aria-label="Quick Controls Sidebar" data-no-drag>
+      <div class="sidebar-inner latency-rail-inner">
+        <!-- Sidebar Header -->
+        <div class="sidebar-header">
+          <div class="sidebar-title-wrap">
+            <span class="sidebar-badge-dot"></span>
+            <span class="sidebar-title">Paprika Hub</span>
+          </div>
+          <div class="sidebar-header-actions">
+            <button class="sidebar-tool-btn" onclick="openProfilesSettings()" title="Open Settings (Ctrl+,)">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+            <button class="sidebar-tool-btn" id="sidebar-btn-pin" onclick="toggleSidebarPin()" title="Pin Sidebar Open">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 17v5M5 12V7a5 5 0 0 1 10 0v5l2 2H3l2-2z"/>
+              </svg>
+            </button>
+            <button class="sidebar-tool-btn" onclick="concealSidebar()" title="Close Sidebar">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
         </div>
-        <button class="latency-rail-btn" id="latency-rail-plus" title="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50 milliseconds">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 7v10M7 12h10"/></svg>
-        </button>
-        <span class="latency-rail-value" id="latency-rail-value">+600ms</span>
+
+        <!-- Section: Active Media Player & Source Control -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-header">
+            <span class="sidebar-section-label">Media Source</span>
+            <button class="sidebar-badge-action" id="sidebar-btn-auto-follow" onclick="unlockSource(event)" title="Auto-follow active player">
+              <span class="qp-auto-dot" id="sidebar-auto-dot"></span> Auto
+            </button>
+          </div>
+
+          <div class="sidebar-source-card" id="sidebar-current-source">
+            <div class="sidebar-source-left">
+              <span class="sidebar-source-icon" id="sidebar-source-icon"></span>
+              <div class="sidebar-source-meta">
+                <div class="sidebar-source-name-row">
+                  <span class="sidebar-source-name" id="sidebar-source-name">Media Player</span>
+                  <span class="sidebar-lock-badge" id="sidebar-source-lock-badge" hidden>🔒 Locked</span>
+                </div>
+                <span class="sidebar-source-track" id="sidebar-source-track">Waiting for track...</span>
+              </div>
+            </div>
+            <button class="sidebar-lock-btn" id="sidebar-lock-btn" onclick="toggleCurrentSourceLock(event)" title="Lock playback to this player">
+              <span id="sidebar-lock-icon">🔒</span>
+            </button>
+          </div>
+
+          <!-- Multi-source selector if multiple players active -->
+          <div class="sidebar-multi-sources" id="sidebar-multi-sources" hidden>
+            <span class="sidebar-sub-label">Other Players:</span>
+            <div class="sidebar-source-pills" id="sidebar-other-sources-list"></div>
+          </div>
+        </div>
+
+        <!-- Section: Active Profile Switcher & Quick Add/Delete -->
+        <div class="sidebar-section">
+          <div class="sidebar-section-header">
+            <span class="sidebar-section-label">Profile</span>
+            <button class="sidebar-badge-action" onclick="toggleSidebarAddProfile(event)" title="Create new profile">+ New</button>
+          </div>
+
+          <!-- Inline profile creation row -->
+          <div class="sidebar-inline-add" id="sidebar-inline-add" hidden>
+            <input type="text" id="sidebar-new-profile-input" class="sidebar-input" placeholder="Profile name..." maxlength="24" onkeydown="onSidebarAddKeyDown(event)">
+            <button class="sidebar-btn-confirm" onclick="submitSidebarAddProfile(event)">Add</button>
+          </div>
+
+          <div class="sidebar-profiles-grid" id="sidebar-profiles-list"></div>
+        </div>
+
+        <!-- Section: Playback Controls (Play/Pause, Skip) -->
+        <div class="sidebar-section sidebar-transport-section">
+          <div class="sidebar-transport-row">
+            <button class="sidebar-media-btn" onclick="skipPrevious()" title="Previous Track">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+            </button>
+            <button class="sidebar-media-btn sidebar-play-btn" id="sidebar-btn-play" onclick="togglePlayback()" title="Play / Pause">
+              <svg class="sidebar-play-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="sidebar-media-btn" onclick="skipNext()" title="Next Track">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Section: Audio Sync / Latency (Elevated Rail) -->
+        <div class="sidebar-section sidebar-sync-section">
+          <div class="sidebar-section-header">
+            <span class="sidebar-section-label">Audio Sync</span>
+            <span class="sidebar-sync-val" id="latency-rail-value">+0ms</span>
+          </div>
+          <div class="sidebar-sync-row">
+            <button class="sidebar-step-btn latency-rail-btn" id="latency-rail-minus" title="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50ms">-50</button>
+            <div class="sidebar-sync-slider latency-slider" id="latency-slider" title="Drag to adjust sync" data-no-drag>
+              <div class="latency-slider-track"></div>
+              <div class="latency-slider-fill" id="latency-slider-fill"></div>
+              <div class="latency-slider-thumb" id="latency-slider-thumb"></div>
+            </div>
+            <button class="sidebar-step-btn latency-rail-btn" id="latency-rail-plus" title="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50ms">+50</button>
+          </div>
+        </div>
+
+        <!-- Section: Quick Toggles (Translations, Layout, Top, Fullscreen) -->
+        <div class="sidebar-section sidebar-toggles-section">
+          <div class="sidebar-toggles-grid">
+            <button class="sidebar-toggle-chip" id="sb-toggle-trans" onclick="toggleTranslations()" title="Toggle Pronunciation / Romaji (T)">
+              <span class="sb-chip-icon">文</span>
+              <span class="sb-chip-text" id="sb-trans-state">Romaji</span>
+            </button>
+            <button class="sidebar-toggle-chip" id="sb-toggle-layout" onclick="cycleLayout()" title="Toggle Compact / Split layout">
+              <span class="sb-chip-icon">⚏</span>
+              <span class="sb-chip-text" id="sb-layout-state">Compact</span>
+            </button>
+            <button class="sidebar-toggle-chip" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop()" title="Toggle Always On Top">
+              <span class="sb-chip-icon">📌</span>
+              <span class="sb-chip-text" id="sb-ontop-state">Top</span>
+            </button>
+            <button class="sidebar-toggle-chip" id="sb-toggle-fs" onclick="toggleFullscreen()" title="Toggle Fullscreen (F11)">
+              <span class="sb-chip-icon">⛶</span>
+              <span class="sb-chip-text" id="sb-fs-state">Full</span>
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </aside>
 
     <!-- Settings: a full-window sheet rather than a dropdown. Every option gets
          a section, a real label and room to explain itself, which a 236px

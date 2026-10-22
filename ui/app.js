@@ -4767,21 +4767,13 @@ window.setCoverArt = function(url, isHiRes) {
   }
 };
 
-// ---------- Latency rail: hidden at the right edge, slides in on approach ----------
+// ---------- Revamped Quick Controls & Source Sidebar ----------
 function initLatencyRail() {
   const rail = document.getElementById('latency-rail');
   if (!rail) return;
   const card = rail.querySelector('.latency-rail-inner');
-  // The trigger is the rail's own footprint, not the whole right edge: a bare
-  // band down the side fired the rail whenever the mouse crossed the window,
-  // which is most of the time. The card is vertically centred and only moves on
-  // the X axis, so its height and centre are readable while it is still parked
-  // off-screen.
-  const REVEAL_PAD_X = 14, REVEAL_PAD_Y = 18;
-  // The trigger rect is cached: reading it on every mousemove forced a layout
-  // over the blur layers roughly a hundred times a second. The card is parked
-  // off-screen and vertically centred while hidden, so it only changes on a
-  // resize (or after the slide transition settles).
+  const REVEAL_PAD_X = 32, REVEAL_PAD_Y = 32;
+
   let zoneCache = null;
   const triggerZone = () => {
     if (zoneCache) return zoneCache;
@@ -4799,30 +4791,56 @@ function initLatencyRail() {
   rail.addEventListener('transitionend', () => { zoneCache = null; });
 
   let hideTimer = null;
+  window.sidebarPinned = false;
+
   const reveal = () => {
     clearTimeout(hideTimer);
     document.body.classList.add('latency-rail-hot');
+    if (window.ProfileManager && typeof window.ProfileManager.renderSidebar === 'function') {
+      window.ProfileManager.renderSidebar();
+    }
   };
   const conceal = () => {
+    if (window.sidebarPinned) return;
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => document.body.classList.remove('latency-rail-hot'), 350);
+    // Smooth, snappy physics-based exit delay (110ms) quicker than before
+    hideTimer = setTimeout(() => document.body.classList.remove('latency-rail-hot'), 110);
   };
   const pointerInZone = (e) => {
     const z = triggerZone();
-    return !!z && e.clientX >= z.left && e.clientY >= z.top && e.clientY <= z.bottom;
+    return (!!z && e.clientX >= z.left && e.clientY >= z.top && e.clientY <= z.bottom) || e.clientX >= window.innerWidth - 18;
   };
+
   window.addEventListener('mousemove', (e) => {
-    // Once the rail is out, hovering it keeps it out even if the pointer wanders
-    // off the zone, so a slider drag cannot pull the rail away mid-gesture.
     if (pointerInZone(e) || rail.matches(':hover')) reveal();
     else conceal();
   }, { passive: true });
   rail.addEventListener('mouseenter', reveal);
   rail.addEventListener('mouseleave', conceal);
 
+  window.revealSidebar = reveal;
+  window.concealSidebar = () => {
+    window.sidebarPinned = false;
+    rail.classList.remove('pinned');
+    const btn = document.getElementById('sidebar-btn-pin');
+    if (btn) btn.classList.remove('active');
+    document.body.classList.remove('latency-rail-hot');
+  };
+  window.toggleSidebarPin = () => {
+    window.sidebarPinned = !window.sidebarPinned;
+    rail.classList.toggle('pinned', window.sidebarPinned);
+    const btn = document.getElementById('sidebar-btn-pin');
+    if (btn) btn.classList.toggle('active', window.sidebarPinned);
+    if (window.sidebarPinned) {
+      reveal();
+      if (window.showProfileToast) window.showProfileToast('Sidebar pinned open');
+    } else {
+      if (window.showProfileToast) window.showProfileToast('Sidebar unpinned');
+    }
+  };
+
   const minus = document.getElementById('latency-rail-minus');
   const plus = document.getElementById('latency-rail-plus');
-  // Hold-to-repeat for fast nudging.
   const bindHold = (el, delta) => {
     if (!el) return;
     let repeat = null;
@@ -4839,33 +4857,29 @@ function initLatencyRail() {
   bindHold(minus, -50);
   bindHold(plus, 50);
 
-  // ---- Vertical sync slider (−3000..+3000 ms, zero at the middle) ----
+  // ---- Horizontal sync slider (−3000..+3000 ms, zero at the middle) ----
   const slider = document.getElementById('latency-slider');
   if (!slider) return;
   const LAT_MIN = -3000, LAT_MAX = 3000;
 
-  // Render the current latencyOffsetMs as thumb + fill. The fill always
-  // starts at the zero mark and extends toward the thumb, so the middle of
-  // the track reads as "in sync".
   window.renderLatencySlider = function() {
-    const h = slider.clientHeight;
-    if (!h) return;
-    const frac = (latencyOffsetMs - LAT_MIN) / (LAT_MAX - LAT_MIN); // 0..1, bottom→top
-    const thumbY = (1 - frac) * h;
-    const zeroY = h / 2;
-    const top = Math.min(thumbY, zeroY);
-    const height = Math.max(2, Math.abs(zeroY - thumbY));
+    const w = slider.clientWidth;
+    if (!w) return;
+    const frac = Math.max(0, Math.min(1, (latencyOffsetMs - LAT_MIN) / (LAT_MAX - LAT_MIN))); // 0..1, left→right
+    const thumbX = frac * w;
+    const zeroX = w / 2;
+    const left = Math.min(thumbX, zeroX);
+    const width = Math.max(2, Math.abs(zeroX - thumbX));
     const fill = document.getElementById('latency-slider-fill');
     const thumb = document.getElementById('latency-slider-thumb');
-    if (fill) { fill.style.top = top + 'px'; fill.style.height = height + 'px'; }
-    if (thumb) thumb.style.top = thumbY + 'px';
+    if (fill) { fill.style.left = left + 'px'; fill.style.width = width + 'px'; }
+    if (thumb) thumb.style.left = thumbX + 'px';
     slider.classList.toggle('zero', Math.abs(latencyOffsetMs) < 25);
   };
 
   const setFromEvent = (e) => {
     const rect = slider.getBoundingClientRect();
-    const frac = 1 - Math.max(0, Math.min(1, (e.clientY - rect.top) / Math.max(1, rect.height)));
-    // Snap to the 50ms grid so drag and the +/- buttons land on the same steps.
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
     const target = Math.round((LAT_MIN + frac * (LAT_MAX - LAT_MIN)) / 50) * 50;
     window.adjustLatency(target - latencyOffsetMs);
   };
@@ -4889,8 +4903,6 @@ function initLatencyRail() {
     window.addEventListener('mouseup', onUp);
   });
 
-  // The slider repaints from updateLatencyUI (called on every latency change);
-  // here only the first paint + resize (height-dependent) are needed.
   window.renderLatencySlider();
   window.addEventListener('resize', () => window.renderLatencySlider());
 }
@@ -7944,6 +7956,142 @@ const ProfileManager = {
     }, 500);
   },
 
+  renderSidebar() {
+    const src = this.currentSource || {
+      id: 'generic',
+      name: 'Media Player',
+      icon: 'generic'
+    };
+    const iconSvg = SOURCE_ICONS[src.icon] || SOURCE_ICONS[src.id] || SOURCE_ICONS.generic;
+    const iconEl = document.getElementById('sidebar-source-icon');
+    const nameEl = document.getElementById('sidebar-source-name');
+    const trackEl = document.getElementById('sidebar-source-track');
+    const lockBadge = document.getElementById('sidebar-source-lock-badge');
+    const lockBtn = document.getElementById('sidebar-lock-btn');
+    const lockIcon = document.getElementById('sidebar-lock-icon');
+    const autoFollowBtn = document.getElementById('sidebar-btn-auto-follow');
+
+    if (iconEl) iconEl.innerHTML = iconSvg;
+    if (nameEl) nameEl.textContent = src.name || 'Media Player';
+    if (trackEl) {
+      trackEl.textContent = (currentTrackMeta && currentTrackMeta.title)
+        ? `${currentTrackMeta.title}${currentTrackMeta.artist ? ' • ' + currentTrackMeta.artist : ''}`
+        : (isPlaying ? 'Playing audio' : 'Waiting for track...');
+    }
+
+    const isLocked = !!this.lockedSourceKey;
+    if (lockBadge) lockBadge.hidden = !isLocked;
+    if (lockBtn) lockBtn.classList.toggle('active', isLocked);
+    if (lockIcon) lockIcon.textContent = isLocked ? '🔒' : '🔓';
+    if (autoFollowBtn) autoFollowBtn.classList.toggle('active', !isLocked);
+
+    // Multi-source switch chips if multiple players detected
+    const multiContainer = document.getElementById('sidebar-multi-sources');
+    const multiList = document.getElementById('sidebar-other-sources-list');
+    if (multiContainer && multiList) {
+      const others = (this.availableSources || []).filter(s => {
+        const sId = (s.source && s.source.id) || s.app_id;
+        return sId !== src.id && s.key !== src.raw_app_id;
+      });
+      if (others.length > 0) {
+        multiContainer.hidden = false;
+        multiList.innerHTML = '';
+        others.forEach(o => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'sidebar-source-chip';
+          const oInfo = o.source || {};
+          const oIcon = SOURCE_ICONS[oInfo.icon] || SOURCE_ICONS[oInfo.id] || SOURCE_ICONS.generic;
+          chip.innerHTML = `<span>${oIcon}</span><span>${oInfo.name || o.app_id}</span>`;
+          chip.onclick = (e) => {
+            e.stopPropagation();
+            this.switchAndLockSource(o.key, oInfo.name || o.app_id);
+          };
+          multiList.appendChild(chip);
+        });
+      } else {
+        multiContainer.hidden = true;
+      }
+    }
+
+    // Profiles Grid in sidebar
+    const profilesList = document.getElementById('sidebar-profiles-list');
+    if (profilesList) {
+      profilesList.innerHTML = '';
+      Object.values(this.profiles).forEach(p => {
+        const chip = document.createElement('div');
+        chip.className = `sidebar-profile-chip ${p.id === this.activeProfileId ? 'active' : ''}`;
+        chip.onclick = (e) => {
+          e.stopPropagation();
+          this.applyProfile(p.id, true);
+        };
+
+        const label = document.createElement('span');
+        label.textContent = p.name;
+        chip.appendChild(label);
+
+        if (!p.isBuiltin) {
+          const del = document.createElement('span');
+          del.className = 'sb-chip-del';
+          del.innerHTML = '&times;';
+          del.title = `Delete "${p.name}"`;
+          del.onclick = (e) => {
+            e.stopPropagation();
+            this.deleteProfile(p.id);
+          };
+          chip.appendChild(del);
+        }
+
+        profilesList.appendChild(chip);
+      });
+    }
+
+    // Transport play button in sidebar
+    const playBtn = document.getElementById('sidebar-btn-play');
+    if (playBtn) {
+      playBtn.innerHTML = isPlaying
+        ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    }
+
+    // Quick Toggles in sidebar
+    const tTrans = document.getElementById('sb-toggle-trans');
+    if (tTrans) {
+      tTrans.classList.toggle('active', !!showSecondary);
+      const s = document.getElementById('sb-trans-state');
+      if (s) s.textContent = showSecondary ? 'Romaji On' : 'Romaji Off';
+    }
+
+    const tLayout = document.getElementById('sb-toggle-layout');
+    if (tLayout) {
+      const isSplit = layoutMode === 'split';
+      tLayout.classList.toggle('active', isSplit);
+      const s = document.getElementById('sb-layout-state');
+      if (s) s.textContent = isSplit ? 'Split' : 'Compact';
+    }
+
+    const tTop = document.getElementById('sb-toggle-ontop');
+    if (tTop) {
+      tTop.classList.toggle('active', !!alwaysOnTop);
+      const s = document.getElementById('sb-ontop-state');
+      if (s) s.textContent = alwaysOnTop ? 'Top On' : 'Top Off';
+    }
+
+    const tFs = document.getElementById('sb-toggle-fs');
+    if (tFs) {
+      tFs.classList.toggle('active', !!isFullscreen);
+      const s = document.getElementById('sb-fs-state');
+      if (s) s.textContent = isFullscreen ? 'FS On' : 'Window';
+    }
+
+    // Latency readout
+    const valEl = document.getElementById('latency-rail-value');
+    if (valEl) {
+      valEl.textContent = `${latencyOffsetMs > 0 ? '+' : ''}${latencyOffsetMs}ms`;
+    }
+    if (window.renderLatencySlider) window.renderLatencySlider();
+  },
+
   renderPills() {
     const active = this.getActiveProfile();
     const src = this.currentSource || {
@@ -8441,3 +8589,52 @@ document.addEventListener('click', (e) => {
     popup.hidden = true;
   }
 });
+
+// Sidebar Bridge Helpers
+window.toggleCurrentSourceLock = function(e) {
+  if (e) e.stopPropagation();
+  if (ProfileManager.lockedSourceKey) {
+    ProfileManager.unlockSource();
+  } else {
+    const cur = ProfileManager.currentSource;
+    const key = (cur && cur.raw_app_id) || (cur && cur.id) || 'media';
+    ProfileManager.switchAndLockSource(key, (cur && cur.name) || 'Current Player');
+  }
+};
+
+window.toggleSidebarAddProfile = function(e) {
+  if (e) e.stopPropagation();
+  const row = document.getElementById('sidebar-inline-add');
+  if (!row) return;
+  row.hidden = !row.hidden;
+  if (!row.hidden) {
+    const input = document.getElementById('sidebar-new-profile-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+  }
+};
+
+window.onSidebarAddKeyDown = function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitSidebarAddProfile(e);
+  } else if (e.key === 'Escape') {
+    const row = document.getElementById('sidebar-inline-add');
+    if (row) row.hidden = true;
+  }
+};
+
+window.submitSidebarAddProfile = function(e) {
+  if (e) e.stopPropagation();
+  const input = document.getElementById('sidebar-new-profile-input');
+  if (!input) return;
+  const val = input.value.trim();
+  if (val) {
+    ProfileManager.createProfile(val);
+    input.value = '';
+    const row = document.getElementById('sidebar-inline-add');
+    if (row) row.hidden = true;
+  }
+};
