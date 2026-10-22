@@ -2453,6 +2453,12 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   transition: all var(--dur-2) var(--ease-fluid);
 }
 
+.sp-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sp-tab:hover {
   color: rgba(255, 255, 255, 0.88);
   background: rgba(255, 255, 255, 0.06);
@@ -2714,6 +2720,7 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
 .qp-val {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -5019,6 +5026,12 @@ body.mini #lyrics-container {
   color: #ffffff;
 }
 
+.sp-action-btn:disabled {
+  opacity: 0.38 !important;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
 .sp-action-primary {
   background: rgba(255, 255, 255, 0.20);
   border-color: rgba(255, 255, 255, 0.30);
@@ -5033,6 +5046,72 @@ body.mini #lyrics-container {
   background: rgba(230, 50, 50, 0.3);
   border-color: rgba(230, 50, 50, 0.5);
   color: #ff6b6b;
+}
+
+/* ---------- Apple / Liquid Glass Toggle Switch ---------- */
+.sp-toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sp-toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+  margin: 0;
+  pointer-events: none;
+}
+
+.sp-toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  transition: background var(--dur-2) var(--ease-fluid), border-color var(--dur-2) var(--ease-fluid), box-shadow var(--dur-2) var(--ease-fluid);
+}
+
+.sp-toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  top: 2px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transition: transform var(--dur-2) var(--ease-spring);
+}
+
+.sp-toggle-switch:hover .sp-toggle-slider {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.sp-toggle-switch input:checked + .sp-toggle-slider {
+  background: #1db954;
+  border-color: rgba(29, 185, 84, 0.6);
+  box-shadow: 0 0 12px rgba(29, 185, 84, 0.35);
+}
+
+.sp-toggle-switch input:checked + .sp-toggle-slider::before {
+  transform: translateX(16px);
+}
+
+.sp-toggle-switch input:focus-visible + .sp-toggle-slider {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .sp-profile-inline-create {
@@ -5082,9 +5161,14 @@ body.mini #lyrics-container {
   position: relative;
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .sp-select {
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  box-sizing: border-box;
   background: rgba(0, 0, 0, 0.40);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -5097,8 +5181,10 @@ body.mini #lyrics-container {
   -webkit-appearance: none;
   outline: none;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: border-color 0.15s ease, background 0.15s ease;
-  min-width: 140px;
 }
 
 .sp-select:focus {
@@ -5215,6 +5301,7 @@ body.mini #lyrics-container {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1;
 }
 
 .source-mapping-icon {
@@ -5718,6 +5805,11 @@ body.latency-rail-hot .app-sidebar.latency-rail,
   background: rgba(29, 185, 84, 0.22);
   border-color: rgba(29, 185, 84, 0.45);
   color: #1db954;
+}
+
+.sidebar-badge-action.active .qp-auto-dot {
+  background: #1db954;
+  box-shadow: 0 0 6px #1db954;
 }
 
 .sidebar-source-card {

@@ -3874,6 +3874,8 @@ function openSettingsTab(id) {
   Settings.set('settingsTab', want);
   if (want === 'profiles' && window.ProfileManager) {
     window.ProfileManager.renderProfilesPanel();
+  } else if (window.toggleSettingsAddProfile) {
+    window.toggleSettingsAddProfile(false);
   }
 }
 
@@ -4098,6 +4100,9 @@ function openSettings(open) {
   panel.classList.toggle('open', open);
   panel.setAttribute('aria-hidden', open ? 'false' : 'true');
   document.body.classList.toggle('settings-open', open);
+  if (!open && window.toggleSettingsAddProfile) {
+    window.toggleSettingsAddProfile(false);
+  }
   // The sheet is exempt from the hover dip, so opening or closing it can change
   // how see-through the window should be right now.
   applyWindowOpacity();
@@ -7645,6 +7650,7 @@ const ProfileManager = {
     }
 
     this.renderPills();
+    this.renderProfilesPanel();
   },
 
   getActiveProfile() {
