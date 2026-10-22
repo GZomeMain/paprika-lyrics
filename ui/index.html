@@ -33,17 +33,22 @@
          the song's colour. It sits at z-index 2, under the card and the lyrics. -->
     <div class="moment-veil" aria-hidden="true"></div>
 
-    <!-- SVG Filter for Dynamic Chromatic Aberration -->
+    <!-- SVG Filter for Dynamic Chromatic Aberration: Clean Optical Color Split with Alpha Masking -->
     <svg style="position: absolute; width: 0; height: 0; pointer-events: none;" aria-hidden="true" focusable="false">
       <defs>
-        <filter id="vfx-chroma" x="-10%" y="-10%" width="120%" height="120%">
-          <feOffset in="SourceGraphic" dx="0" dy="0" result="red" id="chroma-r" />
-          <feOffset in="SourceGraphic" dx="0" dy="0" result="blue" id="chroma-b" />
-          <feColorMatrix in="red" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="red-c" />
-          <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="green-c" />
-          <feColorMatrix in="blue" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blue-c" />
-          <feBlend in="red-c" in2="green-c" mode="screen" result="rg" />
-          <feBlend in="rg" in2="blue-c" mode="screen" />
+        <filter id="vfx-chroma" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+          <feOffset in="SourceGraphic" dx="0" dy="0" result="red-shifted" id="chroma-r" />
+          <feOffset in="SourceGraphic" dx="0" dy="0" result="blue-shifted" id="chroma-b" />
+          <feColorMatrix in="red-shifted" type="matrix"
+            values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="red-c" />
+          <feColorMatrix in="SourceGraphic" type="matrix"
+            values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="green-c" />
+          <feColorMatrix in="blue-shifted" type="matrix"
+            values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blue-c" />
+          <feBlend in="red-c" in2="green-c" mode="screen" result="rg-c" />
+          <feBlend in="rg-c" in2="blue-c" mode="screen" result="full-c" />
+          <!-- Mask strictly with the original image alpha to preserve pristine rounded corners with zero edge roughness -->
+          <feComposite in="full-c" in2="SourceGraphic" operator="in" />
         </filter>
       </defs>
     </svg>

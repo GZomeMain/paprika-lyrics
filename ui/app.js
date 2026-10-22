@@ -1903,24 +1903,34 @@ let chromaAmount = 0;
 let chromaOffsetCache = 0;
 
 function setChromaOffset(px) {
-  const rounded = Math.round(px * 10) / 10;
+  const rounded = Math.round(px * 20) / 20;
   if (rounded === chromaOffsetCache) return;
   chromaOffsetCache = rounded;
 
   const r = document.getElementById('chroma-r');
   const b = document.getElementById('chroma-b');
-  const target = document.getElementById('track-float');
-  if (rounded > 0.15) {
-    if (r) r.setAttribute('dx', (-rounded).toFixed(1));
-    if (b) b.setAttribute('dx', (rounded).toFixed(1));
-    if (target && !target.classList.contains('chroma-active')) {
-      target.classList.add('chroma-active');
+  // Target only the artwork elements (never the ambient light or text behind the art)
+  const targets = [
+    document.getElementById('track-art'),
+    document.getElementById('side-art')
+  ];
+  if (rounded > 0.05) {
+    if (r) r.setAttribute('dx', (-rounded).toFixed(2));
+    if (b) b.setAttribute('dx', (rounded).toFixed(2));
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      if (target && !target.classList.contains('chroma-active')) {
+        target.classList.add('chroma-active');
+      }
     }
   } else {
     if (r) r.setAttribute('dx', '0');
     if (b) b.setAttribute('dx', '0');
-    if (target && target.classList.contains('chroma-active')) {
-      target.classList.remove('chroma-active');
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      if (target && target.classList.contains('chroma-active')) {
+        target.classList.remove('chroma-active');
+      }
     }
   }
 }
@@ -1944,8 +1954,8 @@ function updateBeatSprings(dt) {
   subSpringPos += subSpringVel * clampedDt;
 
   // Smooth exponential decay for chromatic displacement
-  if (chromaAmount > 0.05) {
-    chromaAmount -= chromaAmount * Math.min(1, clampedDt * 14);
+  if (chromaAmount > 0.03) {
+    chromaAmount -= chromaAmount * Math.min(1, clampedDt * 16);
     setChromaOffset(chromaAmount);
   } else if (chromaAmount > 0) {
     chromaAmount = 0;
@@ -1979,8 +1989,9 @@ function triggerBeatTransient(strength, isDrop) {
   beatSpringVel = Math.min(1.8, beatSpringVel + (1.15 * strength * dropMult));
 
   if (sliderChroma > 0) {
-    const chromaScale = (sliderChroma / 100) * 1.5;
-    chromaAmount = Math.min(3.8, (1.2 * strength * dropMult * chromaScale));
+    const chromaScale = (sliderChroma / 100);
+    // Subtle, optical transient lens refraction on the cover art (capped at 1.2px)
+    chromaAmount = Math.min(1.2, 0.85 * strength * dropMult * chromaScale);
     setChromaOffset(chromaAmount);
   }
 
@@ -2130,8 +2141,8 @@ function updateMoment(ms) {
     if (moment.kind === 'drop') {
       if (window.airPipeline && sliderParticles > 0) window.airPipeline.onBeatImpulse(1.8);
       if (sliderChroma > 0 && !reducedMotion) {
-        const chromaScale = (sliderChroma / 100) * 1.5;
-        chromaAmount = Math.min(3.8, chromaAmount + 1.4 * chromaScale);
+        const chromaScale = (sliderChroma / 100);
+        chromaAmount = Math.min(1.2, chromaAmount + 0.60 * chromaScale);
         setChromaOffset(chromaAmount);
       }
     }

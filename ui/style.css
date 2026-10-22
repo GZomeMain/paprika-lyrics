@@ -593,6 +593,12 @@ body.moment-live {
 /* Subtle chromatic aberration channel-split active class */
 .chroma-active {
   filter: url(#vfx-chroma);
+  will-change: filter;
+}
+
+/* Ensure the ambient light behind cover art is always pure, smooth and immune to optical splitting */
+.art-light {
+  filter: none !important;
 }
 
 .dust-field {
