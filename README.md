@@ -13,7 +13,7 @@ A lightweight, frameless Windows overlay powered by native media sessions (GSMTC
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%E2%80%93%203.13-blue.svg)](https://www.python.org/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6.svg)](#requirements)
 
-[**⬇️ Download Latest**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) · [Features](#-features) · [Quick Start](#-quick-start) · [Controls](#️-controls--shortcuts) · [Architecture](#-architecture--under-the-hood-click-to-expand)
+[**⬇️ Download Releases (ZIP / EXE)**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) · [Releases](#-downloads--releases) · [Features](#-features) · [Quick Start](#-quick-start) · [Controls](#️-controls--shortcuts) · [Architecture](#-architecture--under-the-hood-click-to-expand)
 
 <br>
 
@@ -43,12 +43,25 @@ https://github.com/user-attachments/assets/966caaf1-7d9f-40b9-8aa6-39bd481f4a17
 
 ---
 
+## 📦 Downloads & Releases
+
+Prebuilt binaries for 64-bit Windows are published under [**Releases**](https://github.com/GZomeMain/paprika-lyrics/releases/latest). Choose the package format that best suits your setup:
+
+| Package | Format | Details | Download |
+| :--- | :--- | :--- | :--- |
+| **`PaprikaLyrics-windows-x64.zip`** | **Portable Folder Archive**<br>*(Recommended)* | • Fastest startup speed with no temp unpacking<br>• Includes all dependencies in `_internal/`<br>• Keeps `.env`, custom `fonts/`, and `ttml/` organized right beside the app | [**Download ZIP**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) |
+| **`PaprikaLyrics.exe`** | **Single Executable** | • Single standalone executable with zero installation<br>• Fully self-contained—double-click and run<br>• Extracts to temp on launch *(slightly slower first start)* | [**Download EXE**](https://github.com/GZomeMain/paprika-lyrics/releases/latest) |
+
+> **Note on Windows SmartScreen:** Because releases are open-source and unsigned, Windows Defender SmartScreen may display a warning on initial launch (*"Windows protected your PC"*). Click **More info → Run anyway** to proceed.
+
+---
+
 ## 🚀 Quick Start
 
 ### Option A: Prebuilt Binary (Recommended)
-1. Head to [**Releases**](https://github.com/GZomeMain/paprika-lyrics/releases/latest).
-2. Download `PaprikaLyrics-windows-x64.zip` (or the standalone `PaprikaLyrics.exe`).
-3. Extract and launch `PaprikaLyrics.exe`. Play music anywhere on your PC!
+1. Grab `PaprikaLyrics-windows-x64.zip` (or the standalone `PaprikaLyrics.exe`) from [**Releases**](https://github.com/GZomeMain/paprika-lyrics/releases/latest).
+2. Unpack the zip into a folder of your choice (or place `PaprikaLyrics.exe` anywhere).
+3. Run `PaprikaLyrics.exe` and start playing any music on your PC!
 
 ### Option B: Run from Source
 ```bash
@@ -127,12 +140,14 @@ core/beat.py (BPM & Pulse)    core/timeline.py     storage.py (Local Cache)
 paprika_app.py (pywebview host, Win32 window handles, global hotkeys)
 ```
 
-### Packaging Standalone `.exe`
+### Building Binaries Locally
 ```bash
 pip install pyinstaller
 python -m PyInstaller PaprikaLyrics.spec --noconfirm                 # Folder build (dist/PaprikaLyrics/)
-PL_ONEFILE=1 python -m PyInstaller PaprikaLyrics.spec --noconfirm    # Single exe (dist/PaprikaLyrics.exe)
+PL_ONEFILE=1 python -m PyInstaller PaprikaLyrics.spec --noconfirm    # Single exe (dist-onefile/PaprikaLyrics.exe)
 ```
+
+> **Automated GitHub Releases:** Tagging a commit (e.g. `git tag v0.2.2 && git push origin v0.2.2`) triggers GitHub Actions to automatically run tests, build both the `.zip` and `.exe` artifacts, and publish them to Releases. Suffix tags like `v0.2.2-rc1` publish as pre-releases.
 
 </details>
 
