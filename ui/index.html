@@ -186,8 +186,17 @@
         </div>
       </div>
       <div class="track-text">
-        <!-- Title and artist only: the seek row lives on the cover (see
-             #art-player), so this column is exactly what it says it is. -->
+        <!-- Source & Profile interactive pill -->
+        <div class="source-pill" id="source-pill" onclick="toggleQuickProfileMenu(event)" title="Active Music Player & Profile (Click to switch)" data-no-drag>
+          <span class="source-pill-dot"></span>
+          <span class="source-pill-icon" id="source-pill-icon"></span>
+          <span class="source-pill-source" id="source-pill-source">Media Player</span>
+          <span class="source-pill-sep">•</span>
+          <span class="source-pill-profile" id="source-pill-profile">Default</span>
+          <svg class="source-pill-chevron" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+        </div>
         <div id="title">Waiting for music...</div>
         <div id="artist">Play any track to begin</div>
       </div>
@@ -323,6 +332,16 @@
         </div>
         <div class="side-title" id="side-title"></div>
         <div class="side-artist" id="side-artist"></div>
+        <div class="source-pill side-source-pill" id="side-source-pill" onclick="toggleQuickProfileMenu(event)" title="Active Music Player & Profile (Click to switch)" data-no-drag>
+          <span class="source-pill-dot"></span>
+          <span class="source-pill-icon" id="side-source-pill-icon"></span>
+          <span class="source-pill-source" id="side-source-pill-source">Media Player</span>
+          <span class="source-pill-sep">•</span>
+          <span class="source-pill-profile" id="side-source-pill-profile">Default</span>
+          <svg class="source-pill-chevron" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+        </div>
       </div>
     </aside>
 
@@ -413,6 +432,14 @@
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
             </svg>
             <span>Visuals</span>
+          </button>
+          <button class="sp-tab" role="tab" id="qp-tab-profiles" data-tab="profiles"
+                  aria-controls="qp-panel-profiles" aria-selected="false" tabindex="-1">
+            <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>Profiles</span>
           </button>
           <button class="sp-tab" role="tab" id="qp-tab-diag" data-tab="diag"
                   aria-controls="qp-panel-diag" aria-selected="false" tabindex="-1">
@@ -769,6 +796,69 @@
             </section>
           </div>
 
+          <!-- Profiles & Source Management Page -->
+          <div class="sp-panel" id="qp-panel-profiles" role="tabpanel"
+               aria-labelledby="qp-tab-profiles" hidden>
+            <section class="sp-group" data-static>
+              <div class="sp-group-head">
+                <h2 class="sp-group-title">Active Profile</h2>
+                <div class="sp-group-actions">
+                  <button class="sp-action-btn" onclick="promptNewProfile()" title="Create New Profile">+ New</button>
+                  <button class="sp-action-btn" onclick="duplicateCurrentProfile()" title="Duplicate Profile">Duplicate</button>
+                  <button class="sp-action-btn sp-action-danger" id="btn-delete-profile" onclick="deleteCurrentProfile()" title="Delete Profile">Delete</button>
+                </div>
+              </div>
+
+              <div class="profile-select-row">
+                <select id="profile-select" class="sp-select profile-dropdown" onchange="onProfileDropdownChange(this.value)">
+                </select>
+                <button class="sp-btn-secondary" onclick="resetActiveProfileToDefaults()" title="Reset this profile's settings to default">Reset</button>
+              </div>
+
+              <!-- Profile Quick Settings -->
+              <div class="profile-settings-card">
+                <div class="qp-row">
+                  <div class="qp-text-wrap">
+                    <span class="qp-label">Base Sync Offset</span>
+                    <span class="qp-sub">Default latency compensation for this profile</span>
+                  </div>
+                  <div class="profile-latency-stepper">
+                    <button class="stepper-btn" onclick="adjustProfileLatency(-25)">-25</button>
+                    <span class="profile-latency-val" id="profile-latency-display">+0ms</span>
+                    <button class="stepper-btn" onclick="adjustProfileLatency(25)">+25</button>
+                  </div>
+                </div>
+
+                <div class="qp-row">
+                  <div class="qp-text-wrap">
+                    <span class="qp-label">Preferred Layout</span>
+                    <span class="qp-sub">Display mode when this profile is active</span>
+                  </div>
+                  <div class="segmented-control" id="profile-layout-control">
+                    <button class="seg-btn active" data-layout="compact" onclick="setProfileLayout('compact')">Compact</button>
+                    <button class="seg-btn" data-layout="split" onclick="setProfileLayout('split')">Split</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Auto-Switching Rules Section -->
+            <section class="sp-group" data-static>
+              <div class="sp-group-head">
+                <h2 class="sp-group-title">Auto-Switch By Player</h2>
+                <label class="sp-toggle-switch">
+                  <input type="checkbox" id="profile-autoswitch-toggle" onchange="toggleAutoSwitch(this.checked)">
+                  <span class="sp-toggle-slider"></span>
+                </label>
+              </div>
+              <p class="sp-hint">Automatically activates the bound profile whenever audio starts on that music player.</p>
+
+              <div class="source-mapping-list" id="source-mapping-list">
+                <!-- Injected dynamically by app.js: Spotify, SimpMusic, YouTube/Browser, VLC, Apple Music, Generic -->
+              </div>
+            </section>
+          </div>
+
           <div class="sp-panel" id="qp-panel-diag" role="tabpanel"
                aria-labelledby="qp-tab-diag" hidden>
             <!-- `data-static`: this group is NOT a dropdown. Its one row already
@@ -801,6 +891,21 @@
         </footer>
       </div>
     </section>
+
+    <!-- Quick Profile Selector Floating Menu -->
+    <div class="quick-profile-popup" id="quick-profile-popup" data-no-drag hidden>
+      <div class="qp-popup-header">
+        <span class="qp-popup-title">Switch Profile</span>
+        <button class="qp-popup-close" onclick="closeQuickProfileMenu()">&times;</button>
+      </div>
+      <div class="qp-popup-list" id="quick-profile-list"></div>
+      <div class="qp-popup-footer">
+        <button class="qp-popup-manage" onclick="openProfilesSettings()">Configure Profiles & Rules...</button>
+      </div>
+    </div>
+
+    <!-- Dynamic Profile Toast Notification -->
+    <div class="profile-toast" id="profile-toast" aria-live="polite"></div>
 
     <!-- Invisible resize grips: edges and corners -->
     <div class="resize-handle resize-e" data-dir="e" title=""></div>

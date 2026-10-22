@@ -168,6 +168,8 @@ class SmtcBridge:
         self._loaded_duration: float | None = None
         self._pending_full: str | None = None
         self._pending_since = 0.0
+        self._current_title = ""
+        self._current_artist = ""
         # Whether the UI has already been told that nothing is playing at all.
         self._idle = False
         # Whether the selected player publishes a usable timeline at all, and a
@@ -451,11 +453,17 @@ class SmtcBridge:
 
         The overlay can only be honest about a missing duration or a missing
         timeline if it says so; the diagnostics panel shows these three facts.
+        Includes normalized source realization metadata for the profile & sync engine.
         """
+        from core.source_detector import detect_source, source_to_dict
+        title = getattr(self, '_current_title', '')
+        artist = getattr(self, '_current_artist', '')
+        source_info = detect_source(app_id, title=title, artist=artist)
         state = {
             "app": app_id or "",
             "timeline": bool(timeline_ok),
             "duration": bool(duration_ms and duration_ms > 0),
+            "source": source_to_dict(source_info),
         }
         self._push_js(f"window.setTransportState({json.dumps(state)});")
 

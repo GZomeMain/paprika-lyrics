@@ -923,6 +923,17 @@ class WindowApi:
     def seek_position(self, target_ms: float):
         SMTC_BRIDGE.seek_position(target_ms)
 
+    def get_profiles(self) -> dict:
+        """Reads user profiles and source mappings from persistent cache."""
+        from storage import CACHE
+        return CACHE.get_profiles() or {}
+
+    def save_profiles(self, data: dict) -> bool:
+        """Persists user profiles and source mappings to disk."""
+        from storage import CACHE
+        CACHE.save_profiles(data or {})
+        return True
+
     def get_spicy_api_key(self) -> dict:
         """Returns the current Spicy Lyrics API key configuration."""
         import config

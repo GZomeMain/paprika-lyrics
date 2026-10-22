@@ -12,6 +12,7 @@ let playheadMs = 0;
 // travel is meant to be seen — carries it in either direction until it lands.
 let renderMs = 0;
 let latencyOffsetMs = DEFAULT_LATENCY_MS;
+let currentTrackOffsetIsDefault = true;
 let lastTick = performance.now();
 let lyrics = [];
 let lyricDom = [];
@@ -1708,6 +1709,7 @@ function onVisualSliderChange(name, value) {
     Settings.set('tiltLevel', tiltLevel);
     if (val === 0) resetTilt();
   }
+  if (window.ProfileManager) window.ProfileManager.syncFromCurrentVisuals();
   syncSettingsPanel();
   wakeRenderLoop();
 }
@@ -1756,6 +1758,7 @@ function setEffectLevel(name, level) {
     if (tiltLevel === 0) resetTilt();
   }
   syncVisualSliders();
+  if (window.ProfileManager) window.ProfileManager.syncFromCurrentVisuals();
   syncSettingsPanel();
   renderDiagnostics();
   wakeRenderLoop();
@@ -3942,6 +3945,9 @@ function openSettingsTab(id) {
   }
   settingsTab = want;
   Settings.set('settingsTab', want);
+  if (want === 'profiles' && window.ProfileManager) {
+    window.ProfileManager.renderProfilesPanel();
+  }
 }
 
 // Arrow keys move between tabs, Home/End jump to the ends — the ARIA tabs
@@ -3995,7 +4001,9 @@ function settingsSearchableRows() {
         el.classList.contains('ttml-status') || el.classList.contains('ttml-current') ||
         el.classList.contains('ttml-list') || el.classList.contains('sp-hint') ||
         el.classList.contains('sp-slider-card') || el.classList.contains('spicy-key-card') ||
-        el.classList.contains('font-bar') || el.classList.contains('font-list'));
+        el.classList.contains('font-bar') || el.classList.contains('font-list') ||
+        el.classList.contains('profile-select-row') || el.classList.contains('profile-settings-card') ||
+        el.classList.contains('source-mapping-list'));
       // The heading is named by the group itself, not by reading the title's
       // text: the title now carries a toggle whose summary the heading must not
       // pick up ("Sync+600ms").
@@ -4421,6 +4429,7 @@ initSettingsTabs();
 initSettingsGroups();
 initSettingsSearch();
 initSpicyKeySettings();
+if (window.ProfileManager) ProfileManager.init();
 openSettingsTab(Settings.get('settingsTab', 'window'));
 
 window.addEventListener('wheel', (e) => {
@@ -5011,6 +5020,9 @@ window.setTrackDuration = function(ms) {
 // about the player rather than as the overlay being broken.
 window.setTransportState = function(state) {
   transportState = (state && typeof state === 'object') ? state : null;
+  if (window.ProfileManager && state && state.source) {
+    window.ProfileManager.onSourceDetected(state.source);
+  }
   renderDiagnostics();
 };
 
@@ -6695,15 +6707,23 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
     // title/artist/album/duration the resolver sees, so keep them here.
     currentTrackMeta = { title: title || "", artist: artist || "" };
     if (document.body.classList.contains('settings-open')) refreshTtml();
+    currentTrackOffsetIsDefault = !!offsetIsDefault;
     latencyOffsetMs = (typeof savedLatencyOffset === 'number' && !isNaN(savedLatencyOffset)) ? savedLatencyOffset : DEFAULT_LATENCY_MS;
-    // Kill-switch for the built-in starting offset: with default latency off, a
-    // fresh track (no saved per-track nudge) opens at true 0ms instead of the
-    // host's DEFAULT/UNCACHED baseline. Auto latency below can still add its
-    // measured offset on top — the switch only silences the static default.
+    // Latency precedence:
+    // 1. Saved per-track nudge: always wins if track was nudged explicitly
+    // 2. Active profile baseline latency: applies if no per-track nudge exists
+    // 3. True 0ms if default latency is off and profile is 0ms
     if (!offsetIsDefault) {
       // Saved per-track nudge: always wins, switch or no switch.
-    } else if (!useDefaultLatency) {
-      latencyOffsetMs = 0;
+    } else {
+      const profLatency = (window.ProfileManager && typeof window.ProfileManager.getActiveProfileLatency === 'function')
+        ? window.ProfileManager.getActiveProfileLatency()
+        : null;
+      if (typeof profLatency === 'number') {
+        latencyOffsetMs = profLatency;
+      } else if (!useDefaultLatency) {
+        latencyOffsetMs = 0;
+      }
     }
     // Auto latency runs last, so it can only ever replace the host's DEFAULT for
     // this track — never an offset the user chose, and never with a live
@@ -7325,6 +7345,7 @@ function renderProgress(ms) {
 
 window.adjustLatency = function(deltaMs) {
   if (typeof deltaMs !== 'number' || isNaN(deltaMs)) return;
+  currentTrackOffsetIsDefault = false;
 
   latencyOffsetMs = Math.max(-3000, Math.min(3000, latencyOffsetMs + deltaMs));
   // A nudge on a track that opened on the auto offset is the residual error of
@@ -7447,3 +7468,709 @@ window.addEventListener('keydown', (e) => {
     });
   });
 })();
+
+
+// =========================================================
+// Profile System & Source Realization Architecture
+// =========================================================
+
+const SOURCE_ICONS = {
+  spotify: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#1db954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>',
+  simpmusic: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#ff4081"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>',
+  youtube: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>',
+  browser: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  vlc: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#ff8800"><path d="M13.2 2.1a1.4 1.4 0 0 0-2.4 0l-2.1 4.2h6.6zm-2.7 5.4-2.1 4.2h7.2l-2.1-4.2zm-2.7 5.4-2.7 5.4h12.4l-2.7-5.4zm-3.3 6.6-1.5 3c-.3.6.1 1.5.9 1.5h16.2c.8 0 1.2-.9.9-1.5l-1.5-3z"/></svg>',
+  apple: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#fc3c44"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.84c.64-.78 1.08-1.87.96-2.96-.93.04-2.07.62-2.73 1.4-.58.67-1.09 1.77-.96 2.84 1.04.08 2.1-.5 2.73-1.28z"/></svg>',
+  generic: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'
+};
+
+const CANONICAL_SOURCES = [
+  { id: 'spotify', name: 'Spotify', icon: 'spotify', dot: '#1db954' },
+  { id: 'simpmusic', name: 'SimpMusic', icon: 'simpmusic', dot: '#ff4081' },
+  { id: 'youtube', name: 'YouTube / Browser', icon: 'youtube', dot: '#ff0000' },
+  { id: 'vlc', name: 'VLC Media Player', icon: 'vlc', dot: '#ff8800' },
+  { id: 'apple_music', name: 'Apple Music', icon: 'apple', dot: '#fc3c44' },
+  { id: 'generic', name: 'Other Players', icon: 'generic', dot: '#00d2ff' }
+];
+
+const BUILTIN_PROFILES = {
+  default: {
+    id: "default",
+    name: "Default",
+    isBuiltin: true,
+    latencyOffsetMs: 0,
+    layout: "compact",
+    lyricFont: "Inter",
+    uiFont: "Inter",
+    beatLevel: 2,
+    chromaLevel: 2,
+    momentLevel: 2,
+    ambientLevel: 2,
+    tiltLevel: 2,
+    sliderBeat: 45,
+    sliderChroma: 30,
+    sliderArt: 40,
+    sliderParticles: 28,
+    sliderParticleOpacity: 80,
+    sliderParticleSize: 70,
+    sliderMoments: 35,
+    sliderTilt: 50
+  },
+  vivid: {
+    id: "vivid",
+    name: "Vivid",
+    isBuiltin: true,
+    latencyOffsetMs: 0,
+    layout: "compact",
+    lyricFont: "Inter",
+    uiFont: "Inter",
+    beatLevel: 4,
+    chromaLevel: 3,
+    momentLevel: 3,
+    ambientLevel: 3,
+    tiltLevel: 3,
+    sliderBeat: 85,
+    sliderChroma: 60,
+    sliderArt: 50,
+    sliderParticles: 48,
+    sliderParticleOpacity: 90,
+    sliderParticleSize: 85,
+    sliderMoments: 65,
+    sliderTilt: 75
+  },
+  minimal: {
+    id: "minimal",
+    name: "Minimal",
+    isBuiltin: true,
+    latencyOffsetMs: 0,
+    layout: "compact",
+    lyricFont: "Inter",
+    uiFont: "Inter",
+    beatLevel: 1,
+    chromaLevel: 0,
+    momentLevel: 0,
+    ambientLevel: 0,
+    tiltLevel: 0,
+    sliderBeat: 20,
+    sliderChroma: 0,
+    sliderArt: 30,
+    sliderParticles: 0,
+    sliderParticleOpacity: 0,
+    sliderParticleSize: 50,
+    sliderMoments: 0,
+    sliderTilt: 0
+  },
+  youtube: {
+    id: "youtube",
+    name: "YouTube & Web",
+    isBuiltin: true,
+    latencyOffsetMs: 180,
+    layout: "compact",
+    lyricFont: "Inter",
+    uiFont: "Inter",
+    beatLevel: 2,
+    chromaLevel: 2,
+    momentLevel: 2,
+    ambientLevel: 2,
+    tiltLevel: 2,
+    sliderBeat: 45,
+    sliderChroma: 30,
+    sliderArt: 40,
+    sliderParticles: 28,
+    sliderParticleOpacity: 80,
+    sliderParticleSize: 70,
+    sliderMoments: 35,
+    sliderTilt: 50
+  },
+  split: {
+    id: "split",
+    name: "Split Mode",
+    isBuiltin: true,
+    latencyOffsetMs: 0,
+    layout: "split",
+    lyricFont: "Inter",
+    uiFont: "Inter",
+    beatLevel: 2,
+    chromaLevel: 2,
+    momentLevel: 2,
+    ambientLevel: 2,
+    tiltLevel: 2,
+    sliderBeat: 45,
+    sliderChroma: 30,
+    sliderArt: 40,
+    sliderParticles: 28,
+    sliderParticleOpacity: 80,
+    sliderParticleSize: 70,
+    sliderMoments: 35,
+    sliderTilt: 50
+  }
+};
+
+const DEFAULT_SOURCE_MAP = {
+  "spotify": "default",
+  "simpmusic": "default",
+  "youtube": "youtube",
+  "browser": "youtube",
+  "vlc": "default",
+  "apple_music": "default",
+  "generic": "default"
+};
+
+const ProfileManager = {
+  profiles: {},
+  activeProfileId: 'default',
+  sourceMap: Object.assign({}, DEFAULT_SOURCE_MAP),
+  autoSwitch: true,
+  currentSource: null,
+  lastAutoSwitchedSourceId: null,
+  _saveTimer: null,
+
+  init() {
+    const storedProfiles = Settings.get('profiles_data', null);
+    if (!storedProfiles) {
+      this.profiles = JSON.parse(JSON.stringify(BUILTIN_PROFILES));
+      // Seamlessly seed default profile with existing user configuration
+      const def = this.profiles.default;
+      def.sliderBeat = parseInt(Settings.get('sliderBeat', '45'), 10);
+      def.sliderChroma = parseInt(Settings.get('sliderChroma', '30'), 10);
+      def.sliderArt = parseInt(Settings.get('sliderArt', '40'), 10);
+      def.sliderParticles = parseInt(Settings.get('sliderParticles', '28'), 10);
+      def.sliderParticleOpacity = parseInt(Settings.get('sliderParticleOpacity', '80'), 10);
+      def.sliderParticleSize = parseInt(Settings.get('sliderParticleSize', '70'), 10);
+      def.sliderMoments = parseInt(Settings.get('sliderMoments', '35'), 10);
+      def.sliderTilt = parseInt(Settings.get('sliderTilt', '50'), 10);
+      def.beatLevel = parseLevelSetting(Settings.get('beatLevel', 2));
+      def.chromaLevel = parseLevelSetting(Settings.get('chromaLevel', 2));
+      def.momentLevel = parseLevelSetting(Settings.get('momentLevel', 2));
+      def.ambientLevel = parseLevelSetting(Settings.get('ambientLevel', 2));
+      def.tiltLevel = parseLevelSetting(Settings.get('tiltLevel', 2));
+      def.layout = Settings.get('layout', 'compact');
+      this.save();
+    } else {
+      try {
+        this.profiles = JSON.parse(storedProfiles);
+        for (const [k, v] of Object.entries(BUILTIN_PROFILES)) {
+          if (!this.profiles[k]) {
+            this.profiles[k] = JSON.parse(JSON.stringify(v));
+          }
+        }
+      } catch (e) {
+        this.profiles = JSON.parse(JSON.stringify(BUILTIN_PROFILES));
+      }
+    }
+
+    const savedActive = Settings.get('activeProfileId', 'default');
+    this.activeProfileId = this.profiles[savedActive] ? savedActive : 'default';
+
+    const storedMap = Settings.get('profile_source_map', null);
+    if (storedMap) {
+      try {
+        this.sourceMap = Object.assign({}, DEFAULT_SOURCE_MAP, JSON.parse(storedMap));
+      } catch (e) {
+        this.sourceMap = Object.assign({}, DEFAULT_SOURCE_MAP);
+      }
+    } else {
+      this.sourceMap = Object.assign({}, DEFAULT_SOURCE_MAP);
+    }
+
+    this.autoSwitch = Settings.get('autoSwitchSources', '1') === '1';
+
+    // Background sync with host persistence
+    const syncFromBackend = () => {
+      const api = window.pywebview && window.pywebview.api;
+      if (api && api.get_profiles) {
+        api.get_profiles().then((data) => {
+          if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+            if (data.profiles) this.profiles = Object.assign({}, this.profiles, data.profiles);
+            if (data.sourceMap) this.sourceMap = Object.assign({}, this.sourceMap, data.sourceMap);
+            if (data.activeProfileId && this.profiles[data.activeProfileId]) this.activeProfileId = data.activeProfileId;
+            if (typeof data.autoSwitch === 'boolean') this.autoSwitch = data.autoSwitch;
+            this.renderPills();
+            this.renderProfilesPanel();
+          }
+        }).catch(() => {});
+      }
+    };
+
+    if (window.pywebview && window.pywebview.api) {
+      syncFromBackend();
+    } else {
+      window.addEventListener('pywebviewready', syncFromBackend);
+    }
+
+    this.renderPills();
+  },
+
+  getActiveProfile() {
+    return this.profiles[this.activeProfileId] || this.profiles.default || BUILTIN_PROFILES.default;
+  },
+
+  getActiveProfileLatency() {
+    const prof = this.getActiveProfile();
+    return typeof prof.latencyOffsetMs === 'number' ? prof.latencyOffsetMs : 0;
+  },
+
+  updateActiveProfile(updates) {
+    const active = this.getActiveProfile();
+    Object.assign(active, updates);
+    this.save();
+    this.renderPills();
+  },
+
+  syncFromCurrentVisuals() {
+    this.updateActiveProfile({
+      sliderBeat,
+      beatLevel,
+      sliderChroma,
+      chromaLevel,
+      sliderArt,
+      sliderParticles,
+      ambientLevel,
+      sliderParticleOpacity,
+      sliderParticleSize,
+      sliderMoments,
+      momentLevel,
+      sliderTilt,
+      tiltLevel
+    });
+  },
+
+  applyProfile(id, notify = false, reason = '') {
+    if (!this.profiles[id]) id = 'default';
+    this.activeProfileId = id;
+    const p = this.profiles[id];
+
+    // Apply visual sliders and effect levels
+    sliderBeat = p.sliderBeat ?? 45;
+    beatLevel = p.beatLevel ?? 2;
+    sliderChroma = p.sliderChroma ?? 30;
+    chromaLevel = p.chromaLevel ?? 2;
+    sliderArt = p.sliderArt ?? 40;
+    sliderParticles = p.sliderParticles ?? 28;
+    ambientLevel = p.ambientLevel ?? 2;
+    sliderParticleOpacity = p.sliderParticleOpacity ?? 80;
+    sliderParticleSize = p.sliderParticleSize ?? 70;
+    sliderMoments = p.sliderMoments ?? 35;
+    momentLevel = p.momentLevel ?? 2;
+    sliderTilt = p.sliderTilt ?? 50;
+    tiltLevel = p.tiltLevel ?? 2;
+
+    Settings.set('sliderBeat', sliderBeat);
+    Settings.set('beatLevel', beatLevel);
+    Settings.set('sliderChroma', sliderChroma);
+    Settings.set('chromaLevel', chromaLevel);
+    Settings.set('sliderArt', sliderArt);
+    Settings.set('sliderParticles', sliderParticles);
+    Settings.set('ambientLevel', ambientLevel);
+    Settings.set('sliderParticleOpacity', sliderParticleOpacity);
+    Settings.set('sliderParticleSize', sliderParticleSize);
+    Settings.set('sliderMoments', sliderMoments);
+    Settings.set('momentLevel', momentLevel);
+    Settings.set('sliderTilt', sliderTilt);
+    Settings.set('tiltLevel', tiltLevel);
+
+    // Apply layout if defined
+    if (p.layout && LAYOUTS.includes(p.layout)) {
+      layoutMode = p.layout;
+      applyLayoutState();
+    }
+
+    // Apply fonts if defined
+    if (p.lyricFont && typeof applyFont === 'function') applyFont(p.lyricFont);
+    if (p.uiFont && typeof applyUiFont === 'function') applyUiFont(p.uiFont);
+
+    // Latency compensation
+    if (currentTrackOffsetIsDefault) {
+      latencyOffsetMs = typeof p.latencyOffsetMs === 'number' ? p.latencyOffsetMs : 0;
+      updateLatencyUI();
+      if (lyrics.length > 0) {
+        renderProgress((isPlaying ? predictedPlayhead() : playheadMs) + latencyOffsetMs);
+      }
+    }
+
+    // Update Visual Engine states
+    if (window.syncVisualSliders) window.syncVisualSliders();
+    startBeatEngine();
+    startMomentEngine();
+    applyAmbientMode();
+    applyTiltMode();
+    document.documentElement.style.setProperty('--art-slider-scale', (sliderArt / 100).toFixed(2));
+    document.documentElement.style.setProperty('--tilt-amp', String((sliderTilt / 100) * 1.2));
+
+    this.save();
+    this.renderPills();
+    this.renderProfilesPanel();
+    syncSettingsPanel();
+    wakeRenderLoop();
+
+    if (notify) {
+      showProfileToast(`Profile: ${p.name}${reason ? ' • ' + reason : ''}`);
+    }
+  },
+
+  onSourceDetected(source) {
+    if (!source || typeof source !== 'object') return;
+    this.currentSource = source;
+    this.renderPills();
+
+    // Check auto-switching
+    if (this.autoSwitch && source.id) {
+      const targetProfileId = this.sourceMap[source.id] || this.sourceMap[source.group] || this.sourceMap['generic'];
+      if (targetProfileId && targetProfileId !== this.activeProfileId && this.profiles[targetProfileId]) {
+        if (this.lastAutoSwitchedSourceId !== source.id) {
+          this.lastAutoSwitchedSourceId = source.id;
+          this.applyProfile(targetProfileId, true, `Auto-switched for ${source.name}`);
+        }
+      } else {
+        this.lastAutoSwitchedSourceId = source.id;
+      }
+    }
+  },
+
+  setSourceMapping(sourceId, profileId) {
+    this.sourceMap[sourceId] = profileId;
+    if (sourceId === 'youtube') {
+      this.sourceMap['browser'] = profileId;
+    }
+    this.save();
+    const pName = this.profiles[profileId] ? this.profiles[profileId].name : profileId;
+    const sObj = CANONICAL_SOURCES.find(s => s.id === sourceId);
+    showProfileToast(`Mapped ${sObj ? sObj.name : sourceId} → ${pName}`);
+  },
+
+  save() {
+    Settings.set('profiles_data', JSON.stringify(this.profiles));
+    Settings.set('activeProfileId', this.activeProfileId);
+    Settings.set('profile_source_map', JSON.stringify(this.sourceMap));
+    Settings.set('autoSwitchSources', this.autoSwitch ? '1' : '0');
+
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => {
+      const api = window.pywebview && window.pywebview.api;
+      if (api && api.save_profiles) {
+        api.save_profiles({
+          activeProfileId: this.activeProfileId,
+          autoSwitch: this.autoSwitch,
+          profiles: this.profiles,
+          sourceMap: this.sourceMap
+        }).catch(() => {});
+      }
+    }, 500);
+  },
+
+  renderPills() {
+    const active = this.getActiveProfile();
+    const src = this.currentSource || {
+      id: 'generic',
+      name: 'Media Player',
+      icon: 'generic'
+    };
+
+    const iconSvg = SOURCE_ICONS[src.icon] || SOURCE_ICONS[src.id] || SOURCE_ICONS.generic;
+    let dotColor = '#1db954';
+    if (src.id === 'simpmusic') dotColor = '#ff4081';
+    else if (src.id === 'youtube') dotColor = '#ff0000';
+    else if (src.id === 'vlc') dotColor = '#ff8800';
+    else if (src.id === 'apple_music') dotColor = '#fc3c44';
+    else if (src.id === 'browser') dotColor = '#3b82f6';
+    else if (src.id === 'generic') dotColor = '#888888';
+
+    // 1. Float Pill
+    const pill = document.getElementById('source-pill');
+    if (pill) {
+      const iconEl = document.getElementById('source-pill-icon');
+      const srcEl = document.getElementById('source-pill-source');
+      const profEl = document.getElementById('source-pill-profile');
+      const dotEl = pill.querySelector('.source-pill-dot');
+      if (iconEl) iconEl.innerHTML = iconSvg;
+      if (srcEl) srcEl.textContent = src.name || 'Media Player';
+      if (profEl) profEl.textContent = active.name;
+      if (dotEl) {
+        dotEl.style.background = dotColor;
+        dotEl.style.boxShadow = `0 0 6px ${dotColor}99`;
+      }
+    }
+
+    // 2. Side Panel Pill
+    const sidePill = document.getElementById('side-source-pill');
+    if (sidePill) {
+      const sideIconEl = document.getElementById('side-source-pill-icon');
+      const sideSrcEl = document.getElementById('side-source-pill-source');
+      const sideProfEl = document.getElementById('side-source-pill-profile');
+      const sideDotEl = sidePill.querySelector('.source-pill-dot');
+      if (sideIconEl) sideIconEl.innerHTML = iconSvg;
+      if (sideSrcEl) sideSrcEl.textContent = src.name || 'Media Player';
+      if (sideProfEl) sideProfEl.textContent = active.name;
+      if (sideDotEl) {
+        sideDotEl.style.background = dotColor;
+        sideDotEl.style.boxShadow = `0 0 6px ${dotColor}99`;
+      }
+    }
+  },
+
+  renderQuickProfileList() {
+    const list = document.getElementById('quick-profile-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const activeId = this.activeProfileId;
+
+    Object.values(this.profiles).forEach((prof) => {
+      const btn = document.createElement('button');
+      btn.className = `qp-popup-item ${prof.id === activeId ? 'active' : ''}`;
+      btn.innerHTML = `
+        <span>${prof.name}</span>
+        ${prof.id === activeId ? '<span class="qp-popup-item-check">✓</span>' : ''}
+      `;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        this.applyProfile(prof.id, true);
+        closeQuickProfileMenu();
+      };
+      list.appendChild(btn);
+    });
+  },
+
+  renderProfilesPanel() {
+    const select = document.getElementById('profile-select');
+    if (!select) return;
+
+    select.innerHTML = '';
+    Object.values(this.profiles).forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name + (p.isBuiltin ? ' (Built-in)' : '');
+      if (p.id === this.activeProfileId) opt.selected = true;
+      select.appendChild(opt);
+    });
+
+    const active = this.getActiveProfile();
+
+    const delBtn = document.getElementById('btn-delete-profile');
+    if (delBtn) {
+      delBtn.disabled = !!active.isBuiltin;
+      delBtn.style.opacity = active.isBuiltin ? '0.4' : '1';
+      delBtn.style.cursor = active.isBuiltin ? 'not-allowed' : 'pointer';
+    }
+
+    const latDisplay = document.getElementById('profile-latency-display');
+    if (latDisplay) {
+      const lat = active.latencyOffsetMs || 0;
+      latDisplay.textContent = `${lat > 0 ? '+' : ''}${lat}ms`;
+    }
+
+    const layoutCtrl = document.getElementById('profile-layout-control');
+    if (layoutCtrl) {
+      const btns = layoutCtrl.querySelectorAll('.seg-btn');
+      btns.forEach((b) => {
+        const isLayout = b.dataset.layout === (active.layout || 'compact');
+        b.classList.toggle('active', isLayout);
+      });
+    }
+
+    const autoToggle = document.getElementById('profile-autoswitch-toggle');
+    if (autoToggle) {
+      autoToggle.checked = !!this.autoSwitch;
+    }
+
+    const mappingList = document.getElementById('source-mapping-list');
+    if (mappingList) {
+      mappingList.innerHTML = '';
+      CANONICAL_SOURCES.forEach((src) => {
+        const row = document.createElement('div');
+        row.className = 'source-mapping-row';
+
+        const info = document.createElement('div');
+        info.className = 'source-mapping-info';
+        info.innerHTML = `
+          <span class="source-pill-dot" style="background: ${src.dot}; box-shadow: 0 0 6px ${src.dot}99;"></span>
+          <span class="source-mapping-icon">${SOURCE_ICONS[src.icon] || SOURCE_ICONS.generic}</span>
+          <span class="source-mapping-name">${src.name}</span>
+        `;
+
+        const sel = document.createElement('select');
+        sel.className = 'source-mapping-select';
+        sel.onchange = (e) => {
+          this.setSourceMapping(src.id, e.target.value);
+        };
+
+        const currentMappedProfile = this.sourceMap[src.id] || 'default';
+        Object.values(this.profiles).forEach((p) => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name;
+          if (p.id === currentMappedProfile) opt.selected = true;
+          sel.appendChild(opt);
+        });
+
+        row.appendChild(info);
+        row.appendChild(sel);
+        mappingList.appendChild(row);
+      });
+    }
+  }
+};
+
+window.ProfileManager = ProfileManager;
+
+// Global UI Event Bridges for HTML Buttons
+window.toggleQuickProfileMenu = function(e) {
+  if (e) e.stopPropagation();
+  const popup = document.getElementById('quick-profile-popup');
+  if (!popup) return;
+  const isOpening = popup.hidden;
+  if (isOpening) {
+    const target = (e && e.currentTarget) || document.getElementById('source-pill');
+    if (target) {
+      const rect = target.getBoundingClientRect();
+      const popupWidth = 240;
+      let left = rect.left;
+      let top = rect.bottom + 8;
+      if (left + popupWidth > window.innerWidth - 12) {
+        left = Math.max(12, window.innerWidth - popupWidth - 12);
+      }
+      popup.style.left = `${Math.max(12, left)}px`;
+      popup.style.top = `${Math.max(12, top)}px`;
+    }
+    ProfileManager.renderQuickProfileList();
+    popup.hidden = false;
+  } else {
+    popup.hidden = true;
+  }
+};
+
+window.closeQuickProfileMenu = function() {
+  const popup = document.getElementById('quick-profile-popup');
+  if (popup) popup.hidden = true;
+};
+
+window.openProfilesSettings = function() {
+  closeQuickProfileMenu();
+  openSettings(true);
+  openSettingsTab('profiles');
+};
+
+window.promptNewProfile = function() {
+  const name = prompt('Enter a name for the new profile:', 'Custom Profile');
+  if (!name || !name.trim()) return;
+  const newId = 'profile_' + Date.now().toString(36);
+  const active = ProfileManager.getActiveProfile();
+  const newProfile = Object.assign({}, active, {
+    id: newId,
+    name: name.trim(),
+    isBuiltin: false
+  });
+  ProfileManager.profiles[newId] = newProfile;
+  ProfileManager.applyProfile(newId, true, 'Created profile');
+};
+
+window.duplicateCurrentProfile = function() {
+  const active = ProfileManager.getActiveProfile();
+  const newId = 'profile_' + Date.now().toString(36);
+  const newName = `${active.name} (Copy)`;
+  const cloned = Object.assign({}, active, {
+    id: newId,
+    name: newName,
+    isBuiltin: false
+  });
+  ProfileManager.profiles[newId] = cloned;
+  ProfileManager.applyProfile(newId, true, 'Duplicated profile');
+};
+
+window.deleteCurrentProfile = function() {
+  const active = ProfileManager.getActiveProfile();
+  if (active.isBuiltin) {
+    showProfileToast('Built-in profiles cannot be deleted');
+    return;
+  }
+  if (!confirm(`Delete profile "${active.name}"?`)) return;
+
+  const doomedId = active.id;
+  delete ProfileManager.profiles[doomedId];
+
+  for (const src of Object.keys(ProfileManager.sourceMap)) {
+    if (ProfileManager.sourceMap[src] === doomedId) {
+      ProfileManager.sourceMap[src] = 'default';
+    }
+  }
+
+  ProfileManager.applyProfile('default', true, 'Deleted profile');
+};
+
+window.resetActiveProfileToDefaults = function() {
+  const active = ProfileManager.getActiveProfile();
+  if (BUILTIN_PROFILES[active.id]) {
+    ProfileManager.profiles[active.id] = JSON.parse(JSON.stringify(BUILTIN_PROFILES[active.id]));
+    ProfileManager.applyProfile(active.id, true, 'Reset to factory defaults');
+  } else {
+    const def = BUILTIN_PROFILES.default;
+    Object.assign(ProfileManager.profiles[active.id], {
+      latencyOffsetMs: def.latencyOffsetMs,
+      layout: def.layout,
+      beatLevel: def.beatLevel,
+      chromaLevel: def.chromaLevel,
+      momentLevel: def.momentLevel,
+      ambientLevel: def.ambientLevel,
+      tiltLevel: def.tiltLevel,
+      sliderBeat: def.sliderBeat,
+      sliderChroma: def.sliderChroma,
+      sliderArt: def.sliderArt,
+      sliderParticles: def.sliderParticles,
+      sliderParticleOpacity: def.sliderParticleOpacity,
+      sliderParticleSize: def.sliderParticleSize,
+      sliderMoments: def.sliderMoments,
+      sliderTilt: def.sliderTilt
+    });
+    ProfileManager.applyProfile(active.id, true, 'Reset values to defaults');
+  }
+};
+
+window.onProfileDropdownChange = function(val) {
+  ProfileManager.applyProfile(val, true);
+};
+
+window.adjustProfileLatency = function(delta) {
+  const prof = ProfileManager.getActiveProfile();
+  const current = prof.latencyOffsetMs || 0;
+  const next = Math.max(-2000, Math.min(2000, current + delta));
+  ProfileManager.updateActiveProfile({ latencyOffsetMs: next });
+  ProfileManager.renderProfilesPanel();
+  if (currentTrackOffsetIsDefault) {
+    latencyOffsetMs = next;
+    updateLatencyUI();
+    if (lyrics.length > 0) renderProgress((isPlaying ? predictedPlayhead() : playheadMs) + latencyOffsetMs);
+  }
+};
+
+window.setProfileLayout = function(layout) {
+  ProfileManager.updateActiveProfile({ layout });
+  layoutMode = layout;
+  applyLayoutState();
+  syncSettingsPanel();
+  ProfileManager.renderProfilesPanel();
+};
+
+window.toggleAutoSwitch = function(enabled) {
+  ProfileManager.autoSwitch = !!enabled;
+  ProfileManager.save();
+  showProfileToast(enabled ? 'Auto-switching enabled' : 'Auto-switching disabled');
+};
+
+let toastTimer = null;
+window.showProfileToast = function(msg, duration = 2400) {
+  const toast = document.getElementById('profile-toast');
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    toastTimer = null;
+  }, duration);
+};
+
+document.addEventListener('click', (e) => {
+  const popup = document.getElementById('quick-profile-popup');
+  if (popup && !popup.hidden && !popup.contains(e.target) && !e.target.closest('.source-pill')) {
+    popup.hidden = true;
+  }
+});

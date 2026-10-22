@@ -4747,3 +4747,403 @@ body.mini #lyrics-container {
 
 
 
+
+/* =========================================================
+   Source Realization & Profile System Styles
+   ========================================================= */
+
+/* Source & Profile Pill (Main Player & Side Panel) */
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 3px 9px 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary, #b3b3b3);
+  cursor: pointer;
+  user-select: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.35, 1);
+  margin-bottom: 6px;
+  max-width: fit-content;
+}
+
+.source-pill:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.source-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #1db954; /* Default green accent */
+  box-shadow: 0 0 6px rgba(29, 185, 84, 0.6);
+  flex-shrink: 0;
+}
+
+.source-pill-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.source-pill-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.source-pill-source {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.source-pill-sep {
+  opacity: 0.4;
+  font-size: 9px;
+}
+
+.source-pill-profile {
+  color: var(--text-secondary, #b3b3b3);
+}
+
+.source-pill-chevron {
+  opacity: 0.6;
+  margin-left: 2px;
+  transition: transform 0.2s ease;
+}
+
+.source-pill:hover .source-pill-chevron {
+  opacity: 1;
+  transform: translateY(1px);
+}
+
+.side-source-pill {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+/* Quick Profile Popup (Floating Dropdown) */
+.quick-profile-popup {
+  position: absolute;
+  top: 70px;
+  left: 20px;
+  z-index: 1000;
+  width: 240px;
+  background: rgba(20, 20, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 10px;
+  animation: qpFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  color: #fff;
+}
+
+@keyframes qpFadeIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.qp-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.qp-popup-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.qp-popup-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.qp-popup-close:hover {
+  color: #fff;
+}
+
+.qp-popup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.qp-popup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+  width: 100%;
+}
+
+.qp-popup-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.qp-popup-item.active {
+  background: rgba(255, 255, 255, 0.16);
+  font-weight: 600;
+}
+
+.qp-popup-item-check {
+  font-size: 14px;
+  color: #1db954;
+}
+
+.qp-popup-footer {
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.qp-popup-manage {
+  width: 100%;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.qp-popup-manage:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* Profiles Tab UI inside Settings */
+.sp-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.sp-group-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.sp-action-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sp-action-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.sp-action-danger:hover {
+  background: rgba(230, 50, 50, 0.3);
+  border-color: rgba(230, 50, 50, 0.5);
+  color: #ff6b6b;
+}
+
+.profile-select-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.profile-dropdown {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #fff;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.profile-dropdown option {
+  background: #1c1c20;
+  color: #fff;
+}
+
+.profile-settings-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-latency-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.stepper-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.profile-latency-val {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 54px;
+  text-align: center;
+}
+
+.segmented-control {
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.seg-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.seg-btn.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Auto-switch Source Mapping Grid */
+.source-mapping-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.source-mapping-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+}
+
+.source-mapping-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.source-mapping-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.source-mapping-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.source-mapping-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.source-mapping-select option {
+  background: #1c1c20;
+  color: #fff;
+}
+
+/* Floating Profile Toast */
+.profile-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(16px);
+  background: rgba(24, 24, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 7px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 2000;
+}
+
+.profile-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

@@ -362,6 +362,17 @@ class CacheManager:
     # =========================================================================
     # Persistent User Settings (Key-Value)
     # =========================================================================
+    def get_profiles(self) -> dict:
+        with self._lock:
+            settings = self._data.setdefault("settings", {})
+            return settings.get("profiles") or {}
+
+    def save_profiles(self, profiles: dict):
+        with self._lock:
+            settings = self._data.setdefault("settings", {})
+            settings["profiles"] = dict(profiles) if isinstance(profiles, dict) else {}
+            self._schedule_save(delay=0.4)
+
     def get_setting(self, key: str, default=None):
         with self._lock:
             settings = self._data.setdefault("settings", {})
