@@ -186,18 +186,6 @@
         </div>
       </div>
       <div class="track-text">
-        <!-- Source & Profile interactive pill -->
-        <div class="source-pill" id="source-pill" onclick="window.revealSidebar()" title="Active Music Player & Profile (Click to open Sidebar)" data-no-drag>
-          <span class="source-pill-dot"></span>
-          <span class="source-pill-icon" id="source-pill-icon"></span>
-          <span class="source-pill-source" id="source-pill-source">Media Player</span>
-          <span class="source-pill-lock" id="source-pill-lock" title="Source locked (keeps playing this app)" hidden>🔒</span>
-          <span class="source-pill-sep">•</span>
-          <span class="source-pill-profile" id="source-pill-profile">Default</span>
-          <svg class="source-pill-chevron" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
-            <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-          </svg>
-        </div>
         <div id="title">Waiting for music...</div>
         <div id="artist">Play any track to begin</div>
       </div>
@@ -333,17 +321,6 @@
         </div>
         <div class="side-title" id="side-title"></div>
         <div class="side-artist" id="side-artist"></div>
-        <div class="source-pill side-source-pill" id="side-source-pill" onclick="window.revealSidebar()" title="Active Music Player & Profile (Click to open Sidebar)" data-no-drag>
-          <span class="source-pill-dot"></span>
-          <span class="source-pill-icon" id="side-source-pill-icon"></span>
-          <span class="source-pill-source" id="side-source-pill-source">Media Player</span>
-          <span class="source-pill-lock" id="side-source-pill-lock" title="Source locked (keeps playing this app)" hidden>🔒</span>
-          <span class="source-pill-sep">•</span>
-          <span class="source-pill-profile" id="side-source-pill-profile">Default</span>
-          <svg class="source-pill-chevron" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
-            <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-          </svg>
-        </div>
       </div>
     </aside>
 
@@ -353,8 +330,7 @@
         <!-- Sidebar Header -->
         <div class="sidebar-header">
           <div class="sidebar-title-wrap">
-            <span class="sidebar-badge-dot"></span>
-            <span class="sidebar-title">Paprika Hub</span>
+            <span class="sidebar-title">Controls</span>
           </div>
           <div class="sidebar-header-actions">
             <button class="sidebar-tool-btn" onclick="openProfilesSettings()" title="Open Settings (Ctrl+,)">
@@ -381,9 +357,7 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <span class="sidebar-section-label">Media Source</span>
-            <button class="sidebar-badge-action" id="sidebar-btn-auto-follow" onclick="unlockSource(event)" title="Auto-follow active player">
-              <span class="qp-auto-dot" id="sidebar-auto-dot"></span> Auto
-            </button>
+            <button class="sidebar-badge-action" id="sidebar-btn-auto-follow" onclick="unlockSource(event)" title="Auto-follow active player">Auto</button>
           </div>
 
           <div class="sidebar-source-card" id="sidebar-current-source">
@@ -469,7 +443,7 @@
               <span class="sb-chip-text" id="sb-layout-state">Compact</span>
             </button>
             <button class="sidebar-toggle-chip" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop()" title="Toggle Always On Top">
-              <span class="sb-chip-icon">📌</span>
+              <span class="sb-chip-icon">▲</span>
               <span class="sb-chip-text" id="sb-ontop-state">Top</span>
             </button>
             <button class="sidebar-toggle-chip" id="sb-toggle-fs" onclick="toggleFullscreen()" title="Toggle Fullscreen (F11)">
@@ -693,12 +667,7 @@
               </div>
               <div class="font-status" id="qp-font-status" role="status" aria-live="polite"></div>
               <div class="font-list" id="qp-font-list"></div>
-              <p class="sp-hint">Each row is drawn in the face it names. Give a face the Lyrics or
-                the Interface — an imported one works for both. Inter and Barriecito are fetched
-                from the web; the rest are faces Windows and macOS already ship, so the overlay
-                still reads well offline. Add font… takes .ttf, .otf, .woff or .woff2 files,
-                copies them into your fonts folder and keeps them across restarts — import as
-                many as you like; Remove moves one to that folder’s <code>.trash</code>.</p>
+              <p class="sp-hint">Choose typography for lyrics and interface. Supports .ttf, .otf, and .woff2.</p>
             </section>
 
             <!-- Spicy Lyrics API Secret Key -->
@@ -746,10 +715,7 @@
               <div class="ttml-status" id="qp-ttml-status" role="status" aria-live="polite"></div>
               <div class="ttml-current" id="qp-ttml-current"></div>
               <div class="ttml-list" id="qp-ttml-list"></div>
-              <p class="sp-hint">Add Apple Music <code>.ttml</code> files for songs the online lookup
-                mis-times. A file is used when its own title and artist match the playing song;
-                anything else is one click away below. Removed files move to a <code>.trash</code>
-                folder inside the library.</p>
+              <p class="sp-hint">Import Apple Music <code>.ttml</code> files for syllable-synced offline lyrics.</p>
             </section>
           </div>
 
@@ -908,7 +874,7 @@
                   <span class="qp-state" id="qp-tilt-state">Subtle</span>
                 </button>
               </div>
-              <p class="sp-hint">Fine-tune visual effects across 5 intensity levels (0: Off, 1: Min, 2: Subtle, 3: Vivid, 4: Apex). Beat sync locks visual pulses and chromatic aberration to audio transients; Room air traces fluid particle trails; Big moments amplify drops with synchronized color grading.</p>
+              <p class="sp-hint">Fine-tune ambient atmosphere, audio-reactive pulses, and particle intensity.</p>
             </section>
           </div>
 
@@ -922,33 +888,44 @@
                   <button class="sp-action-btn" onclick="promptNewProfile()" title="Create New Profile">+ New</button>
                   <button class="sp-action-btn" onclick="duplicateCurrentProfile()" title="Duplicate Profile">Duplicate</button>
                   <button class="sp-action-btn sp-action-danger" id="btn-delete-profile" onclick="deleteCurrentProfile()" title="Delete Profile">Delete</button>
+                  <button class="sp-action-btn" onclick="resetActiveProfileToDefaults()" title="Reset this profile's settings to default">Reset</button>
                 </div>
               </div>
 
-              <div class="profile-create-bar">
-                <input type="text" id="settings-new-profile-input" class="sp-input profile-create-input" placeholder="New profile name..." maxlength="24" onkeydown="onSettingsAddKeyDown(event)">
-                <button class="sp-action-btn profile-create-btn" onclick="submitSettingsAddProfile()">+ Add Profile</button>
+              <!-- Inline Profile Creation Form (Hidden by default) -->
+              <div class="sp-profile-inline-create" id="settings-inline-create-row" hidden>
+                <input type="text" id="settings-new-profile-input" class="sp-input" placeholder="Profile name..." maxlength="24" onkeydown="onSettingsAddKeyDown(event)">
+                <button class="sp-action-btn" onclick="submitSettingsAddProfile()">Add</button>
+                <button class="sp-action-btn" onclick="toggleSettingsAddProfile(false)">Cancel</button>
               </div>
 
-              <div class="profile-select-row">
-                <select id="profile-select" class="sp-select profile-dropdown" onchange="onProfileDropdownChange(this.value)">
-                </select>
-                <button class="sp-btn-secondary" onclick="resetActiveProfileToDefaults()" title="Reset this profile's settings to default">Reset</button>
+              <!-- Clean Profile Selector Row -->
+              <div class="sp-row profile-select-row">
+                <div class="qp-text-wrap">
+                  <span class="qp-label">Select Profile</span>
+                  <span class="qp-sub">Choose active configuration preset</span>
+                </div>
+                <div class="sp-select-wrap">
+                  <select id="profile-select" class="sp-select" onchange="onProfileDropdownChange(this.value)">
+                  </select>
+                </div>
               </div>
 
-              <!-- Profile Quick Settings -->
-              <div class="profile-settings-card">
-                <div class="qp-row">
+              <!-- Profile Custom Settings Card -->
+              <div class="sp-card profile-settings-card">
+                <div class="sp-row">
                   <div class="qp-text-wrap">
                     <span class="qp-label">Locked Player Source</span>
                     <span class="qp-sub">Keep following this player even while others are played</span>
                   </div>
-                  <select id="profile-source-lock-select" class="source-mapping-select" onchange="onSourceLockSelectChange(this.value)">
-                    <option value="">Auto-Follow (Active Player)</option>
-                  </select>
+                  <div class="sp-select-wrap">
+                    <select id="profile-source-lock-select" class="sp-select" onchange="onSourceLockSelectChange(this.value)">
+                      <option value="">Auto-Follow (Active Player)</option>
+                    </select>
+                  </div>
                 </div>
 
-                <div class="qp-row">
+                <div class="sp-row">
                   <div class="qp-text-wrap">
                     <span class="qp-label">Base Sync Offset</span>
                     <span class="qp-sub">Default latency compensation for this profile</span>
@@ -960,7 +937,7 @@
                   </div>
                 </div>
 
-                <div class="qp-row">
+                <div class="sp-row">
                   <div class="qp-text-wrap">
                     <span class="qp-label">Preferred Layout</span>
                     <span class="qp-sub">Display mode when this profile is active</span>
@@ -982,7 +959,7 @@
                   <span class="sp-toggle-slider"></span>
                 </label>
               </div>
-              <p class="sp-hint">Automatically activates the bound profile whenever audio starts on that music player.</p>
+              <p class="sp-hint">Automatically activates the bound profile when music starts on that player.</p>
 
               <div class="source-mapping-list" id="source-mapping-list">
                 <!-- Injected dynamically by app.js: Spotify, SimpMusic, YouTube/Browser, VLC, Apple Music, Generic -->

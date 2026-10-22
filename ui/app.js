@@ -2295,7 +2295,7 @@ class AirParticlePool {
 
 // --- Procedural Air Particle Geometries (Clean, Cool Celestial & Botanical) ---
 // 0: Soft Stardust Mote (ethereal cosmic dust point with luminous pinpoint core)
-// 1: Ethereal Floral Blossom (delicate sakura/plum bloom with organic curved petals, stamen beads & starlight heart)
+// 1: Clean Geometric Floral Mote (stylized 4-petal geometric glint with dynamic track palette)
 // 2: Diamond Crystal Star (tapered 4-point radiant celestial starlight glint)
 // 3: 8-Point Celestial Cross Star (major cardinal diffraction rays with diagonal micro-glints)
 
@@ -2324,15 +2324,15 @@ function drawAirBokehOrb(ctx, x, y, size, r, g, b, alpha, bloom) {
   ctx.fill();
 }
 
-function drawAirEtherealFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+function drawAirGeometricFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
 
-  // Soft ethereal floral ambient aura
-  const haloRad = size * 1.65 * bloom;
+  // Soft ambient aura in dynamic track color
+  const haloRad = size * 1.5 * bloom;
   const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
-  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.38})`);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.40})`);
   halo.addColorStop(0.50, `rgba(${r}, ${g}, ${b}, ${alpha * 0.12})`);
   halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
   ctx.fillStyle = halo;
@@ -2340,83 +2340,26 @@ function drawAirEtherealFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shap
   ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
   ctx.fill();
 
-  const petalCount = shapeParam > 0.40 ? 5 : 4; // Organic 5-petal sakura or 4-petal delicate blossom
-  const petalLen = size * 0.92;
-  const petalWidth = size * (petalCount === 5 ? 0.42 : 0.46);
+  // 4 clean, symmetrical geometric petals radiating from center (pure dynamic palette)
+  const petalDist = size * 0.55;
+  const petalRad = Math.max(1.2, size * 0.32);
 
-  for (let k = 0; k < petalCount; k++) {
-    const angle = (k * Math.PI * 2) / petalCount;
-    ctx.save();
-    ctx.rotate(angle);
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.72})`;
+  for (let a = 0; a < 4; a++) {
+    const angle = (a * Math.PI) / 2;
+    const px = Math.cos(angle) * petalDist;
+    const py = Math.sin(angle) * petalDist;
 
-    // Each petal: graceful organic curve with subtle delicate sakura notch at apex
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-
-    // Left flank curves outward
-    ctx.bezierCurveTo(
-      -petalWidth * 0.70, petalLen * 0.32,
-      -petalWidth * 0.95, petalLen * 0.70,
-      -petalWidth * 0.20, petalLen
-    );
-
-    // Subtle gentle sakura notch / indent at petal apex
-    ctx.quadraticCurveTo(0, petalLen * 0.90, petalWidth * 0.20, petalLen);
-
-    // Right flank curves back to origin
-    ctx.bezierCurveTo(
-      petalWidth * 0.95, petalLen * 0.70,
-      petalWidth * 0.70, petalLen * 0.32,
-      0, 0
-    );
-    ctx.closePath();
-
-    // Petal gradient: rich tone at heart fading into translucent porcelain white at petal tip
-    const petalGrad = ctx.createLinearGradient(0, 0, 0, petalLen);
-    petalGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.76})`);
-    petalGrad.addColorStop(0.55, `rgba(${Math.min(255, r + 40)}, ${Math.min(255, g + 40)}, ${Math.min(255, b + 40)}, ${alpha * 0.60})`);
-    petalGrad.addColorStop(0.92, `rgba(255, 255, 255, ${alpha * 0.82})`);
-    petalGrad.addColorStop(1, `rgba(255, 255, 255, ${alpha * 0.65})`);
-    ctx.fillStyle = petalGrad;
-    ctx.fill();
-
-    // Delicate translucent petal contour rim
-    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.40})`;
-    ctx.lineWidth = Math.max(0.6, size * 0.04);
-    ctx.stroke();
-
-    // Subtle translucent inner petal vein
-    ctx.beginPath();
-    ctx.moveTo(0, petalLen * 0.14);
-    ctx.lineTo(0, petalLen * 0.66);
-    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.30})`;
-    ctx.lineWidth = Math.max(0.5, size * 0.03);
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  // Golden / warm stamen pollen points encircling the core
-  const stamenCount = petalCount;
-  const stamenDist = size * 0.26;
-  const stamenRad = Math.max(0.7, size * 0.075);
-  ctx.fillStyle = `rgba(255, 238, 185, ${Math.min(1.0, alpha * 0.92)})`;
-  for (let s = 0; s < stamenCount; s++) {
-    const sa = (s * Math.PI * 2) / stamenCount + (Math.PI / stamenCount);
-    ctx.beginPath();
-    ctx.arc(Math.cos(sa) * stamenDist, Math.sin(sa) * stamenDist, stamenRad, 0, Math.PI * 2);
+    ctx.arc(px, py, petalRad, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Luminous white starlight core
-  const coreRad = Math.max(1.1, size * 0.18);
-  const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreRad * 1.8);
-  coreGrad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.98)})`);
-  coreGrad.addColorStop(0.5, `rgba(255, 248, 225, ${alpha * 0.72})`);
-  coreGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-  ctx.fillStyle = coreGrad;
+  // Brilliant starlight white center core
+  const coreRad = Math.max(1.0, size * 0.22);
+  ctx.fillStyle = '#ffffff';
   ctx.beginPath();
-  ctx.arc(0, 0, coreRad * 1.8, 0, Math.PI * 2);
+  ctx.arc(0, 0, coreRad, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -2553,8 +2496,11 @@ function drawAirCelestialSparkle(ctx, x, y, size, rot, r, g, b, alpha, bloom, sh
 }
 
 // Aliases for legacy/backward compatibility:
+function drawAirEtherealFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  drawAirGeometricFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam);
+}
 function drawAirBulbousCross(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
-  drawAirEtherealFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam);
+  drawAirGeometricFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam);
 }
 function drawAirPrismRing(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
   drawAirCelestialSparkle(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam);
@@ -3066,7 +3012,7 @@ class AirParticlePipeline {
       if (shape === 0) {
         drawAirBokehOrb(ctx, p.x[i], p.y[i], size, r, g, b, alpha, bloom);
       } else if (shape === 1) {
-        drawAirEtherealFlower(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+        drawAirGeometricFlower(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       } else if (shape === 2) {
         drawAirDiamondStar(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       } else if (shape === 3) {
@@ -4753,49 +4699,56 @@ function initLatencyRail() {
   const rail = document.getElementById('latency-rail');
   if (!rail) return;
   const card = rail.querySelector('.latency-rail-inner');
-  const REVEAL_PAD_X = 32, REVEAL_PAD_Y = 32;
-
-  let zoneCache = null;
-  const triggerZone = () => {
-    if (zoneCache) return zoneCache;
-    if (!card) return null;
-    const r = card.getBoundingClientRect();
-    const centre = r.top + r.height / 2;
-    zoneCache = {
-      left: window.innerWidth - (r.width + REVEAL_PAD_X),
-      top: centre - r.height / 2 - REVEAL_PAD_Y,
-      bottom: centre + r.height / 2 + REVEAL_PAD_Y
-    };
-    return zoneCache;
-  };
-  window.addEventListener('resize', () => { zoneCache = null; });
-  rail.addEventListener('transitionend', () => { zoneCache = null; });
 
   let hideTimer = null;
+  let revealTimer = null;
   window.sidebarPinned = false;
 
   const reveal = () => {
     clearTimeout(hideTimer);
+    clearTimeout(revealTimer);
+    revealTimer = null;
     document.body.classList.add('latency-rail-hot');
     if (window.ProfileManager && typeof window.ProfileManager.renderSidebar === 'function') {
       window.ProfileManager.renderSidebar();
     }
   };
+
   const conceal = () => {
+    clearTimeout(revealTimer);
+    revealTimer = null;
     if (window.sidebarPinned) return;
     clearTimeout(hideTimer);
-    // Smooth, snappy physics-based exit delay (110ms) quicker than before
     hideTimer = setTimeout(() => document.body.classList.remove('latency-rail-hot'), 110);
   };
-  const pointerInZone = (e) => {
-    const z = triggerZone();
-    return (!!z && e.clientX >= z.left && e.clientY >= z.top && e.clientY <= z.bottom) || e.clientX >= window.innerWidth - 18;
+
+  // Only trigger if cursor is within 5px of the actual right window border
+  const pointerAtEdge = (e) => {
+    return e.clientX >= window.innerWidth - 5;
   };
 
   window.addEventListener('mousemove', (e) => {
-    if (pointerInZone(e) || rail.matches(':hover')) reveal();
-    else conceal();
+    const isOpen = document.body.classList.contains('latency-rail-hot');
+    if (isOpen) {
+      if (rail.matches(':hover') || pointerAtEdge(e)) {
+        clearTimeout(hideTimer);
+      } else {
+        conceal();
+      }
+    } else {
+      if (pointerAtEdge(e)) {
+        if (!revealTimer) {
+          revealTimer = setTimeout(reveal, 120);
+        }
+      } else {
+        if (revealTimer) {
+          clearTimeout(revealTimer);
+          revealTimer = null;
+        }
+      }
+    }
   }, { passive: true });
+
   rail.addEventListener('mouseenter', reveal);
   rail.addEventListener('mouseleave', conceal);
 
@@ -4820,7 +4773,7 @@ function initLatencyRail() {
     }
   };
 
-  const minus = document.getElementById('latency-rail-minus');
+    const minus = document.getElementById('latency-rail-minus');
   const plus = document.getElementById('latency-rail-plus');
   const bindHold = (el, delta) => {
     if (!el) return;
@@ -7983,10 +7936,14 @@ const ProfileManager = {
           chip.className = 'sidebar-source-chip';
           const oInfo = o.source || {};
           const oIcon = SOURCE_ICONS[oInfo.icon] || SOURCE_ICONS[oInfo.id] || SOURCE_ICONS.generic;
-          chip.innerHTML = `<span>${oIcon}</span><span>${oInfo.name || o.app_id}</span>`;
+          let displayName = oInfo.name || o.app_id || 'Player';
+          if (/^[0-9a-fA-F]{8,}/.test(displayName)) {
+            displayName = 'Other Player';
+          }
+          chip.innerHTML = `<span>${oIcon}</span><span>${displayName}</span>`;
           chip.onclick = (e) => {
             e.stopPropagation();
-            this.switchAndLockSource(o.key, oInfo.name || o.app_id);
+            this.switchAndLockSource(o.key, displayName);
           };
           multiList.appendChild(chip);
         });
@@ -8326,13 +8283,14 @@ const ProfileManager = {
         const info = document.createElement('div');
         info.className = 'source-mapping-info';
         info.innerHTML = `
-          <span class="source-pill-dot" style="background: ${src.dot}; box-shadow: 0 0 6px ${src.dot}99;"></span>
           <span class="source-mapping-icon">${SOURCE_ICONS[src.icon] || SOURCE_ICONS.generic}</span>
           <span class="source-mapping-name">${src.name}</span>
         `;
 
+        const selWrap = document.createElement('div');
+        selWrap.className = 'sp-select-wrap';
         const sel = document.createElement('select');
-        sel.className = 'source-mapping-select';
+        sel.className = 'sp-select';
         sel.onchange = (e) => {
           this.setSourceMapping(src.id, e.target.value);
         };
@@ -8345,9 +8303,10 @@ const ProfileManager = {
           if (p.id === currentMappedProfile) opt.selected = true;
           sel.appendChild(opt);
         });
+        selWrap.appendChild(sel);
 
         row.appendChild(info);
-        row.appendChild(sel);
+        row.appendChild(selWrap);
         mappingList.appendChild(row);
       });
     }
@@ -8439,11 +8398,20 @@ window.submitQuickAddProfile = function(e) {
 };
 
 window.promptNewProfile = function() {
-  const input = document.getElementById('settings-new-profile-input');
-  if (input) {
-    input.focus();
-    input.select();
+  const row = document.getElementById('settings-inline-create-row');
+  if (row) {
+    row.hidden = false;
+    const input = document.getElementById('settings-new-profile-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
   }
+};
+
+window.toggleSettingsAddProfile = function(show) {
+  const row = document.getElementById('settings-inline-create-row');
+  if (row) row.hidden = !show;
 };
 
 window.submitSettingsAddProfile = function() {
