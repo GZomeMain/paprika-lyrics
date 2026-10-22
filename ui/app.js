@@ -8278,7 +8278,7 @@ const ProfileManager = {
       mappingList.innerHTML = '';
       CANONICAL_SOURCES.forEach((src) => {
         const row = document.createElement('div');
-        row.className = 'source-mapping-row';
+        row.className = 'qp-row qp-static source-mapping-row';
 
         const info = document.createElement('div');
         info.className = 'source-mapping-info';
@@ -8286,6 +8286,9 @@ const ProfileManager = {
           <span class="source-mapping-icon">${SOURCE_ICONS[src.icon] || SOURCE_ICONS.generic}</span>
           <span class="source-mapping-name">${src.name}</span>
         `;
+
+        const valWrap = document.createElement('div');
+        valWrap.className = 'qp-val';
 
         const selWrap = document.createElement('div');
         selWrap.className = 'sp-select-wrap';
@@ -8304,9 +8307,10 @@ const ProfileManager = {
           sel.appendChild(opt);
         });
         selWrap.appendChild(sel);
+        valWrap.appendChild(selWrap);
 
         row.appendChild(info);
-        row.appendChild(selWrap);
+        row.appendChild(valWrap);
         mappingList.appendChild(row);
       });
     }
@@ -8421,6 +8425,7 @@ window.submitSettingsAddProfile = function() {
   if (val) {
     ProfileManager.createProfile(val);
     input.value = '';
+    window.toggleSettingsAddProfile(false);
   }
 };
 
@@ -8428,6 +8433,9 @@ window.onSettingsAddKeyDown = function(e) {
   if (e.key === 'Enter') {
     e.preventDefault();
     submitSettingsAddProfile();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    toggleSettingsAddProfile(false);
   }
 };
 

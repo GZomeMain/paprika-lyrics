@@ -443,7 +443,7 @@
               <span class="sb-chip-text" id="sb-layout-state">Compact</span>
             </button>
             <button class="sidebar-toggle-chip" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop()" title="Toggle Always On Top">
-              <span class="sb-chip-icon">▲</span>
+              <span class="sb-chip-icon">📌</span>
               <span class="sb-chip-text" id="sb-ontop-state">Top</span>
             </button>
             <button class="sidebar-toggle-chip" id="sb-toggle-fs" onclick="toggleFullscreen()" title="Toggle Fullscreen (F11)">
@@ -894,54 +894,64 @@
 
               <!-- Inline Profile Creation Form (Hidden by default) -->
               <div class="sp-profile-inline-create" id="settings-inline-create-row" hidden>
-                <input type="text" id="settings-new-profile-input" class="sp-input" placeholder="Profile name..." maxlength="24" onkeydown="onSettingsAddKeyDown(event)">
-                <button class="sp-action-btn" onclick="submitSettingsAddProfile()">Add</button>
-                <button class="sp-action-btn" onclick="toggleSettingsAddProfile(false)">Cancel</button>
+                <input type="text" id="settings-new-profile-input" class="sp-input" placeholder="New profile name..." maxlength="24" onkeydown="onSettingsAddKeyDown(event)">
+                <div class="sp-profile-create-actions">
+                  <button class="sp-action-btn sp-action-primary" onclick="submitSettingsAddProfile()">Add</button>
+                  <button class="sp-action-btn" onclick="toggleSettingsAddProfile(false)">Cancel</button>
+                </div>
               </div>
 
-              <!-- Clean Profile Selector Row -->
-              <div class="sp-row profile-select-row">
+              <!-- Profile Selector Row -->
+              <div class="qp-row qp-static">
                 <div class="qp-text-wrap">
                   <span class="qp-label">Select Profile</span>
                   <span class="qp-sub">Choose active configuration preset</span>
                 </div>
-                <div class="sp-select-wrap">
-                  <select id="profile-select" class="sp-select" onchange="onProfileDropdownChange(this.value)">
-                  </select>
+                <div class="qp-val">
+                  <div class="sp-select-wrap">
+                    <select id="profile-select" class="sp-select" onchange="onProfileDropdownChange(this.value)">
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              <!-- Profile Custom Settings Card -->
-              <div class="sp-card profile-settings-card">
-                <div class="sp-row">
-                  <div class="qp-text-wrap">
-                    <span class="qp-label">Locked Player Source</span>
-                    <span class="qp-sub">Keep following this player even while others are played</span>
-                  </div>
+              <!-- Locked Player Source -->
+              <div class="qp-row qp-static">
+                <div class="qp-text-wrap">
+                  <span class="qp-label">Locked Player Source</span>
+                  <span class="qp-sub">Keep following this player even while others are played</span>
+                </div>
+                <div class="qp-val">
                   <div class="sp-select-wrap">
                     <select id="profile-source-lock-select" class="sp-select" onchange="onSourceLockSelectChange(this.value)">
                       <option value="">Auto-Follow (Active Player)</option>
                     </select>
                   </div>
                 </div>
+              </div>
 
-                <div class="sp-row">
-                  <div class="qp-text-wrap">
-                    <span class="qp-label">Base Sync Offset</span>
-                    <span class="qp-sub">Default latency compensation for this profile</span>
-                  </div>
+              <!-- Base Sync Offset -->
+              <div class="qp-row qp-static">
+                <div class="qp-text-wrap">
+                  <span class="qp-label">Base Sync Offset</span>
+                  <span class="qp-sub">Default latency compensation for this profile</span>
+                </div>
+                <div class="qp-val">
                   <div class="profile-latency-stepper">
                     <button class="stepper-btn" onclick="adjustProfileLatency(-25)">-25</button>
                     <span class="profile-latency-val" id="profile-latency-display">+0ms</span>
                     <button class="stepper-btn" onclick="adjustProfileLatency(25)">+25</button>
                   </div>
                 </div>
+              </div>
 
-                <div class="sp-row">
-                  <div class="qp-text-wrap">
-                    <span class="qp-label">Preferred Layout</span>
-                    <span class="qp-sub">Display mode when this profile is active</span>
-                  </div>
+              <!-- Preferred Layout -->
+              <div class="qp-row qp-static">
+                <div class="qp-text-wrap">
+                  <span class="qp-label">Preferred Layout</span>
+                  <span class="qp-sub">Display mode when this profile is active</span>
+                </div>
+                <div class="qp-val">
                   <div class="segmented-control" id="profile-layout-control">
                     <button class="seg-btn active" data-layout="compact" onclick="setProfileLayout('compact')">Compact</button>
                     <button class="seg-btn" data-layout="split" onclick="setProfileLayout('split')">Split</button>
