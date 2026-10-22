@@ -207,6 +207,7 @@ const container = document.getElementById('lyrics-container');
 const playBtns = [
   document.getElementById('art-tp-play'),
   document.getElementById('side-tp-play'),
+  document.getElementById('sidebar-btn-play'),
 ].filter(Boolean);
 // NOTE: the old #latency-bar / #latency-label elements were removed from the
 // DOM when the latency rail and settings page replaced them; the guarded
@@ -1430,6 +1431,9 @@ function syncSettingsPanel() {
   updateLatencyUI();
   renderDiagnostics();
   syncSettingsGroupSummaries();
+  if (window.ProfileManager && typeof window.ProfileManager.renderSidebar === 'function') {
+    window.ProfileManager.renderSidebar();
+  }
 }
 
 // =========================================================
@@ -4100,6 +4104,9 @@ function openSettings(open) {
   panel.classList.toggle('open', open);
   panel.setAttribute('aria-hidden', open ? 'false' : 'true');
   document.body.classList.toggle('settings-open', open);
+  if (open && typeof window.concealSidebar === 'function') {
+    window.concealSidebar();
+  }
   if (!open && window.toggleSettingsAddProfile) {
     window.toggleSettingsAddProfile(false);
   }
@@ -4699,15 +4706,69 @@ window.setCoverArt = function(url, isHiRes) {
   }
 };
 
-// ---------- Revamped Quick Controls & Source Sidebar ----------
+// ---------- Revamped Quick Controls Style Bar ----------
 function initLatencyRail() {
   const rail = document.getElementById('latency-rail');
   if (!rail) return;
-  const card = rail.querySelector('.latency-rail-inner');
 
+  const tipEl = document.getElementById('sidebar-floating-tooltip');
   let hideTimer = null;
   let revealTimer = null;
+  let isDraggingSlider = false;
+  let isHoldingStep = false;
   window.sidebarPinned = false;
+  window._activeSidebarTipTarget = null;
+
+  const updateTip = (target) => {
+    if (!tipEl || !target) return;
+    const tipText = target.dataset.tooltip || '';
+    if (!tipText) {
+      tipEl.classList.remove('visible');
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    const railRect = rail.getBoundingClientRect();
+    if (rect.bottom < railRect.top || rect.top > railRect.bottom || rect.left > window.innerWidth || rect.right < 0) {
+      tipEl.classList.remove('visible');
+      return;
+    }
+    tipEl.textContent = tipText;
+    tipEl.style.top = `${rect.top + rect.height / 2}px`;
+    tipEl.style.right = `${window.innerWidth - rect.left + 10}px`;
+    tipEl.classList.add('visible');
+  };
+
+  const hideTip = () => {
+    window._activeSidebarTipTarget = null;
+    if (tipEl) tipEl.classList.remove('visible');
+  };
+
+  window.updateSidebarFloatingTip = () => {
+    if (window._activeSidebarTipTarget) updateTip(window._activeSidebarTipTarget);
+  };
+
+  rail.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target || !rail.contains(target) || !target.dataset.tooltip) return;
+    window._activeSidebarTipTarget = target;
+    updateTip(target);
+  });
+
+  rail.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (target && target === window._activeSidebarTipTarget) {
+      if (e.relatedTarget && target.contains(e.relatedTarget)) return;
+      hideTip();
+    }
+  });
+
+  const innerScrollEl = rail.querySelector('.sidebar-inner') || rail;
+  innerScrollEl.addEventListener('scroll', () => {
+    if (window._activeSidebarTipTarget) updateTip(window._activeSidebarTipTarget);
+  }, { passive: true });
+  rail.addEventListener('scroll', () => {
+    if (window._activeSidebarTipTarget) updateTip(window._activeSidebarTipTarget);
+  }, { capture: true, passive: true });
 
   const reveal = () => {
     clearTimeout(hideTimer);
@@ -4722,20 +4783,25 @@ function initLatencyRail() {
   const conceal = () => {
     clearTimeout(revealTimer);
     revealTimer = null;
-    if (window.sidebarPinned) return;
+    hideTip();
+    if (window.sidebarPinned || isDraggingSlider || isHoldingStep) return;
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => document.body.classList.remove('latency-rail-hot'), 110);
+    hideTimer = setTimeout(() => {
+      if (isDraggingSlider || isHoldingStep) return;
+      document.body.classList.remove('latency-rail-hot');
+    }, 110);
   };
 
-  // Only trigger if cursor is within 5px of the actual right window border
+  // Trigger if cursor is within 8px of the actual right window border (avoid top window control buttons and resize corners)
   const pointerAtEdge = (e) => {
-    return e.clientX >= window.innerWidth - 5;
+    if (miniMode || document.body.classList.contains('resizing') || document.body.classList.contains('settings-open')) return false;
+    return e.clientX >= window.innerWidth - 8 && e.clientX <= window.innerWidth && e.clientY >= 36 && e.clientY <= window.innerHeight - 22;
   };
 
   window.addEventListener('mousemove', (e) => {
     const isOpen = document.body.classList.contains('latency-rail-hot');
     if (isOpen) {
-      if (rail.matches(':hover') || pointerAtEdge(e)) {
+      if (rail.matches(':hover') || pointerAtEdge(e) || isDraggingSlider || isHoldingStep) {
         clearTimeout(hideTimer);
       } else {
         conceal();
@@ -4743,7 +4809,7 @@ function initLatencyRail() {
     } else {
       if (pointerAtEdge(e)) {
         if (!revealTimer) {
-          revealTimer = setTimeout(reveal, 120);
+          revealTimer = setTimeout(reveal, 100);
         }
       } else {
         if (revealTimer) {
@@ -4757,6 +4823,23 @@ function initLatencyRail() {
   rail.addEventListener('mouseenter', reveal);
   rail.addEventListener('mouseleave', conceal);
 
+  window.addEventListener('blur', () => {
+    if (isDraggingSlider) {
+      isDraggingSlider = false;
+      const sl = document.getElementById('latency-slider');
+      if (sl) sl.classList.remove('dragging');
+    }
+    if (isHoldingStep) {
+      isHoldingStep = false;
+    }
+    hideTip();
+    if (!window.sidebarPinned) {
+      clearTimeout(revealTimer);
+      revealTimer = null;
+      document.body.classList.remove('latency-rail-hot');
+    }
+  });
+
   window.revealSidebar = reveal;
   window.concealSidebar = () => {
     window.sidebarPinned = false;
@@ -4764,6 +4847,7 @@ function initLatencyRail() {
     const btn = document.getElementById('sidebar-btn-pin');
     if (btn) btn.classList.remove('active');
     document.body.classList.remove('latency-rail-hot');
+    hideTip();
   };
   window.toggleSidebarPin = () => {
     window.sidebarPinned = !window.sidebarPinned;
@@ -4776,74 +4860,177 @@ function initLatencyRail() {
     } else {
       if (window.showProfileToast) window.showProfileToast('Sidebar unpinned');
     }
+    if (window.ProfileManager && typeof window.ProfileManager.renderSidebar === 'function') {
+      window.ProfileManager.renderSidebar();
+    }
   };
 
-    const minus = document.getElementById('latency-rail-minus');
+  const minus = document.getElementById('latency-rail-minus');
   const plus = document.getElementById('latency-rail-plus');
   const bindHold = (el, delta) => {
     if (!el) return;
     let repeat = null;
-    const stop = () => { clearTimeout(repeat); repeat = null; };
-    el.addEventListener('mousedown', () => {
+    const stop = () => {
+      clearTimeout(repeat);
+      repeat = null;
+      if (isHoldingStep) {
+        isHoldingStep = false;
+        if (!rail.matches(':hover') && !window.sidebarPinned) {
+          conceal();
+        }
+      }
+    };
+    const start = (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.button && e.button !== 0) return;
+      e.preventDefault();
+      isHoldingStep = true;
       window.adjustLatency(delta);
       repeat = setTimeout(function tick() {
         window.adjustLatency(delta);
         repeat = setTimeout(tick, 90);
       }, 420);
+    };
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('mousedown', start);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        window.adjustLatency(delta);
+      }
     });
-    ['mouseup', 'mouseleave'].forEach(ev => el.addEventListener(ev, stop));
+    ['pointerup', 'pointercancel', 'pointerleave', 'mouseup', 'mouseleave'].forEach(ev => el.addEventListener(ev, stop));
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('mouseup', stop);
   };
   bindHold(minus, -50);
   bindHold(plus, 50);
 
-  // ---- Horizontal sync slider (−3000..+3000 ms, zero at the middle) ----
+  // ---- Vertical sync slider (−3000..+3000 ms, zero at the middle) ----
   const slider = document.getElementById('latency-slider');
   if (!slider) return;
   const LAT_MIN = -3000, LAT_MAX = 3000;
 
   window.renderLatencySlider = function() {
-    const w = slider.clientWidth;
-    if (!w) return;
-    const frac = Math.max(0, Math.min(1, (latencyOffsetMs - LAT_MIN) / (LAT_MAX - LAT_MIN))); // 0..1, left→right
-    const thumbX = frac * w;
-    const zeroX = w / 2;
-    const left = Math.min(thumbX, zeroX);
-    const width = Math.max(2, Math.abs(zeroX - thumbX));
+    const h = slider.clientHeight || 72;
+    if (!h) return;
+    const clampedLat = Math.max(LAT_MIN, Math.min(LAT_MAX, latencyOffsetMs));
+    const frac = (clampedLat - LAT_MIN) / (LAT_MAX - LAT_MIN); // 0 at -3000ms, 0.5 at 0ms, 1 at +3000ms
+    const thumbY = (1 - frac) * h;
+    const zeroY = h / 2;
+    const top = Math.min(thumbY, zeroY);
+    const height = Math.max(2, Math.abs(zeroY - thumbY));
     const fill = document.getElementById('latency-slider-fill');
     const thumb = document.getElementById('latency-slider-thumb');
-    if (fill) { fill.style.left = left + 'px'; fill.style.width = width + 'px'; }
-    if (thumb) thumb.style.left = thumbX + 'px';
+    if (fill) {
+      fill.style.top = top + 'px';
+      fill.style.height = height + 'px';
+    }
+    if (thumb) {
+      thumb.style.top = thumbY + 'px';
+    }
     slider.classList.toggle('zero', Math.abs(latencyOffsetMs) < 25);
+    slider.setAttribute('aria-valuenow', clampedLat);
+    slider.setAttribute('aria-valuetext', `${clampedLat > 0 ? '+' : ''}${clampedLat}ms`);
   };
 
   const setFromEvent = (e) => {
     const rect = slider.getBoundingClientRect();
-    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+    const frac = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / Math.max(1, rect.height)));
     const target = Math.round((LAT_MIN + frac * (LAT_MAX - LAT_MIN)) / 50) * 50;
-    window.adjustLatency(target - latencyOffsetMs);
+    const clamped = Math.max(LAT_MIN, Math.min(LAT_MAX, target));
+    if (clamped !== latencyOffsetMs) {
+      window.adjustLatency(clamped - latencyOffsetMs);
+    }
   };
 
-  let dragging = false;
-  const onMove = (e) => { if (dragging) { e.preventDefault(); setFromEvent(e); } };
-  const onUp = () => {
-    if (!dragging) return;
-    dragging = false;
-    slider.classList.remove('dragging');
-    window.removeEventListener('mousemove', onMove);
-    window.removeEventListener('mouseup', onUp);
+  const onDragMove = (e) => {
+    if (!isDraggingSlider) return;
+    e.preventDefault();
+    setFromEvent(e);
   };
-  slider.addEventListener('mousedown', (e) => {
+  const onDragEnd = (e) => {
+    if (!isDraggingSlider) return;
+    isDraggingSlider = false;
+    slider.classList.remove('dragging');
+    if (e && e.pointerId !== undefined) {
+      try { slider.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    window.removeEventListener('pointermove', onDragMove);
+    window.removeEventListener('pointerup', onDragEnd);
+    window.removeEventListener('pointercancel', onDragEnd);
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragEnd);
+    if (!rail.matches(':hover') && !pointerAtEdge(e) && !window.sidebarPinned) {
+      conceal();
+    }
+  };
+  const onDragStart = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.button && e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    dragging = true;
+    isDraggingSlider = true;
     slider.classList.add('dragging');
+    if (e.pointerId !== undefined) {
+      try { slider.setPointerCapture(e.pointerId); } catch (_) {}
+    }
     setFromEvent(e);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragEnd);
+    window.addEventListener('pointercancel', onDragEnd);
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragEnd);
+  };
+  slider.addEventListener('pointerdown', onDragStart);
+  slider.addEventListener('mousedown', onDragStart);
+
+  slider.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 50 : -50;
+    window.adjustLatency(delta);
+  }, { passive: false });
+
+  slider.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      window.adjustLatency(50);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      window.adjustLatency(-50);
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      window.adjustLatency(200);
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      window.adjustLatency(-200);
+    } else if (e.key === 'Home' || e.key === 'End' || e.key === '0') {
+      e.preventDefault();
+      resetLatencyToZero(e);
+    }
   });
 
+  const resetLatencyToZero = (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (latencyOffsetMs !== 0) {
+      window.adjustLatency(-latencyOffsetMs);
+    }
+  };
+  slider.addEventListener('dblclick', resetLatencyToZero);
+  const valEl = document.getElementById('latency-rail-value');
+  if (valEl) {
+    valEl.addEventListener('dblclick', resetLatencyToZero);
+    valEl.style.cursor = 'pointer';
+    valEl.title = 'Double-click to reset sync to 0ms';
+  }
+
   window.renderLatencySlider();
-  window.addEventListener('resize', () => window.renderLatencySlider());
+  window.addEventListener('resize', () => {
+    window.renderLatencySlider();
+    if (typeof window.updateSidebarFloatingTip === 'function') {
+      window.updateSidebarFloatingTip();
+    }
+  });
 }
 initLatencyRail();
 
@@ -6999,6 +7186,9 @@ window.setPlaybackState = function(playing) {
   playBtns.forEach(b => b.classList.toggle('is-playing', isPlaying));
   // The beat pulse follows playback: a paused track should not keep glowing.
   document.body.classList.toggle('beat-paused', !isPlaying);
+  if (playing !== wasPlaying && window.ProfileManager && typeof window.ProfileManager.renderSidebar === 'function') {
+    window.ProfileManager.renderSidebar();
+  }
   lastTick = now;
 };
 
@@ -7432,6 +7622,7 @@ const SOURCE_ICONS = {
   browser: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
   vlc: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#ff8800"><path d="M13.2 2.1a1.4 1.4 0 0 0-2.4 0l-2.1 4.2h6.6zm-2.7 5.4-2.1 4.2h7.2l-2.1-4.2zm-2.7 5.4-2.7 5.4h12.4l-2.7-5.4zm-3.3 6.6-1.5 3c-.3.6.1 1.5.9 1.5h16.2c.8 0 1.2-.9.9-1.5l-1.5-3z"/></svg>',
   apple: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#fc3c44"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.84c.64-.78 1.08-1.87.96-2.96-.93.04-2.07.62-2.73 1.4-.58.67-1.09 1.77-.96 2.84 1.04.08 2.1-.5 2.73-1.28z"/></svg>',
+  apple_music: '<svg viewBox="0 0 24 24" width="13" height="13" fill="#fc3c44"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.84c.64-.78 1.08-1.87.96-2.96-.93.04-2.07.62-2.73 1.4-.58.67-1.09 1.77-.96 2.84 1.04.08 2.1-.5 2.73-1.28z"/></svg>',
   generic: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'
 };
 
@@ -7903,137 +8094,101 @@ const ProfileManager = {
       icon: 'generic'
     };
     const iconSvg = SOURCE_ICONS[src.icon] || SOURCE_ICONS[src.id] || SOURCE_ICONS.generic;
-    const iconEl = document.getElementById('sidebar-source-icon');
-    const nameEl = document.getElementById('sidebar-source-name');
-    const trackEl = document.getElementById('sidebar-source-track');
-    const lockBadge = document.getElementById('sidebar-source-lock-badge');
-    const lockBtn = document.getElementById('sidebar-lock-btn');
-    const lockIcon = document.getElementById('sidebar-lock-icon');
-    const autoFollowBtn = document.getElementById('sidebar-btn-auto-follow');
+    const isLocked = !!this.lockedSourceKey;
 
+    // 1. Media Source Indicator & Pulsing Status Dot
+    const sourceCard = document.getElementById('sidebar-current-source');
+    const iconEl = document.getElementById('sidebar-source-icon');
+    const dotEl = document.getElementById('sidebar-source-dot');
     if (iconEl) iconEl.innerHTML = iconSvg;
-    if (nameEl) nameEl.textContent = src.name || 'Media Player';
-    if (trackEl) {
-      trackEl.textContent = (currentTrackMeta && currentTrackMeta.title)
+    if (sourceCard) {
+      const trackText = (currentTrackMeta && currentTrackMeta.title)
         ? `${currentTrackMeta.title}${currentTrackMeta.artist ? ' • ' + currentTrackMeta.artist : ''}`
         : (isPlaying ? 'Playing audio' : 'Waiting for track...');
+      sourceCard.dataset.tooltip = `${src.name || 'Media Player'} • ${trackText}`;
+      sourceCard.classList.toggle('is-locked', isLocked);
+    }
+    if (dotEl) {
+      let dotColor = '#1db954';
+      if (src.id === 'simpmusic') dotColor = '#ff4081';
+      else if (src.id === 'youtube') dotColor = '#ff0000';
+      else if (src.id === 'vlc') dotColor = '#ff8800';
+      else if (src.id === 'apple_music') dotColor = '#fc3c44';
+      else if (src.id === 'browser') dotColor = '#3b82f6';
+      else if (src.id === 'generic') dotColor = '#888888';
+      dotEl.style.background = isLocked ? '#ffb703' : dotColor;
+      dotEl.style.boxShadow = `0 0 6px ${isLocked ? '#ffb703' : dotColor}99`;
     }
 
-    const isLocked = !!this.lockedSourceKey;
-    if (lockBadge) lockBadge.hidden = !isLocked;
-    if (lockBtn) lockBtn.classList.toggle('active', isLocked);
-    if (lockIcon) lockIcon.textContent = isLocked ? '🔒' : '🔓';
-    if (autoFollowBtn) autoFollowBtn.classList.toggle('active', !isLocked);
-
-    // Multi-source switch chips if multiple players detected
-    const multiContainer = document.getElementById('sidebar-multi-sources');
-    const multiList = document.getElementById('sidebar-other-sources-list');
-    if (multiContainer && multiList) {
-      const others = (this.availableSources || []).filter(s => {
-        const sId = (s.source && s.source.id) || s.app_id;
-        return sId !== src.id && s.key !== src.raw_app_id;
-      });
-      if (others.length > 0) {
-        multiContainer.hidden = false;
-        multiList.innerHTML = '';
-        others.forEach(o => {
-          const chip = document.createElement('button');
-          chip.type = 'button';
-          chip.className = 'sidebar-source-chip';
-          const oInfo = o.source || {};
-          const oIcon = SOURCE_ICONS[oInfo.icon] || SOURCE_ICONS[oInfo.id] || SOURCE_ICONS.generic;
-          let displayName = oInfo.name || o.app_id || 'Player';
-          if (/^[0-9a-fA-F]{8,}/.test(displayName)) {
-            displayName = 'Other Player';
-          }
-          chip.innerHTML = `<span>${oIcon}</span><span>${displayName}</span>`;
-          chip.onclick = (e) => {
-            e.stopPropagation();
-            this.switchAndLockSource(o.key, displayName);
-          };
-          multiList.appendChild(chip);
-        });
-      } else {
-        multiContainer.hidden = true;
-      }
+    // 2. Functional Lock Toggle Button & Morphing Vector SVG
+    const lockBtn = document.getElementById('sidebar-lock-btn');
+    const lockLocked = document.getElementById('sidebar-lock-locked');
+    const lockUnlocked = document.getElementById('sidebar-lock-unlocked');
+    if (lockBtn) {
+      lockBtn.classList.toggle('active', isLocked);
+      lockBtn.dataset.tooltip = isLocked
+        ? `Locked: ${src.name || 'Player'} (Click to auto-follow)`
+        : `Auto-follow: ${src.name || 'Player'} (Click to lock)`;
     }
+    if (lockLocked) lockLocked.hidden = !isLocked;
+    if (lockUnlocked) lockUnlocked.hidden = isLocked;
 
-    // Profiles Grid in sidebar
-    const profilesList = document.getElementById('sidebar-profiles-list');
-    if (profilesList) {
-      profilesList.innerHTML = '';
-      Object.values(this.profiles).forEach(p => {
-        const chip = document.createElement('div');
-        chip.className = `sidebar-profile-chip ${p.id === this.activeProfileId ? 'active' : ''}`;
-        chip.onclick = (e) => {
-          e.stopPropagation();
-          this.applyProfile(p.id, true);
-        };
-
-        const label = document.createElement('span');
-        label.textContent = p.name;
-        chip.appendChild(label);
-
-        if (!p.isBuiltin) {
-          const del = document.createElement('span');
-          del.className = 'sb-chip-del';
-          del.innerHTML = '&times;';
-          del.title = `Delete "${p.name}"`;
-          del.onclick = (e) => {
-            e.stopPropagation();
-            this.deleteProfile(p.id);
-          };
-          chip.appendChild(del);
-        }
-
-        profilesList.appendChild(chip);
-      });
-    }
-
-    // Transport play button in sidebar
+    // 3. Playback Transport Controls
     const playBtn = document.getElementById('sidebar-btn-play');
     if (playBtn) {
+      playBtn.classList.toggle('is-playing', isPlaying);
       playBtn.innerHTML = isPlaying
-        ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
-        : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        ? '<svg class="sidebar-play-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
+        : '<svg class="sidebar-play-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+      playBtn.dataset.tooltip = isPlaying ? 'Pause (Space)' : 'Play (Space)';
     }
 
-    // Quick Toggles in sidebar
+    // 4. Quick Action Buttons
     const tTrans = document.getElementById('sb-toggle-trans');
     if (tTrans) {
       tTrans.classList.toggle('active', !!showSecondary);
-      const s = document.getElementById('sb-trans-state');
-      if (s) s.textContent = showSecondary ? 'Romaji On' : 'Romaji Off';
+      tTrans.dataset.tooltip = showSecondary ? 'Romaji: On (T)' : 'Romaji: Off (T)';
     }
 
     const tLayout = document.getElementById('sb-toggle-layout');
     if (tLayout) {
       const isSplit = layoutMode === 'split';
       tLayout.classList.toggle('active', isSplit);
-      const s = document.getElementById('sb-layout-state');
-      if (s) s.textContent = isSplit ? 'Split' : 'Compact';
+      tLayout.dataset.tooltip = isSplit ? 'Layout: Split' : 'Layout: Compact';
     }
 
     const tTop = document.getElementById('sb-toggle-ontop');
     if (tTop) {
       tTop.classList.toggle('active', !!alwaysOnTop);
-      const s = document.getElementById('sb-ontop-state');
-      if (s) s.textContent = alwaysOnTop ? 'Top On' : 'Top Off';
+      tTop.dataset.tooltip = alwaysOnTop ? 'Always on Top: On' : 'Always on Top: Off';
     }
 
     const tFs = document.getElementById('sb-toggle-fs');
     if (tFs) {
       tFs.classList.toggle('active', !!isFullscreen);
-      const s = document.getElementById('sb-fs-state');
-      if (s) s.textContent = isFullscreen ? 'FS On' : 'Window';
+      tFs.dataset.tooltip = isFullscreen ? 'Fullscreen: On (F11)' : 'Fullscreen: Off (F11)';
     }
 
-    // Latency readout
+    // Pin Button State
+    const pinBtn = document.getElementById('sidebar-btn-pin');
+    if (pinBtn) {
+      pinBtn.classList.toggle('active', !!window.sidebarPinned);
+      pinBtn.dataset.tooltip = window.sidebarPinned ? 'Unpin style bar' : 'Pin style bar open';
+    }
+    const rail = document.getElementById('latency-rail');
+    if (rail) {
+      rail.classList.toggle('pinned', !!window.sidebarPinned);
+    }
+
+    // Latency Numeric Readout & Slider
     const valEl = document.getElementById('latency-rail-value');
     if (valEl) {
       valEl.textContent = `${latencyOffsetMs > 0 ? '+' : ''}${latencyOffsetMs}ms`;
     }
     if (window.renderLatencySlider) window.renderLatencySlider();
+    if (typeof window.updateSidebarFloatingTip === 'function') {
+      window.updateSidebarFloatingTip();
+    }
   },
 
   renderPills() {
@@ -8089,6 +8244,10 @@ const ProfileManager = {
         sideDotEl.style.background = isLocked ? '#ffb703' : dotColor;
         sideDotEl.style.boxShadow = `0 0 6px ${isLocked ? '#ffb703' : dotColor}99`;
       }
+    }
+
+    if (typeof this.renderSidebar === 'function') {
+      this.renderSidebar();
     }
   },
 
@@ -8324,6 +8483,7 @@ const ProfileManager = {
 };
 
 window.ProfileManager = ProfileManager;
+ProfileManager.init();
 
 // Global UI Event Bridges
 window.toggleQuickProfileMenu = function(e) {
@@ -8560,44 +8720,15 @@ window.toggleCurrentSourceLock = function(e) {
     ProfileManager.unlockSource();
   } else {
     const cur = ProfileManager.currentSource;
-    const key = (cur && cur.raw_app_id) || (cur && cur.id) || 'media';
+    let key = (cur && cur.raw_app_id) || (cur && cur.id);
+    if (Array.isArray(ProfileManager.availableSources) && ProfileManager.availableSources.length > 0) {
+      const activeEntry = ProfileManager.availableSources.find(s => s.playing) || ProfileManager.availableSources[0];
+      if (activeEntry && activeEntry.key) {
+        key = activeEntry.key;
+      }
+    }
+    key = key || 'media';
     ProfileManager.switchAndLockSource(key, (cur && cur.name) || 'Current Player');
   }
 };
 
-window.toggleSidebarAddProfile = function(e) {
-  if (e) e.stopPropagation();
-  const row = document.getElementById('sidebar-inline-add');
-  if (!row) return;
-  row.hidden = !row.hidden;
-  if (!row.hidden) {
-    const input = document.getElementById('sidebar-new-profile-input');
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
-  }
-};
-
-window.onSidebarAddKeyDown = function(e) {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    submitSidebarAddProfile(e);
-  } else if (e.key === 'Escape') {
-    const row = document.getElementById('sidebar-inline-add');
-    if (row) row.hidden = true;
-  }
-};
-
-window.submitSidebarAddProfile = function(e) {
-  if (e) e.stopPropagation();
-  const input = document.getElementById('sidebar-new-profile-input');
-  if (!input) return;
-  const val = input.value.trim();
-  if (val) {
-    ProfileManager.createProfile(val);
-    input.value = '';
-    const row = document.getElementById('sidebar-inline-add');
-    if (row) row.hidden = true;
-  }
-};

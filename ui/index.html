@@ -324,136 +324,134 @@
       </div>
     </aside>
 
-    <!-- Revamped Quick Controls & Source Sidebar (Right Edge, Physics-based Spring Slide-in) -->
+    <!-- Revamped Quick Controls Style Bar (Right Edge, Slim Vertical Bar ~48px) -->
     <aside class="app-sidebar latency-rail" id="latency-rail" aria-label="Quick Controls Sidebar" data-no-drag>
       <div class="sidebar-inner latency-rail-inner">
-        <!-- Sidebar Header -->
-        <div class="sidebar-header">
-          <div class="sidebar-title-wrap">
-            <span class="sidebar-title">Controls</span>
-          </div>
-          <div class="sidebar-header-actions">
-            <button class="sidebar-tool-btn" onclick="openProfilesSettings()" title="Open Settings (Ctrl+,)">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </button>
-            <button class="sidebar-tool-btn" id="sidebar-btn-pin" onclick="toggleSidebarPin()" title="Pin Sidebar Open">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 17v5M5 12V7a5 5 0 0 1 10 0v5l2 2H3l2-2z"/>
-              </svg>
-            </button>
-            <button class="sidebar-tool-btn" onclick="concealSidebar()" title="Close Sidebar">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          </div>
+        <!-- Top Utility Section: Pin & Settings -->
+        <div class="sidebar-group sidebar-group-top">
+          <button class="sidebar-icon-btn" id="sidebar-btn-pin" onclick="toggleSidebarPin()"
+                  data-tooltip="Pin style bar open" aria-label="Pin sidebar open">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="17" x2="12" y2="22"/>
+              <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h.5a1.5 1.5 0 0 0 0-3h-7a1.5 1.5 0 0 0 0 3H9v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn" onclick="openProfilesSettings()"
+                  data-tooltip="Settings & Profiles (Ctrl+,)" aria-label="Open settings">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3.2"/>
+              <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
+            </svg>
+          </button>
         </div>
 
-        <!-- Section: Active Media Player & Source Control -->
-        <div class="sidebar-section">
-          <div class="sidebar-section-header">
-            <span class="sidebar-section-label">Media Source</span>
-            <button class="sidebar-badge-action" id="sidebar-btn-auto-follow" onclick="unlockSource(event)" title="Auto-follow active player"><span class="qp-auto-dot" id="sidebar-auto-dot"></span> Auto</button>
-          </div>
+        <div class="sidebar-divider" role="separator"></div>
 
-          <div class="sidebar-source-card" id="sidebar-current-source">
-            <div class="sidebar-source-left">
-              <span class="sidebar-source-icon" id="sidebar-source-icon"></span>
-              <div class="sidebar-source-meta">
-                <div class="sidebar-source-name-row">
-                  <span class="sidebar-source-name" id="sidebar-source-name">Media Player</span>
-                  <span class="sidebar-lock-badge" id="sidebar-source-lock-badge" hidden>🔒 Locked</span>
-                </div>
-                <span class="sidebar-source-track" id="sidebar-source-track">Waiting for track...</span>
-              </div>
-            </div>
-            <button class="sidebar-lock-btn" id="sidebar-lock-btn" onclick="toggleCurrentSourceLock(event)" title="Lock playback to this player">
-              <span id="sidebar-lock-icon">🔒</span>
-            </button>
+        <!-- Media Source & Lock Toggle -->
+        <div class="sidebar-group sidebar-group-source">
+          <div class="sidebar-source-indicator" id="sidebar-current-source" onclick="toggleCurrentSourceLock(event)"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleCurrentSourceLock(event);}"
+               role="button" tabindex="0" data-tooltip="Media Player" aria-label="Active media source (Click to toggle lock)">
+            <span class="sidebar-source-icon" id="sidebar-source-icon"></span>
+            <span class="sidebar-source-dot" id="sidebar-source-dot"></span>
           </div>
-
-          <!-- Multi-source selector if multiple players active -->
-          <div class="sidebar-multi-sources" id="sidebar-multi-sources" hidden>
-            <span class="sidebar-sub-label">Other Players:</span>
-            <div class="sidebar-source-pills" id="sidebar-other-sources-list"></div>
-          </div>
+          <button class="sidebar-icon-btn sidebar-lock-btn" id="sidebar-lock-btn" onclick="toggleCurrentSourceLock(event)"
+                  data-tooltip="Auto-follow player (Click to lock)" aria-label="Toggle player lock">
+            <svg class="sidebar-lock-svg icon-unlocked" id="sidebar-lock-unlocked" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              <path d="M8 11V7a4 4 0 0 1 7.7-1.5"/>
+            </svg>
+            <svg class="sidebar-lock-svg icon-locked" id="sidebar-lock-locked" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" hidden>
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+            </svg>
+          </button>
         </div>
 
-        <!-- Section: Active Profile Switcher & Quick Add/Delete -->
-        <div class="sidebar-section">
-          <div class="sidebar-section-header">
-            <span class="sidebar-section-label">Profile</span>
-            <button class="sidebar-badge-action" onclick="toggleSidebarAddProfile(event)" title="Create new profile">+ New</button>
-          </div>
+        <div class="sidebar-divider" role="separator"></div>
 
-          <!-- Inline profile creation row -->
-          <div class="sidebar-inline-add" id="sidebar-inline-add" hidden>
-            <input type="text" id="sidebar-new-profile-input" class="sidebar-input" placeholder="Profile name..." maxlength="24" onkeydown="onSidebarAddKeyDown(event)">
-            <button class="sidebar-btn-confirm" onclick="submitSidebarAddProfile(event)">Add</button>
-          </div>
-
-          <div class="sidebar-profiles-grid" id="sidebar-profiles-list"></div>
+        <!-- Vertical Playback Transport -->
+        <div class="sidebar-group sidebar-group-transport">
+          <button class="sidebar-icon-btn sidebar-media-btn" onclick="skipPrevious()"
+                  data-tooltip="Previous Track" aria-label="Previous track">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn sidebar-media-btn sidebar-play-btn" id="sidebar-btn-play" onclick="togglePlayback()"
+                  data-tooltip="Play / Pause (Space)" aria-label="Play or pause">
+            <svg class="sidebar-play-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn sidebar-media-btn" onclick="skipNext()"
+                  data-tooltip="Next Track" aria-label="Next track">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+            </svg>
+          </button>
         </div>
 
-        <!-- Section: Playback Controls (Play/Pause, Skip) -->
-        <div class="sidebar-section sidebar-transport-section">
-          <div class="sidebar-transport-row">
-            <button class="sidebar-media-btn" onclick="skipPrevious()" title="Previous Track">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
-            </button>
-            <button class="sidebar-media-btn sidebar-play-btn" id="sidebar-btn-play" onclick="togglePlayback()" title="Play / Pause">
-              <svg class="sidebar-play-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            </button>
-            <button class="sidebar-media-btn" onclick="skipNext()" title="Next Track">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-            </button>
-          </div>
-        </div>
+        <div class="sidebar-divider" role="separator"></div>
 
-        <!-- Section: Audio Sync / Latency (Elevated Rail) -->
-        <div class="sidebar-section sidebar-sync-section">
-          <div class="sidebar-section-header">
-            <span class="sidebar-section-label">Audio Sync</span>
+        <!-- Vertical Audio Sync -->
+        <div class="sidebar-group sidebar-group-sync">
+          <button class="sidebar-icon-btn sidebar-step-btn latency-rail-btn" id="latency-rail-plus"
+                  data-tooltip="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50ms">+50</button>
+          <div class="sidebar-sync-slider-col">
             <span class="sidebar-sync-val" id="latency-rail-value">+0ms</span>
-          </div>
-          <div class="sidebar-sync-row">
-            <button class="sidebar-step-btn latency-rail-btn" id="latency-rail-minus" title="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50ms">-50</button>
-            <div class="sidebar-sync-slider latency-slider" id="latency-slider" title="Drag to adjust sync" data-no-drag>
+            <div class="sidebar-sync-slider latency-slider" id="latency-slider"
+                 role="slider" tabindex="0" aria-valuemin="-3000" aria-valuemax="3000" aria-valuenow="0" aria-valuetext="+0ms"
+                 data-tooltip="Drag to adjust sync (-3000ms..+3000ms)" aria-label="Audio sync slider" data-no-drag>
               <div class="latency-slider-track"></div>
               <div class="latency-slider-fill" id="latency-slider-fill"></div>
+              <div class="latency-slider-center"></div>
               <div class="latency-slider-thumb" id="latency-slider-thumb"></div>
             </div>
-            <button class="sidebar-step-btn latency-rail-btn" id="latency-rail-plus" title="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50ms">+50</button>
           </div>
+          <button class="sidebar-icon-btn sidebar-step-btn latency-rail-btn" id="latency-rail-minus"
+                  data-tooltip="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50ms">-50</button>
         </div>
 
-        <!-- Section: Quick Toggles (Translations, Layout, Top, Fullscreen) -->
-        <div class="sidebar-section sidebar-toggles-section">
-          <div class="sidebar-toggles-grid">
-            <button class="sidebar-toggle-chip" id="sb-toggle-trans" onclick="toggleTranslations()" title="Toggle Pronunciation / Romaji (T)">
-              <span class="sb-chip-icon">文</span>
-              <span class="sb-chip-text" id="sb-trans-state">Romaji</span>
-            </button>
-            <button class="sidebar-toggle-chip" id="sb-toggle-layout" onclick="cycleLayout()" title="Toggle Compact / Split layout">
-              <span class="sb-chip-icon">⚏</span>
-              <span class="sb-chip-text" id="sb-layout-state">Compact</span>
-            </button>
-            <button class="sidebar-toggle-chip" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop()" title="Toggle Always On Top">
-              <span class="sb-chip-icon">📌</span>
-              <span class="sb-chip-text" id="sb-ontop-state">Top</span>
-            </button>
-            <button class="sidebar-toggle-chip" id="sb-toggle-fs" onclick="toggleFullscreen()" title="Toggle Fullscreen (F11)">
-              <span class="sb-chip-icon">⛶</span>
-              <span class="sb-chip-text" id="sb-fs-state">Full</span>
-            </button>
-          </div>
+        <div class="sidebar-divider" role="separator"></div>
+
+        <!-- Vertical Action Stack -->
+        <div class="sidebar-group sidebar-group-actions">
+          <button class="sidebar-icon-btn" id="sb-toggle-trans" onclick="toggleTranslations()"
+                  data-tooltip="Toggle Pronunciation / Romaji (T)" aria-label="Toggle Pronunciation">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m5 8 6 6"/>
+              <path d="m4 14 6-6 2-3"/>
+              <path d="M2 5h12"/>
+              <path d="M7 2h1"/>
+              <path d="m22 22-5-10-5 10"/>
+              <path d="M14 18h6"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn" id="sb-toggle-layout" onclick="cycleLayout()"
+                  data-tooltip="Toggle Layout (Compact / Split)" aria-label="Cycle layout">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="M9.5 4.5v15"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop()"
+                  data-tooltip="Toggle Always On Top" aria-label="Toggle always on top">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="m8.5 13 3.5-3.5 3.5 3.5M12 9.5v7"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn" id="sb-toggle-fs" onclick="toggleFullscreen()"
+                  data-tooltip="Toggle Fullscreen (F11)" aria-label="Toggle fullscreen">
+            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+            </svg>
+          </button>
         </div>
       </div>
     </aside>
+    <div id="sidebar-floating-tooltip" class="sidebar-floating-tooltip" aria-hidden="true"></div>
 
     <!-- Settings: a full-window sheet rather than a dropdown. Every option gets
          a section, a real label and room to explain itself, which a 236px
