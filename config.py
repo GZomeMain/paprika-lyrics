@@ -221,7 +221,8 @@ def set_spicy_api_key(key: str) -> dict:
     and the persistent settings cache in CACHE.
     """
     global SPICY_API_KEY
-    clean_key = (key or "").strip()
+    import re
+    clean_key = re.sub(r'[\r\n"]', '', (key or "").strip())
     SPICY_API_KEY = clean_key
     if clean_key:
         os.environ["SPICY_API_KEY"] = clean_key

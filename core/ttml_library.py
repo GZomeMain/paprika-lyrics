@@ -31,6 +31,7 @@ from storage import CACHE
 
 TTML_SUFFIXES = (".ttml", ".xml")
 TRASH_DIR_NAME = ".trash"
+MAX_TTML_BYTES = 10 * 1024 * 1024  # 10 MB limit
 # A binding map entry's "file" when the user asked for online lyrics for a song:
 # the marker has to survive a restart, or the auto-match would quietly come back.
 DISABLED = ""
@@ -150,6 +151,11 @@ class TtmlLibrary:
     # ------------------------------------------------------------------- index
     def _parse_file(self, path: Path) -> tuple[list[dict], dict]:
         try:
+            if path.stat().st_size > MAX_TTML_BYTES:
+                return [], {"error": "file too large (max 10MB)", "title": "",
+                            "artist": "", "album": "", "duration_ms": None,
+                            "lang": "", "timing": "", "timing_declared": "",
+                            "spotify_id": "", "apple_music_id": "", "agents": []}
             # utf-8-sig: the dialect forbids a BOM, and WebView/editor output
             # sometimes carries one anyway; stripping it is free.
             text = path.read_text(encoding="utf-8-sig", errors="replace")
@@ -578,15 +584,33 @@ class TtmlLibrary:
         except OSError:
             return 0
 
+    def _safe_path(self, rel: str) -> Path | None:
+        """The file `rel` names, or None unless it is a real file inside the library."""
+        rel = str(rel or "").replace("\\", "/").lstrip("/")
+        if not rel or ".." in Path(rel).parts:
+            return None
+        target = self.directory / rel
+        try:
+            if not target.is_file():
+                return None
+            target.resolve().relative_to(self.directory.resolve())
+        except Exception:
+            return None
+        return target
+
     def reveal(self, rel: str = "") -> bool:
         """Opens the library (or selects one file in it) in the file manager."""
         try:
             self.ensure_dir()
             if rel:
-                target = self.directory / rel
-                if target.exists():
-                    os.startfile(str(target))          # noqa: S606 - Windows shell
-                    return True
+                target = self._safe_path(rel)
+                if target is not None:
+                    try:
+                        import subprocess
+                        subprocess.run(["explorer.exe", f"/select,{target.resolve()}"], check=False)
+                        return True
+                    except Exception:
+                        pass
             os.startfile(str(self.directory))          # noqa: S606 - Windows shell
             return True
         except Exception as exc:

@@ -186,7 +186,7 @@ let lastAutoLatencyMs = 0;
 // On by default so existing installs behave exactly as before; turning it off
 // opens fresh tracks at true 0ms unless auto latency fires or the user nudges.
 // Saved per-track nudges always win either way.
-let useDefaultLatency = Settings.get('useDefaultLatency', 'on') !== 'off';
+let useDefaultLatency = Settings.get('useDefaultLatency', 'off') === 'on';
 // The track an auto offset opened on. A later Ctrl+[/] nudge on that same track
 // is the residual error of the auto estimate for this player, so it teaches the
 // per-player bias (see window.adjustLatency). Cleared on every load.
@@ -873,6 +873,7 @@ function applyLayoutState() {
   if (activeLineIdx >= 0 && lyricDom[activeLineIdx]) {
     scrollToActiveCluster([activeLineIdx]);
   }
+  if (window.airPipeline) window.airPipeline.resize();
   syncSettingsPanel();
 }
 
@@ -1014,6 +1015,7 @@ function applyMiniState() {
   syncWindowDrag();   // the mini bar is a drag surface too
   syncLyricsClearance();
   fitLyricLines();    // mini has its own gutters, and therefore its own column width
+  if (window.airPipeline) window.airPipeline.resize();
   wakeRenderLoop();   // entering/leaving mini animates the scroller's padding
 }
 
@@ -1402,10 +1404,11 @@ function syncSettingsPanel() {
   renderFontPanel();
   setValueText(document.querySelector('#qp-motion .qp-state'), reducedMotion ? 'Reduced' : 'Full');
   setValueText(document.getElementById('qp-motion-style-state'), motionStyle.charAt(0).toUpperCase() + motionStyle.slice(1));
-  setValueText(document.getElementById('qp-beat-state'), BEAT_LABELS[beatMode] || 'Subtle');
-  setValueText(document.getElementById('qp-moments-state'), MOMENT_LABELS[momentsMode] || 'Subtle');
-  setValueText(document.getElementById('qp-ambient-state'), AMBIENT_LABELS[ambientMode] || 'Subtle');
-  setValueText(document.getElementById('qp-tilt-state'), TILT_LABELS[tiltMode] || 'Subtle');
+  setValueText(document.getElementById('qp-beat-state'), EFFECT_LEVEL_LABELS[beatLevel] || 'Subtle');
+  setValueText(document.getElementById('qp-moments-state'), EFFECT_LEVEL_LABELS[momentLevel] || 'Subtle');
+  setValueText(document.getElementById('qp-ambient-state'), EFFECT_LEVEL_LABELS[ambientLevel] || 'Subtle');
+  setValueText(document.getElementById('qp-tilt-state'), EFFECT_LEVEL_LABELS[tiltLevel] || 'Subtle');
+  syncSegmentedControls();
   setValueText(document.querySelector('#qp-clickthrough .qp-state'), clickThrough ? 'On' : 'Off');
   setValueText(document.getElementById('qp-layout-state'),
     layoutMode === 'compact' ? 'Compact' : (isFullscreen ? 'Split' : 'Split (needs FS)'));
@@ -1497,21 +1500,299 @@ function cycleMotionStyle() {
 // present, same layers and colours, no separate glow element — with the album art
 // breathing along with it. Modes: Subtle (default) / Bold / Off.
 // =========================================================
+// =========================================================
+// 5-Level Visual Effects Engine & Audio-DSP Clock Timing Architecture
+// =========================================================
+const EFFECT_LEVEL_LABELS = ['Off', 'Minimal', 'Subtle', 'Vivid', 'Apex'];
+const BEAT_LEVEL_SCALES = [0, 0.40, 0.75, 1.05, 1.40];
+const CHROMA_LEVEL_SCALES = [0, 0.45, 0.90, 1.50, 2.30];
+const AMBIENT_LEVEL_COUNTS = [0, 14, 28, 48, 80];
+const AMBIENT_LEVEL_OPACITIES = [0, 0.35, 0.62, 0.88, 1.0];
+const MOMENT_LEVEL_DEPTHS = [0, 0.35, 0.65, 1.0, 1.45];
+const TILT_LEVEL_AMPS = [0, 0.35, 0.70, 1.20, 1.70];
+
+let beatLevel = 2;
+let chromaLevel = 2;
+let ambientLevel = 2;
+let momentLevel = 2;
+let tiltLevel = 2;
+
+// Backward-compatible string mode mappings
+function getLegacyMode(lvl) {
+  if (lvl === 0) return 'off';
+  if (lvl >= 3) return 'bold';
+  return 'on';
+}
+
+function parseLevelSetting(val, fallback = 2) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'number') return Math.max(0, Math.min(4, Math.round(val)));
+  if (val === 'off' || val === '0') return 0;
+  if (val === 'min' || val === '1') return 1;
+  if (val === 'on' || val === 'subtle' || val === '2') return 2;
+  if (val === 'bold' || val === 'vivid' || val === '3') return 3;
+  if (val === 'apex' || val === '4') return 4;
+  const num = parseInt(val, 10);
+  return isNaN(num) ? fallback : Math.max(0, Math.min(4, num));
+}
+
 let beatMode = 'on';
 const BEAT_MODES = ['on', 'bold', 'off'];
 const BEAT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
+
+const MOMENT_MODES = ['on', 'bold', 'off'];
+const MOMENT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
+const MOMENT_DEPTH = { on: 0.6, bold: 1 };
+let momentsMode = 'on';
+
+const AMBIENT_MODES = ['on', 'bold', 'off'];
+const AMBIENT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
+const AMBIENT_LEVEL = { on: 0.62, bold: 1, off: 0 };
+let ambientMode = 'on';
+
+const TILT_MODES = ['on', 'bold', 'off'];
+const TILT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
+const TILT_AMP = { on: 0.7, bold: 1.2, off: 0 };
+let tiltMode = 'on';
+
+let sliderBeat = parseInt(Settings.get('sliderBeat', '45'), 10);
+if (isNaN(sliderBeat)) sliderBeat = 45;
+let sliderChroma = parseInt(Settings.get('sliderChroma', '30'), 10);
+if (isNaN(sliderChroma)) sliderChroma = 30;
+let sliderArt = parseInt(Settings.get('sliderArt', '40'), 10);
+if (isNaN(sliderArt)) sliderArt = 40;
+let sliderParticles = parseInt(Settings.get('sliderParticles', '28'), 10);
+if (isNaN(sliderParticles)) sliderParticles = 28;
+let sliderParticleOpacity = parseInt(Settings.get('sliderParticleOpacity', '80'), 10);
+if (isNaN(sliderParticleOpacity)) sliderParticleOpacity = 80;
+let sliderParticleSize = parseInt(Settings.get('sliderParticleSize', '70'), 10);
+if (isNaN(sliderParticleSize)) sliderParticleSize = 70;
+let sliderMoments = parseInt(Settings.get('sliderMoments', '35'), 10);
+if (isNaN(sliderMoments)) sliderMoments = 35;
+let sliderTilt = parseInt(Settings.get('sliderTilt', '50'), 10);
+if (isNaN(sliderTilt)) sliderTilt = 50;
+
+function toggleSubSection(id) {
+  const section = document.getElementById(id);
+  const btn = document.querySelector(`[aria-controls="${id}"]`);
+  if (!section) return;
+  const isHidden = section.hidden;
+  section.hidden = !isHidden;
+  if (btn) {
+    btn.setAttribute('aria-expanded', String(isHidden));
+    btn.classList.toggle('sp-expanded', isHidden);
+  }
+  Settings.set(`expand_${id}`, isHidden ? '1' : '0');
+}
+window.toggleSubSection = toggleSubSection;
+
+function restoreSubSections() {
+  ['beat-sub', 'air-sub'].forEach(id => {
+    const isExpanded = Settings.get(`expand_${id}`, '0') === '1';
+    const section = document.getElementById(id);
+    const btn = document.querySelector(`[aria-controls="${id}"]`);
+    if (section && btn && isExpanded) {
+      section.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      btn.classList.add('sp-expanded');
+    }
+  });
+}
+window.restoreSubSections = restoreSubSections;
+
+function syncVisualSliders() {
+  const sliders = [
+    { id: 'slider-beat', badge: 'badge-beat', val: sliderBeat, unit: '%' },
+    { id: 'slider-chroma', badge: 'badge-chroma', val: sliderChroma, unit: '%' },
+    { id: 'slider-art', badge: 'badge-art', val: sliderArt, unit: '%' },
+    { id: 'slider-particles', badge: 'badge-particles', val: sliderParticles, unit: ' motes' },
+    { id: 'slider-particle-opacity', badge: 'badge-particle-opacity', val: sliderParticleOpacity, unit: '%' },
+    { id: 'slider-particle-size', badge: 'badge-particle-size', val: sliderParticleSize, unit: '%' },
+    { id: 'slider-moments', badge: 'badge-moments', val: sliderMoments, unit: '%' },
+    { id: 'slider-tilt', badge: 'badge-tilt', val: sliderTilt, unit: '%' }
+  ];
+  for (const s of sliders) {
+    const el = document.getElementById(s.id);
+    if (el) el.value = s.val;
+    const b = document.getElementById(s.badge);
+    if (b) b.textContent = s.val === 0 ? 'Off' : `${s.val}${s.unit}`;
+  }
+  document.documentElement.style.setProperty('--art-slider-scale', (sliderArt / 100).toFixed(2));
+  document.documentElement.style.setProperty('--tilt-amp', String((sliderTilt / 100) * 1.2));
+  restoreSubSections();
+}
+window.syncVisualSliders = syncVisualSliders;
+
+function onVisualSliderInput(name, value) {
+  const val = Math.max(0, parseInt(value, 10) || 0);
+  if (name === 'beat') {
+    sliderBeat = val;
+    beatLevel = val === 0 ? 0 : (val < 25 ? 1 : (val < 60 ? 2 : (val < 85 ? 3 : 4)));
+    const b = document.getElementById('badge-beat');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+  } else if (name === 'chroma') {
+    sliderChroma = val;
+    chromaLevel = val === 0 ? 0 : 2;
+    if (val === 0) setChromaOffset(0);
+    const b = document.getElementById('badge-chroma');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+  } else if (name === 'art') {
+    sliderArt = val;
+    document.documentElement.style.setProperty('--art-slider-scale', (val / 100).toFixed(2));
+    const b = document.getElementById('badge-art');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+  } else if (name === 'particles') {
+    sliderParticles = val;
+    ambientLevel = val === 0 ? 0 : 2;
+    if (window.airPipeline) {
+      if (val === 0) {
+        if (window.airPipeline.ctx && window.airPipeline.canvas) {
+          window.airPipeline.ctx.clearRect(0, 0, window.airPipeline.canvas.width, window.airPipeline.canvas.height);
+        }
+        window.airPipeline.pool.clear();
+      } else if (window.airPipeline.pool.count === 0) {
+        window.airPipeline.seedParticles();
+      }
+    }
+    const b = document.getElementById('badge-particles');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val} motes`;
+  } else if (name === 'particle-opacity') {
+    sliderParticleOpacity = val;
+    const b = document.getElementById('badge-particle-opacity');
+    if (b) b.textContent = `${val}%`;
+  } else if (name === 'particle-size') {
+    sliderParticleSize = val;
+    const b = document.getElementById('badge-particle-size');
+    if (b) b.textContent = `${val}%`;
+  } else if (name === 'moments') {
+    sliderMoments = val;
+    momentLevel = val === 0 ? 0 : 2;
+    if (val === 0) releaseMomentGrade();
+    const b = document.getElementById('badge-moments');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+  } else if (name === 'tilt') {
+    sliderTilt = val;
+    tiltLevel = val === 0 ? 0 : 2;
+    document.documentElement.style.setProperty('--tilt-amp', String((val / 100) * 1.2));
+    if (val === 0) resetTilt();
+    const b = document.getElementById('badge-tilt');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+  }
+}
+
+function onVisualSliderChange(name, value) {
+  onVisualSliderInput(name, value);
+  const val = Math.max(0, parseInt(value, 10) || 0);
+  if (name === 'beat') {
+    Settings.set('sliderBeat', val);
+    Settings.set('beatLevel', beatLevel);
+    startBeatEngine();
+  } else if (name === 'chroma') {
+    Settings.set('sliderChroma', val);
+    Settings.set('chromaLevel', chromaLevel);
+  } else if (name === 'art') {
+    Settings.set('sliderArt', val);
+  } else if (name === 'particles') {
+    Settings.set('sliderParticles', val);
+    Settings.set('ambientLevel', ambientLevel);
+  } else if (name === 'particle-opacity') {
+    Settings.set('sliderParticleOpacity', val);
+  } else if (name === 'particle-size') {
+    Settings.set('sliderParticleSize', val);
+  } else if (name === 'moments') {
+    Settings.set('sliderMoments', val);
+    Settings.set('momentLevel', momentLevel);
+    startMomentEngine();
+  } else if (name === 'tilt') {
+    Settings.set('sliderTilt', val);
+    Settings.set('tiltLevel', tiltLevel);
+    if (val === 0) resetTilt();
+  }
+  syncSettingsPanel();
+  wakeRenderLoop();
+}
+window.onVisualSliderInput = onVisualSliderInput;
+window.onVisualSliderChange = onVisualSliderChange;
+
+function syncSegmentedControls() {
+  syncVisualSliders();
+}
+window.syncSegmentedControls = syncSegmentedControls;
+
+function setEffectLevel(name, level) {
+  level = Math.max(0, Math.min(4, parseInt(level, 10) || 0));
+  const lvlToPct = [0, 25, 45, 75, 100];
+  const lvlToMotes = [0, 14, 28, 48, 80];
+  if (name === 'beat') {
+    beatLevel = level;
+    sliderBeat = lvlToPct[level];
+    Settings.set('sliderBeat', sliderBeat);
+    Settings.set('beatLevel', level);
+    startBeatEngine();
+  } else if (name === 'chroma') {
+    chromaLevel = level;
+    sliderChroma = lvlToPct[level];
+    Settings.set('sliderChroma', sliderChroma);
+    Settings.set('chromaLevel', level);
+    if (chromaLevel === 0) setChromaOffset(0);
+  } else if (name === 'ambient') {
+    ambientLevel = level;
+    sliderParticles = lvlToMotes[level];
+    Settings.set('sliderParticles', sliderParticles);
+    Settings.set('ambientLevel', level);
+    applyAmbientMode();
+  } else if (name === 'moments') {
+    momentLevel = level;
+    sliderMoments = lvlToPct[level];
+    Settings.set('sliderMoments', sliderMoments);
+    Settings.set('momentLevel', level);
+    startMomentEngine();
+  } else if (name === 'tilt') {
+    tiltLevel = level;
+    sliderTilt = lvlToPct[level];
+    Settings.set('sliderTilt', sliderTilt);
+    Settings.set('tiltLevel', level);
+    applyTiltMode();
+    if (tiltLevel === 0) resetTilt();
+  }
+  syncVisualSliders();
+  syncSettingsPanel();
+  renderDiagnostics();
+  wakeRenderLoop();
+  if (lyrics && lyrics.length > 0) renderProgress(playheadMs + latencyOffsetMs);
+}
+window.setEffectLevel = setEffectLevel;
+
+function cycleBeatMode() {
+  setEffectLevel('beat', (beatLevel + 1) % 5);
+}
+
+function cycleChromaMode() {
+  setEffectLevel('chroma', (chromaLevel + 1) % 5);
+}
+
+function cycleMoments() {
+  setEffectLevel('moments', (momentLevel + 1) % 5);
+}
+
+function cycleAmbient() {
+  setEffectLevel('ambient', (ambientLevel + 1) % 5);
+}
+
+function cycleTilt() {
+  setEffectLevel('tilt', (tiltLevel + 1) % 5);
+}
+
+// =========================================================
+// Beat Engine & Audio-DSP-Clock Synchronization
+// =========================================================
 let beatPlan = null;      // {bpm, periodMs, phaseMs, runs, phases, stats}
 let beatPlanIndex = 0;    // cursor; the playhead usually walks forward
-let beatPhaseIndex = 0;   // same trick for the build/drop spans
+let beatPhaseIndex = 0;   // cursor for the build/drop spans
 let beatPhase = null;     // 'build' | 'drop' | null, the shape the pulse is in
 let beatBpm = 0;
-// The swell takes ~16% of the cycle to reach its peak; leading the pulse by that
-// fraction lands the peak on the beat instead of dragging behind it.
 const BEAT_LEAD_FRAC = 0.16;
 
-// The pulse run containing `ms`, or null where the plan rests.
-// A cursor rather than a binary search: a plan holds tens of runs and the
-// playhead normally moves forward, so this is O(1) in practice even on a seek.
 function beatRunAt(ms) {
   const runs = beatPlan && beatPlan.runs;
   if (!runs || runs.length === 0) return null;
@@ -1523,10 +1804,6 @@ function beatRunAt(ms) {
   return (ms >= run[0] && ms <= run[1]) ? run : null;
 }
 
-// Which shape the pulse is in at `ms`: 'build', 'drop', or null for the steady
-// stretches. Sourced from the macro envelope in core/beat.py, where the intensity
-// actually ramps and lands — this side only labels it so the animation timing can
-// follow along.
 function beatPhaseAt(ms) {
   const phases = beatPlan && beatPlan.phases;
   if (!phases || phases.length === 0) return null;
@@ -1538,9 +1815,6 @@ function beatPhaseAt(ms) {
   return (ms >= span[0] && ms <= span[1]) ? span[2] : null;
 }
 
-// Kept as a class flip rather than a style write: the phase only changes a
-// handful of times per track, and the CSS rules attached to it are what shape
-// the attack. Amplitudes come from --beat-strength and are untouched here.
 function setBeatPhase(kind) {
   if (kind === beatPhase) return;
   beatPhase = kind;
@@ -1548,11 +1822,8 @@ function setBeatPhase(kind) {
   document.body.classList.toggle('beat-phase-drop', kind === 'drop');
 }
 
-// Phase-locks the CSS animation to the tracked grid so the swell peaks on the
-// next real beat rather than wherever the class happened to be toggled.
-// animation-delay is negative, which is what lets the cycle start early enough to
-// peak ON the beat instead of trailing it.
 function alignBeatToGrid(ms) {
+  if (!beatPlan || !beatPlan.periodMs) return;
   const period = beatPlan.periodMs;
   const lead = period * BEAT_LEAD_FRAC;
   const nextBeat = beatPlan.phaseMs + Math.ceil((ms - beatPlan.phaseMs) / period) * period;
@@ -1562,32 +1833,24 @@ function alignBeatToGrid(ms) {
 }
 
 function stopBeatEngine() {
-  // The plan index is a cursor into the old track's runs; a new track must not
-  // inherit it.
   beatPlanIndex = 0;
   beatPhaseIndex = 0;
   setBeatPhase(null);
   const body = document.body;
   body.classList.remove('beat-on', 'beat-bold', 'beat-live');
   body.style.removeProperty('--beat-strength');
+  if (window.audioDspClock) window.audioDspClock.reset();
 }
 
 function startBeatEngine() {
   stopBeatEngine();
-  if (beatMode === 'off' || reducedMotion || !beatPlan) return;
+  if (beatLevel === 0 || reducedMotion || !beatPlan) return;
   const body = document.body;
-  // The period is the tracked one, and it is NOT randomised: an earlier build
-  // walked it by +/-8% every few beats to sound less robotic, which is exactly
-  // what would pull the pulse off the grid it is now locked to. The pulse still
-  // breathes, because its strength follows the music.
   body.style.setProperty('--beat-ms', `${beatPlan.periodMs.toFixed(0)}ms`);
-  body.classList.add(beatMode === 'bold' ? 'beat-bold' : 'beat-on');
+  body.classList.add(beatLevel >= 3 ? 'beat-bold' : 'beat-on');
+  if (window.audioDspClock) window.audioDspClock.reset();
 }
 
-// Gating hook, called every frame from renderProgress with the live playhead.
-// The body class carries the MODE (on/bold); 'beat-live' is what actually runs
-// the pulse, and it is only on while the plan says the track is driven.
-// Share of the track the plan says to pulse through, for the diagnostics row.
 function pulseCoverage() {
   if (!beatPlan || !beatPlan.runs.length) return 0;
   const active = beatPlan.runs.reduce((sum, run) => sum + (run[1] - run[0]), 0);
@@ -1595,7 +1858,6 @@ function pulseCoverage() {
   return Math.round((active / span) * 100);
 }
 
-// The strength band the plan actually uses, for the diagnostics row.
 function pulseRange() {
   if (!beatPlan || !beatPlan.runs.length) return '\u2014';
   let lo = 1, hi = 0;
@@ -1608,19 +1870,17 @@ function pulseRange() {
 
 function updateBeatLive(ms) {
   const body = document.body;
-  if (beatMode === 'off' || reducedMotion || !beatPlan || !isPlaying) {
-    // Paused or unplanned: park the pulse without tearing down the mode class,
-    // so resuming does not need a re-render to come back.
+  if (sliderBeat === 0 || beatLevel === 0 || reducedMotion || !beatPlan || !isPlaying) {
     if (body.classList.contains('beat-live')) body.classList.remove('beat-live');
     return;
   }
 
   const run = beatRunAt(ms);
+  const beatMinGate = 0.46 * (1.1 - (sliderBeat / 100) * 0.3);
   const live = body.classList.contains('beat-live');
-  if (run) {
-    // Strength is published before the class, so the animation starts at the
-    // right depth instead of snapping to it a frame later.
-    body.style.setProperty('--beat-strength', run[2].toFixed(2));
+  if (run && run[2] >= beatMinGate) {
+    const scale = (sliderBeat / 100) * 0.95;
+    body.style.setProperty('--beat-strength', (run[2] * scale).toFixed(2));
     if (!live) {
       alignBeatToGrid(ms);
       body.classList.add('beat-live');
@@ -1633,25 +1893,193 @@ function updateBeatLive(ms) {
 }
 
 // =========================================================
-// Song moments: the envelope
-// A drop attacks on the phase start and holds to its end; a hook eases in and
-// holds two bars. --moment-strength is the whole intensity, read by the grade,
-// the sleeve's halo and the line's bloom, so Subtle and Bold differ by this
-// number alone (MOMENT_DEPTH) rather than by three sets of amplitudes.
+// Critically Damped Spring Physics & Dynamic Chromatic Aberration
 // =========================================================
-const MOMENT_MODES = ['on', 'bold', 'off'];
-const MOMENT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
-// Subtle deliberately whispers: a full-window grade reads far stronger than its
-// number suggests, which is the same lesson the pulse's amplitudes encode.
-const MOMENT_DEPTH = { on: 0.6, bold: 1 };
-let momentsMode = 'on';
+let beatSpringPos = 0;
+let beatSpringVel = 0;
+let subSpringPos = 0;
+let subSpringVel = 0;
+let chromaAmount = 0;
+let chromaOffsetCache = 0;
+
+function setChromaOffset(px) {
+  const rounded = Math.round(px * 10) / 10;
+  if (rounded === chromaOffsetCache) return;
+  chromaOffsetCache = rounded;
+
+  const r = document.getElementById('chroma-r');
+  const b = document.getElementById('chroma-b');
+  const target = document.getElementById('track-float');
+  if (rounded > 0.15) {
+    if (r) r.setAttribute('dx', (-rounded).toFixed(1));
+    if (b) b.setAttribute('dx', (rounded).toFixed(1));
+    if (target && !target.classList.contains('chroma-active')) {
+      target.classList.add('chroma-active');
+    }
+  } else {
+    if (r) r.setAttribute('dx', '0');
+    if (b) b.setAttribute('dx', '0');
+    if (target && target.classList.contains('chroma-active')) {
+      target.classList.remove('chroma-active');
+    }
+  }
+}
+
+function updateBeatSprings(dt) {
+  const clampedDt = Math.min(0.045, (dt || 16.6) / 1000);
+  if (clampedDt <= 0) return true;
+
+  // Primary transient spring: critically damped
+  const k = 230;
+  const c = 26;
+  const acc = -k * beatSpringPos - c * beatSpringVel;
+  beatSpringVel += acc * clampedDt;
+  beatSpringPos += beatSpringVel * clampedDt;
+
+  // Secondary micro-pulse spring (faster snappy decay)
+  const subK = 340;
+  const subC = 34;
+  const subAcc = -subK * subSpringPos - subC * subSpringVel;
+  subSpringVel += subAcc * clampedDt;
+  subSpringPos += subSpringVel * clampedDt;
+
+  // Smooth exponential decay for chromatic displacement
+  if (chromaAmount > 0.05) {
+    chromaAmount -= chromaAmount * Math.min(1, clampedDt * 14);
+    setChromaOffset(chromaAmount);
+  } else if (chromaAmount > 0) {
+    chromaAmount = 0;
+    setChromaOffset(0);
+  }
+
+  // Publish spring scale and lamp glow to CSS variables
+  const scaleMult = (sliderBeat / 100) * 0.9;
+  const artScale = (sliderArt / 100);
+  const currentScale = 1 + (beatSpringPos * 0.020 + subSpringPos * 0.006) * scaleMult * artScale;
+  const lampSpring = (beatSpringPos * 0.25 + subSpringPos * 0.08) * scaleMult * artScale;
+
+  const root = document.documentElement;
+  root.style.setProperty('--beat-scale', currentScale.toFixed(4));
+  root.style.setProperty('--lamp-beat-spring', lampSpring.toFixed(3));
+
+  const settled = Math.abs(beatSpringPos) < 0.001 && Math.abs(beatSpringVel) < 0.004 &&
+                  Math.abs(subSpringPos) < 0.001 && Math.abs(subSpringVel) < 0.004;
+  if (settled) {
+    beatSpringPos = 0;
+    beatSpringVel = 0;
+    subSpringPos = 0;
+    subSpringVel = 0;
+  }
+  return settled;
+}
+
+function triggerBeatTransient(strength, isDrop) {
+  if (sliderBeat === 0 || beatLevel === 0 || reducedMotion) return;
+  const dropMult = isDrop ? 1.35 : 1.0;
+  beatSpringVel = Math.min(1.8, beatSpringVel + (1.15 * strength * dropMult));
+
+  if (sliderChroma > 0) {
+    const chromaScale = (sliderChroma / 100) * 1.5;
+    chromaAmount = Math.min(3.8, (1.2 * strength * dropMult * chromaScale));
+    setChromaOffset(chromaAmount);
+  }
+
+  if (window.airPipeline && sliderParticles > 0) {
+    const surge = (isDrop ? 2.2 : 0.9) * strength;
+    window.airPipeline.onBeatImpulse(surge);
+  }
+}
+
+function triggerSubBeatTransient(strength) {
+  if (sliderBeat === 0 || beatLevel === 0 || reducedMotion) return;
+  subSpringVel = Math.min(0.9, subSpringVel + (0.55 * strength));
+  if (window.airPipeline && sliderParticles > 0 && sliderBeat >= 35) {
+    window.airPipeline.onSubBeatImpulse(strength * 0.4);
+  }
+}
+
+// =========================================================
+// Audio-DSP-Clock Engine
+// Jitter rejection filter + lookahead transient dispatch
+// =========================================================
+class AudioDspClockEngine {
+  constructor() {
+    this.lastMs = 0;
+    this.jitterSamples = new Float32Array(8);
+    this.jitterIdx = 0;
+    this.avgJitter = 0;
+    this.lastBeatGridIndex = -1;
+    this.lastSubBeatGridIndex = -1;
+  }
+
+  reset() {
+    this.lastMs = 0;
+    this.jitterSamples.fill(0);
+    this.jitterIdx = 0;
+    this.avgJitter = 0;
+    this.lastBeatGridIndex = -1;
+    this.lastSubBeatGridIndex = -1;
+  }
+
+  recordJitter(sampleMs, wallDelta) {
+    if (this.lastMs > 0 && wallDelta > 0) {
+      const audioDelta = sampleMs - this.lastMs;
+      const jitter = Math.abs(audioDelta - wallDelta);
+      this.jitterSamples[this.jitterIdx] = jitter;
+      this.jitterIdx = (this.jitterIdx + 1) & 7;
+      let sum = 0;
+      for (let i = 0; i < 8; i++) sum += this.jitterSamples[i];
+      this.avgJitter = sum / 8;
+    }
+    this.lastMs = sampleMs;
+  }
+
+  process(ms, delta) {
+    if (!beatPlan || sliderBeat === 0 || beatLevel === 0 || reducedMotion || !isPlaying) return;
+    const run = beatRunAt(ms);
+    if (!run) return;
+
+    // Gate calm / no-beat parts: only fire pulses during genuine rhythm sections
+    const beatMinGate = 0.46 * (1.1 - (sliderBeat / 100) * 0.3);
+    if (run[2] < beatMinGate) return;
+
+    const period = beatPlan.periodMs;
+    if (period <= 0) return;
+
+    const phaseOffset = beatPlan.phaseMs;
+    const beatGridIdx = Math.floor((ms - phaseOffset) / period);
+    const subGridIdx = Math.floor(((ms - phaseOffset) * 2) / period);
+
+    const lookaheadMs = Math.max(8, Math.min(24, (delta || 16.6) * 0.75 + this.avgJitter * 0.5));
+    const nextBeatMs = phaseOffset + (beatGridIdx + 1) * period;
+    const timeToNextBeat = nextBeatMs - ms;
+
+    if (beatGridIdx > this.lastBeatGridIndex && (timeToNextBeat <= lookaheadMs || ms >= phaseOffset + beatGridIdx * period)) {
+      this.lastBeatGridIndex = beatGridIdx;
+      const strength = run[2] * (sliderBeat / 100) * 0.90;
+      const isDrop = beatPhaseAt(ms) === 'drop';
+      triggerBeatTransient(strength, isDrop);
+    }
+
+    if (subGridIdx > this.lastSubBeatGridIndex && subGridIdx !== beatGridIdx * 2 && sliderBeat >= 35) {
+      this.lastSubBeatGridIndex = subGridIdx;
+      const strength = run[2] * (sliderBeat / 100) * 0.45;
+      triggerSubBeatTransient(strength);
+    }
+  }
+}
+
+const audioDspClock = new AudioDspClockEngine();
+window.audioDspClock = audioDspClock;
+
+// =========================================================
+// Song moments: Climax Moments & Dynamic Color Grading
+// =========================================================
 let momentPlan = null;     // the merged arrivals for the current track
 let momentIndex = 0;       // cursor; the playhead usually walks forward
 let momentLast = null;     // the moment the grade is currently on, or null
 let momentsFired = { total: 0, drop: 0, hook: 0 };
 
-// The moment containing `ms`, walked with the same forward cursor the beat
-// engine uses — a track holds tens of moments and the playhead moves forward.
 function momentAt(ms) {
   const list = momentPlan;
   if (!list || !list.length) return null;
@@ -1663,9 +2091,6 @@ function momentAt(ms) {
   return (ms >= moment.ms && ms <= moment.endMs) ? moment : null;
 }
 
-// The grade comes down the same way wherever it can: between moments, while
-// paused, while minimized, and while the setting is off. One place, so the inline
-// number cannot be left behind by one of those paths for a later rule to read.
 function releaseMomentGrade() {
   const body = document.body;
   body.classList.remove('moment-live', 'moment-attack');
@@ -1674,8 +2099,6 @@ function releaseMomentGrade() {
 }
 
 function stopMomentEngine() {
-  // The cursor points into the old track's moments; a new track must not inherit
-  // it. The counters are per track too — the report says what THIS track did.
   momentPlan = null;
   momentIndex = 0;
   momentsFired = { total: 0, drop: 0, hook: 0 };
@@ -1684,18 +2107,14 @@ function stopMomentEngine() {
 
 function startMomentEngine() {
   stopMomentEngine();
-  if (momentsMode === 'off' || reducedMotion || miniMode) return;
+  if (sliderMoments === 0 || momentLevel === 0 || reducedMotion || miniMode) return;
   if (!lyrics || !lyrics.length) return;
   momentPlan = momentStarts(lyrics, beatPlan);
 }
 
 function updateMoment(ms) {
   const body = document.body;
-  if (momentsMode === 'off' || reducedMotion || miniMode || !isPlaying
-      || syncGlideInFlight()) {
-    // Paused, minimized, off, or sweeping between two places in the song: park
-    // the grade without tearing the plan down, so resuming does not need a
-    // re-render to come back.
+  if (sliderMoments === 0 || momentLevel === 0 || reducedMotion || miniMode || !isPlaying || syncGlideInFlight()) {
     if (body.classList.contains('moment-live')) releaseMomentGrade();
     return;
   }
@@ -1708,63 +2127,25 @@ function updateMoment(ms) {
     momentLast = moment;
     momentsFired.total += 1;
     momentsFired[moment.kind] += 1;
+    if (moment.kind === 'drop') {
+      if (window.airPipeline && sliderParticles > 0) window.airPipeline.onBeatImpulse(1.8);
+      if (sliderChroma > 0 && !reducedMotion) {
+        const chromaScale = (sliderChroma / 100) * 1.5;
+        chromaAmount = Math.min(3.8, chromaAmount + 1.4 * chromaScale);
+        setChromaOffset(chromaAmount);
+      }
+    }
   }
-  // The number is published before the class, so the grade starts at the right
-  // depth instead of snapping to it a frame later — the same ordering, and the
-  // same reason, as the beat engine's strength write.
-  const depth = MOMENT_DEPTH[momentsMode] || MOMENT_DEPTH.on;
+  const depth = (sliderMoments / 100) * 0.70;
   body.style.setProperty('--moment-strength', (moment.strength * depth).toFixed(2));
   body.classList.toggle('moment-attack', moment.kind === 'drop');
   body.classList.add('moment-live');
 }
 
-// The same three states as Beat sync, deliberately: two intensity systems that
-// share subtleties (and the same "a full-window effect reads stronger than its
-// number" lesson) should read as one family rather than two inventions.
-function cycleMoments() {
-  const idx = MOMENT_MODES.indexOf(momentsMode);
-  momentsMode = MOMENT_MODES[(idx + 1) % MOMENT_MODES.length];
-  Settings.set('momentsMode', momentsMode);
-  startMomentEngine();
-  syncSettingsPanel();
-  renderDiagnostics();
-  // startMomentEngine clears the grade, so re-gate it now instead of waiting for
-  // the next animation frame — otherwise a mode flip blanks it for a frame.
-  wakeRenderLoop();
-  if (lyrics.length > 0) renderProgress(playheadMs + latencyOffsetMs);
-}
-
-function cycleBeatMode() {
-  const idx = BEAT_MODES.indexOf(beatMode);
-  beatMode = BEAT_MODES[(idx + 1) % BEAT_MODES.length];
-  Settings.set('beatMode', beatMode);
-  startBeatEngine();
-  syncSettingsPanel();
-  renderDiagnostics();
-  // startBeatEngine clears 'beat-live' (it carries the pulse), so re-gate it
-  // now instead of waiting for the next animation frame — otherwise a mode
-  // flip blanks the pulse for a frame.
-  wakeRenderLoop();
-  if (lyrics.length > 0) renderProgress(playheadMs + latencyOffsetMs);
-}
-
 // =========================================================
-// Room air
-// The room has air in it: a handful of motes of the album's own light drifting
-// through the backdrop. This is the app's only effect that is on in a SILENT
-// passage too, on purpose — it is what stops a calm verse reading as a frozen
-// frame. The beat only nudges it and a drop only puffs it; the air is already
-// moving before either happens.
-//
-// The layout is a pure function of the mote's index rather than Math.random: a
-// field that reshuffles on every launch cannot be reasoned about, and the preview
-// gate asserts this layout instead of whatever happened to be built. The hash is
-// a 32-bit finaliser so every value lands in [0,1) with no floating-point drift.
+// Room air: GPU Particle Simulation Canvas
+// Zero-allocation TypedArray pooling, fluid velocity trails, curl noise
 // =========================================================
-// Sixteen motes across a whole window is one per 80,000 square pixels, which is
-// sparse enough to read as a rendering fault rather than as air — the first pass
-// shipped at that density and was invisible in Bold. Twenty-eight is the count at
-// which the room looks inhabited without looking like snowfall.
 const DUST_COUNT = 28;
 
 function dustHash(i, salt) {
@@ -1774,9 +2155,6 @@ function dustHash(i, salt) {
   return (h >>> 0) / 4294967296;
 }
 
-// x/y are viewport fractions, size px, delay/dur seconds, drift a horizontal
-// wander in rem. The delay is negative on purpose: the field starts already
-// mid-flight instead of all sixteen motes appearing together on the first frame.
 function dustLayout(count) {
   const out = [];
   for (let i = 0; i < count; i++) {
@@ -1793,20 +2171,928 @@ function dustLayout(count) {
 }
 window.dustLayout = dustLayout;
 
-// Built once and never rebuilt: there is nothing per-track about air, and a field
-// that re-created itself on a track change would be a visible rebuild for no
-// reason.
+function parseCssColor(str, fallback = { r: 185, g: 205, b: 255 }) {
+  if (!str || typeof str !== 'string') return fallback;
+  str = str.trim();
+  if (str.startsWith('#')) {
+    const hex = str.slice(1);
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex[0] + hex[0], 16),
+        g: parseInt(hex[1] + hex[1], 16),
+        b: parseInt(hex[2] + hex[2], 16),
+      };
+    }
+    if (hex.length >= 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+      };
+    }
+  }
+  const match = str.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+  if (match) {
+    return {
+      r: Math.round(parseFloat(match[1])),
+      g: Math.round(parseFloat(match[2])),
+      b: Math.round(parseFloat(match[3])),
+    };
+  }
+  return fallback;
+}
+
+class AirParticlePool {
+  constructor(capacity = 120) {
+    this.capacity = capacity;
+    this.count = 0;
+    this.x = new Float32Array(capacity);
+    this.y = new Float32Array(capacity);
+    this.prevX = new Float32Array(capacity);
+    this.prevY = new Float32Array(capacity);
+    this.vx = new Float32Array(capacity);
+    this.vy = new Float32Array(capacity);
+    this.beatVx = new Float32Array(capacity);
+    this.beatVy = new Float32Array(capacity);
+    this.size = new Float32Array(capacity);
+    this.rawSize = new Float32Array(capacity);
+    this.meanSize = new Float32Array(capacity);
+    this.alpha = new Float32Array(capacity);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.seed = new Float32Array(capacity);
+    this.colorIdx = new Uint8Array(capacity);
+    this.shapeType = new Uint8Array(capacity);
+    this.shapeParam = new Float32Array(capacity);
+    this.rot = new Float32Array(capacity);
+    this.rotSpeed = new Float32Array(capacity);
+    this.baseRotSpeed = new Float32Array(capacity);
+    this.bloom = new Float32Array(capacity);
+    this.reactivity = new Float32Array(capacity);
+    this.twinkleType = new Uint8Array(capacity);
+    this.twinkleFreq = new Float32Array(capacity);
+    this.twinklePhase = new Float32Array(capacity);
+    this.twinkleDepth = new Float32Array(capacity);
+    this.r = new Uint8Array(capacity);
+    this.g = new Uint8Array(capacity);
+    this.b = new Uint8Array(capacity);
+  }
+
+  spawn(x, y, vx, vy, rawSize, meanSize, maxLife, colorIdx, seed, r, g, b, shapeType = 0, shapeParam = 0.5, rot = 0, rotSpeed = 0, bloom = 1.0, reactivity = 1.0, twinkleType = 0, twinkleFreq = 2.0, twinklePhase = 0, twinkleDepth = 0.8) {
+    if (this.count >= this.capacity) return -1;
+    const i = this.count++;
+    this.x[i] = x;
+    this.y[i] = y;
+    this.prevX[i] = x;
+    this.prevY[i] = y;
+    this.vx[i] = vx;
+    this.vy[i] = vy;
+    this.beatVx[i] = 0;
+    this.beatVy[i] = 0;
+    this.rawSize[i] = rawSize;
+    this.meanSize[i] = meanSize;
+    this.size[i] = rawSize;
+    this.alpha[i] = 0;
+    this.life[i] = 0;
+    this.maxLife[i] = maxLife;
+    this.colorIdx[i] = colorIdx;
+    this.seed[i] = seed;
+    this.shapeType[i] = shapeType;
+    this.shapeParam[i] = shapeParam;
+    this.rot[i] = rot;
+    this.rotSpeed[i] = rotSpeed;
+    this.baseRotSpeed[i] = rotSpeed;
+    this.bloom[i] = bloom;
+    this.reactivity[i] = reactivity;
+    this.twinkleType[i] = twinkleType;
+    this.twinkleFreq[i] = twinkleFreq;
+    this.twinklePhase[i] = twinklePhase;
+    this.twinkleDepth[i] = twinkleDepth;
+    this.r[i] = r;
+    this.g[i] = g;
+    this.b[i] = b;
+    return i;
+  }
+
+  clear() {
+    this.count = 0;
+  }
+}
+
+// --- Procedural Air Particle Geometries ---
+// 0: Hazy Bokeh Bloom Orb (deep diffuse sphere with radiant nucleus)
+// 1: Bulbous Cross / Rounded Clover Petals (flaring out with thick rounded bulbous ends)
+// 2: Diamond Crystal Sparkle (tapered 4-point ray glint with adjustable aspect ratio)
+// 3: Luminous Prism Ring (ethereal refraction ring with bright jewel nodes)
+// 4: Bulbous Spore / Dumbbell Micro-Mote (floating filament with thick bulbous ends)
+// 5: Soft Dual Nebula Cloudlet (misty double dust puff drifting in unison)
+
+function drawAirBokehOrb(ctx, x, y, size, r, g, b, alpha, bloom) {
+  const rad = size * 1.5 * bloom;
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, rad);
+  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.42})`);
+  grad.addColorStop(0.35, `rgba(${r}, ${g}, ${b}, ${alpha * 0.20})`);
+  grad.addColorStop(0.70, `rgba(${r}, ${g}, ${b}, ${alpha * 0.07})`);
+  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, rad, 0, Math.PI * 2);
+  ctx.fill();
+
+  const coreRad = Math.max(1.2, size * 0.32);
+  const coreGrad = ctx.createRadialGradient(x, y, 0, x, y, coreRad);
+  coreGrad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.65})`);
+  coreGrad.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.32})`);
+  coreGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(x, y, coreRad, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawAirBulbousCross(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+
+  // Soft ambient halo
+  const haloRad = size * 1.8 * bloom;
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.44})`);
+  halo.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`);
+  halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 4 bulbous lobes with prominent thicker rounded ends
+  const armDist = size * 0.85;
+  const bulbRadius = Math.max(1.8, size * (0.34 + shapeParam * 0.24));
+  const waist = Math.max(0.9, size * 0.18);
+
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.82})`;
+  for (let a = 0; a < 4; a++) {
+    const angle = (a * Math.PI) / 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const tipX = cos * armDist;
+    const tipY = sin * armDist;
+
+    // Stem connecting to bulbous tip
+    ctx.beginPath();
+    ctx.moveTo(-sin * waist, cos * waist);
+    ctx.lineTo(tipX - sin * (bulbRadius * 0.6), tipY + cos * (bulbRadius * 0.6));
+    ctx.lineTo(tipX + sin * (bulbRadius * 0.6), tipY - cos * (bulbRadius * 0.6));
+    ctx.lineTo(sin * waist, -cos * waist);
+    ctx.closePath();
+    ctx.fill();
+
+    // Prominent bulbous rounded head at the end
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, bulbRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Luminous white core
+  const coreRad = Math.max(1.2, size * 0.30);
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.95)})`;
+  ctx.beginPath();
+  ctx.arc(0, 0, coreRad, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawAirDiamondStar(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+
+  const haloRad = size * 1.7 * bloom;
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.48})`);
+  halo.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, ${alpha * 0.16})`);
+  halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
+  ctx.fill();
+
+  const rayLen = size * (1.3 + shapeParam * 0.5);
+  const rayWidth = Math.max(0.7, size * (0.16 + shapeParam * 0.18));
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.92)})`;
+
+  // Vertical ray
+  ctx.beginPath();
+  ctx.moveTo(0, -rayLen);
+  ctx.quadraticCurveTo(0, 0, rayWidth, 0);
+  ctx.quadraticCurveTo(0, 0, 0, rayLen);
+  ctx.quadraticCurveTo(0, 0, -rayWidth, 0);
+  ctx.quadraticCurveTo(0, 0, 0, -rayLen);
+  ctx.closePath();
+  ctx.fill();
+
+  // Horizontal ray
+  ctx.beginPath();
+  ctx.moveTo(-rayLen, 0);
+  ctx.quadraticCurveTo(0, 0, 0, rayWidth);
+  ctx.quadraticCurveTo(0, 0, rayLen, 0);
+  ctx.quadraticCurveTo(0, 0, 0, -rayWidth);
+  ctx.quadraticCurveTo(0, 0, -rayLen, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  const centerRad = Math.max(1.0, size * 0.26);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0, 0, centerRad, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawAirPrismRing(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+
+  const ringRad = Math.max(2.5, size * (0.8 + shapeParam * 0.3));
+  const haloRad = ringRad * 1.8 * bloom;
+
+  // Ambient halo
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloRad);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.35})`);
+  halo.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.12})`);
+  halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, haloRad, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Glowing ring stroke
+  ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.75})`;
+  ctx.lineWidth = Math.max(1.0, size * 0.18);
+  ctx.beginPath();
+  ctx.arc(0, 0, ringRad, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Refractive jewel nodes on the ring perimeter
+  const nodeCount = shapeParam > 0.5 ? 6 : 4;
+  const nodeRad = Math.max(1.0, size * 0.20);
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.95)})`;
+  for (let k = 0; k < nodeCount; k++) {
+    const na = (k * Math.PI * 2) / nodeCount;
+    ctx.beginPath();
+    ctx.arc(Math.cos(na) * ringRad, Math.sin(na) * ringRad, nodeRad, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Soft center glimmer
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.50})`;
+  ctx.beginPath();
+  ctx.arc(0, 0, Math.max(0.8, size * 0.20), 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawAirBulbousSpore(ctx, x, y, size, angle, r, g, b, alpha, bloom, shapeParam) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  const span = size * (1.1 + shapeParam * 0.4);
+  const endBulb = Math.max(1.6, size * (0.36 + shapeParam * 0.22)); // prominent thick bulbous ends
+  const waist = Math.max(0.8, size * 0.16);
+
+  // Soft halo around spore
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, span * 1.5 * bloom);
+  halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.42})`);
+  halo.addColorStop(0.6, `rgba(${r}, ${g}, ${b}, ${alpha * 0.12})`);
+  halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, span * 1.5 * bloom, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Waist connector
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.70})`;
+  ctx.beginPath();
+  ctx.moveTo(-span * 0.5, -waist);
+  ctx.lineTo(span * 0.5, -waist);
+  ctx.lineTo(span * 0.5, waist);
+  ctx.lineTo(-span * 0.5, waist);
+  ctx.closePath();
+  ctx.fill();
+
+  // Two prominent bulbous ends
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.85})`;
+  ctx.beginPath();
+  ctx.arc(-span * 0.5, 0, endBulb, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(span * 0.5, 0, endBulb, 0, Math.PI * 2);
+  ctx.fill();
+
+  // White gleaming highlights inside bulb ends
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.90})`;
+  ctx.beginPath();
+  ctx.arc(-span * 0.5, 0, endBulb * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(span * 0.5, 0, endBulb * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawAirNebulaCloud(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapeParam) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+
+  const radA = size * (1.1 + shapeParam * 0.4) * bloom;
+  const radB = size * (0.75 + shapeParam * 0.3) * bloom;
+  const offset = size * 0.45;
+
+  // Main puff
+  const gradA = ctx.createRadialGradient(-offset * 0.5, 0, 0, -offset * 0.5, 0, radA);
+  gradA.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.45})`);
+  gradA.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.20})`);
+  gradA.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = gradA;
+  ctx.beginPath();
+  ctx.arc(-offset * 0.5, 0, radA, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Companion puff
+  const gradB = ctx.createRadialGradient(offset * 0.6, -offset * 0.3, 0, offset * 0.6, -offset * 0.3, radB);
+  gradB.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.38})`);
+  gradB.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, ${alpha * 0.16})`);
+  gradB.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = gradB;
+  ctx.beginPath();
+  ctx.arc(offset * 0.6, -offset * 0.3, radB, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Glowing condensation nucleus
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.35);
+  core.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.60})`);
+  core.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+class AirParticlePipeline {
+  constructor() {
+    this.canvas = null;
+    this.ctx = null;
+    this.width = 0;
+    this.height = 0;
+    this.dpr = 1;
+    this.pool = new AirParticlePool(120);
+    this.lastSpawn = 0;
+    this.colorA = { r: 185, g: 205, b: 255 };
+    this.colorB = { r: 220, g: 235, b: 255 };
+    this.setupDone = false;
+    this.resizeObserver = null;
+  }
+
+  init() {
+    this.canvas = document.getElementById('fx-canvas');
+    if (!this.canvas) return;
+    this.ctx = this.canvas.getContext('2d', { alpha: true });
+    this.resize();
+    window.addEventListener('resize', () => this.resize(), { passive: true });
+
+    if (window.ResizeObserver && !this.resizeObserver) {
+      this.resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const cr = entry.contentRect;
+          if (cr.width > 0 && cr.height > 0) {
+            this.handleResize(cr.width, cr.height);
+          }
+        }
+      });
+      this.resizeObserver.observe(this.canvas);
+    }
+
+    this.updateColors();
+    this.seedParticles();
+    this.setupDone = true;
+  }
+
+  resize() {
+    if (!this.canvas) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const w = rect.width || window.innerWidth;
+    const h = rect.height || window.innerHeight;
+    this.handleResize(w, h);
+  }
+
+  handleResize(newW, newH) {
+    if (!this.canvas || newW <= 0 || newH <= 0) return;
+    const oldW = this.width;
+    const oldH = this.height;
+
+    this.width = newW;
+    this.height = newH;
+    this.dpr = Math.min(2.0, window.devicePixelRatio || 1);
+    this.canvas.width = Math.round(newW * this.dpr);
+    this.canvas.height = Math.round(newH * this.dpr);
+
+    const p = this.pool;
+    if (oldW > 0 && oldH > 0 && p.count > 0 && (Math.abs(oldW - newW) > 2 || Math.abs(oldH - newH) > 2)) {
+      const scaleX = newW / oldW;
+      const scaleY = newH / oldH;
+      for (let i = 0; i < p.count; i++) {
+        p.x[i] *= scaleX;
+        p.y[i] *= scaleY;
+        p.prevX[i] *= scaleX;
+        p.prevY[i] *= scaleY;
+      }
+    } else if (p.count === 0 && sliderParticles > 0) {
+      this.seedParticles();
+    }
+  }
+
+  computeParticleColor(yPos, seedIndex) {
+    const isTop = yPos < (this.height * 0.52 + (dustHash(seedIndex, 7) - 0.5) * (this.height * 0.2));
+    const base = isTop ? this.colorA : this.colorB;
+
+    const jitter = (dustHash(seedIndex, 8) - 0.5) * 32;
+    const highlight = dustHash(seedIndex, 9) > 0.82;
+
+    let r, g, b;
+    if (highlight) {
+      r = Math.min(255, Math.max(160, Math.round(base.r * 0.6 + 255 * 0.4 + jitter * 0.5)));
+      g = Math.min(255, Math.max(160, Math.round(base.g * 0.6 + 255 * 0.4 + jitter * 0.5)));
+      b = Math.min(255, Math.max(160, Math.round(base.b * 0.6 + 255 * 0.4 + jitter * 0.5)));
+    } else {
+      r = Math.min(255, Math.max(10, Math.round(base.r + jitter * 1.15)));
+      g = Math.min(255, Math.max(10, Math.round(base.g + jitter * 0.95)));
+      b = Math.min(255, Math.max(10, Math.round(base.b + jitter * 1.25)));
+    }
+    return { r, g, b };
+  }
+
+  updateColors() {
+    const root = document.documentElement;
+    const c1 = root.style.getPropertyValue('--mote-a').trim() ||
+               root.style.getPropertyValue('--art-accent').trim() || '#b9cdff';
+    const c2 = root.style.getPropertyValue('--mote-b').trim() ||
+               root.style.getPropertyValue('--art-accent').trim() || '#e0ecff';
+    this.colorA = parseCssColor(c1, { r: 185, g: 205, b: 255 });
+    this.colorB = parseCssColor(c2, { r: 220, g: 235, b: 255 });
+
+    const p = this.pool;
+    for (let i = 0; i < p.count; i++) {
+      const c = this.computeParticleColor(p.y[i], i);
+      p.r[i] = c.r;
+      p.g[i] = c.g;
+      p.b[i] = c.b;
+    }
+  }
+
+  seedParticles() {
+    this.pool.clear();
+    const targetCount = sliderParticles > 0 ? sliderParticles : 0;
+    if (targetCount <= 0 || this.width <= 0 || this.height <= 0) return;
+
+    for (let i = 0; i < targetCount; i++) {
+      // Distribute evenly across the FULL window height and width
+      const x = (dustHash(i, 1) * 0.96 + 0.02) * this.width;
+      const y = (dustHash(i, 2) * 0.96 + 0.02) * this.height;
+
+      const hashVal = dustHash(i, 11);
+      let shapeType = 0;
+      let rawSize = 8;
+      let meanSize = 8;
+      let reactivity = 1.0;
+
+      if (hashVal < 0.20) {
+        shapeType = 0; // Hazy Bokeh Bloom Orb: large, dreamy, out-of-focus
+        meanSize = 22.0;
+        rawSize = 14 + dustHash(i, 3) * 16;
+        reactivity = 0.35 + dustHash(i, 17) * 0.30;
+      } else if (hashVal < 0.42) {
+        shapeType = 1; // Bulbous Cross / Clover Petals with thick rounded ends
+        meanSize = 9.5;
+        rawSize = 6.0 + dustHash(i, 3) * 7.5;
+        reactivity = 0.65 + dustHash(i, 17) * 0.55;
+      } else if (hashVal < 0.62) {
+        shapeType = 2; // Diamond Crystal Sparkle: crisp starlight glint
+        meanSize = 9.0;
+        rawSize = 5.5 + dustHash(i, 3) * 7.5;
+        reactivity = 0.80 + dustHash(i, 17) * 0.70;
+      } else if (hashVal < 0.78) {
+        shapeType = 3; // Luminous Prism Ring with jewel nodes
+        meanSize = 10.5;
+        rawSize = 6.5 + dustHash(i, 3) * 8.0;
+        reactivity = 0.55 + dustHash(i, 17) * 0.50;
+      } else if (hashVal < 0.90) {
+        shapeType = 4; // Bulbous Spore / Dumbbell with thick rounded ends
+        meanSize = 6.7;
+        rawSize = 4.0 + dustHash(i, 3) * 5.5;
+        reactivity = 0.90 + dustHash(i, 17) * 0.70;
+      } else {
+        shapeType = 5; // Soft Dual Nebula Dust Cloud
+        meanSize = 18.0;
+        rawSize = 11 + dustHash(i, 3) * 14;
+        reactivity = 0.30 + dustHash(i, 17) * 0.30;
+      }
+
+      const shapeParam = dustHash(i, 18);
+      const maxLife = 16000 + dustHash(i, 5) * 18000;
+      const life = dustHash(i, 4) * maxLife;
+      const colorIdx = i % 2;
+      const seed = dustHash(i, 6) * 100;
+      const col = this.computeParticleColor(y, i);
+      const rot = dustHash(i, 12) * Math.PI * 2;
+
+      // Significantly reduced rotation speeds: mostly meditative drift, high speeds rare & strictly capped
+      const speedTier = dustHash(i, 13);
+      let rotSpeed = 0;
+      if (speedTier < 0.65) {
+        rotSpeed = (dustHash(i, 19) - 0.5) * 0.0018; // Serene drift
+      } else if (speedTier < 0.90) {
+        rotSpeed = (dustHash(i, 19) - 0.5) * 0.0036; // Gentle turn
+      } else {
+        rotSpeed = (dustHash(i, 19) - 0.5) * 0.0060; // Moderate turn (capped)
+      }
+
+      const bloom = 0.85 + dustHash(i, 14) * 0.5;
+      const vx = (dustHash(i, 15) - 0.5) * 0.20;
+      const vy = -0.05 - dustHash(i, 16) * 0.18;
+
+      // Twinkling animation distribution
+      const twVal = dustHash(i, 20);
+      let twinkleType = 0;
+      if (twVal < 0.40) twinkleType = 1; // Glint sparkle twinkle
+      else if (twVal < 0.70) twinkleType = 2; // Breathing swell
+      else twinkleType = 0; // Steady ambient
+
+      const twinkleFreq = 1.6 + dustHash(i, 21) * 2.2;
+      const twinklePhase = dustHash(i, 22) * Math.PI * 2;
+      const twinkleDepth = 0.6 + dustHash(i, 23) * 0.6;
+
+      const idx = this.pool.spawn(
+        x, y, vx, vy, rawSize, meanSize, maxLife, colorIdx, seed, col.r, col.g, col.b,
+        shapeType, shapeParam, rot, rotSpeed, bloom, reactivity,
+        twinkleType, twinkleFreq, twinklePhase, twinkleDepth
+      );
+      if (idx >= 0) {
+        this.pool.life[idx] = life;
+      }
+    }
+  }
+
+  spawnParticle(i, respawnAnywhere = false) {
+    const p = this.pool;
+    p.life[i] = 0;
+    p.maxLife[i] = 16000 + Math.random() * 18000;
+    p.beatVx[i] = 0;
+    p.beatVy[i] = 0;
+
+    if (respawnAnywhere) {
+      // Re-seed smoothly anywhere across the room so particles never cluster!
+      p.x[i] = Math.random() * this.width;
+      p.y[i] = Math.random() * this.height;
+    } else {
+      const edge = Math.random();
+      if (edge < 0.5) {
+        p.x[i] = Math.random() * this.width;
+        p.y[i] = this.height + 15;
+      } else if (edge < 0.75) {
+        p.x[i] = Math.random() < 0.5 ? -15 : this.width + 15;
+        p.y[i] = Math.random() * this.height;
+      } else {
+        p.x[i] = Math.random() * this.width;
+        p.y[i] = Math.random() * (this.height * 0.7);
+      }
+    }
+
+    p.prevX[i] = p.x[i];
+    p.prevY[i] = p.y[i];
+
+    const hashVal = Math.random();
+    let rawSize = 8;
+    let meanSize = 8;
+    if (hashVal < 0.20) {
+      p.shapeType[i] = 0; // Hazy Bokeh Bloom Orb
+      meanSize = 22.0;
+      rawSize = 14 + Math.random() * 16;
+      p.reactivity[i] = 0.35 + Math.random() * 0.30;
+    } else if (hashVal < 0.42) {
+      p.shapeType[i] = 1; // Bulbous Cross / Clover Petals
+      meanSize = 9.5;
+      rawSize = 6.0 + Math.random() * 7.5;
+      p.reactivity[i] = 0.65 + Math.random() * 0.55;
+    } else if (hashVal < 0.62) {
+      p.shapeType[i] = 2; // Diamond Crystal Sparkle
+      meanSize = 9.0;
+      rawSize = 5.5 + Math.random() * 7.5;
+      p.reactivity[i] = 0.80 + Math.random() * 0.70;
+    } else if (hashVal < 0.78) {
+      p.shapeType[i] = 3; // Luminous Prism Ring
+      meanSize = 10.5;
+      rawSize = 6.5 + Math.random() * 8.0;
+      p.reactivity[i] = 0.55 + Math.random() * 0.50;
+    } else if (hashVal < 0.90) {
+      p.shapeType[i] = 4; // Bulbous Spore / Dumbbell
+      meanSize = 6.7;
+      rawSize = 4.0 + Math.random() * 5.5;
+      p.reactivity[i] = 0.90 + Math.random() * 0.70;
+    } else {
+      p.shapeType[i] = 5; // Soft Dual Nebula Dust Cloud
+      meanSize = 18.0;
+      rawSize = 11 + Math.random() * 14;
+      p.reactivity[i] = 0.30 + Math.random() * 0.30;
+    }
+
+    p.rawSize[i] = rawSize;
+    p.meanSize[i] = meanSize;
+    p.size[i] = rawSize;
+
+    p.shapeParam[i] = Math.random();
+    p.vx[i] = (Math.random() - 0.5) * 0.20;
+    p.vy[i] = -0.05 - Math.random() * 0.18;
+    p.rot[i] = Math.random() * Math.PI * 2;
+
+    const speedTier = Math.random();
+    if (speedTier < 0.65) {
+      p.rotSpeed[i] = (Math.random() - 0.5) * 0.0018;
+    } else if (speedTier < 0.90) {
+      p.rotSpeed[i] = (Math.random() - 0.5) * 0.0036;
+    } else {
+      p.rotSpeed[i] = (Math.random() - 0.5) * 0.0060;
+    }
+    p.baseRotSpeed[i] = p.rotSpeed[i];
+
+    p.bloom[i] = 0.85 + Math.random() * 0.5;
+    p.seed[i] = Math.random() * 100;
+
+    const twVal = Math.random();
+    if (twVal < 0.40) p.twinkleType[i] = 1;
+    else if (twVal < 0.70) p.twinkleType[i] = 2;
+    else p.twinkleType[i] = 0;
+
+    p.twinkleFreq[i] = 1.6 + Math.random() * 2.2;
+    p.twinklePhase[i] = Math.random() * Math.PI * 2;
+    p.twinkleDepth[i] = 0.6 + Math.random() * 0.6;
+
+    const col = this.computeParticleColor(p.y[i], i);
+    p.r[i] = col.r;
+    p.g[i] = col.g;
+    p.b[i] = col.b;
+  }
+
+  onBeatImpulse(surge) {
+    if (sliderParticles === 0 || ambientLevel === 0 || reducedMotion) return;
+    const p = this.pool;
+    const mult = surge * (sliderParticles >= 40 ? 1.1 : 0.85);
+    const halfW = this.width * 0.5;
+    const halfH = this.height * 0.5;
+
+    for (let i = 0; i < p.count; i++) {
+      const react = p.reactivity[i];
+      if (react <= 0.05) continue; // Inertial particle maintains serene drift
+
+      const hash1 = dustHash(i, 7);
+      const hash2 = dustHash(i, 8);
+      const hash3 = dustHash(i, 9);
+
+      // Varied response patterns: upward lift, lateral draft, radial expansion, swirl
+      const behavior = i % 4;
+      let impulseX = 0;
+      let impulseY = 0;
+
+      if (behavior === 0) {
+        // Gentle acoustic vertical lift
+        impulseY = -(0.22 + hash1 * 0.38) * mult * react;
+        impulseX = (hash2 - 0.5) * 0.22 * mult * react;
+      } else if (behavior === 1) {
+        // Lateral acoustic draft with subtle loft
+        impulseX = (hash2 > 0.5 ? 1 : -1) * (0.16 + hash1 * 0.32) * mult * react;
+        impulseY = -(0.06 + hash3 * 0.16) * mult * react;
+      } else if (behavior === 2) {
+        // Radial expansion wave from room center
+        const dx = p.x[i] - halfW;
+        const dy = p.y[i] - halfH;
+        const dist = Math.hypot(dx, dy) || 1;
+        const push = (0.14 + hash1 * 0.28) * mult * react;
+        impulseX = (dx / dist) * push;
+        impulseY = (dy / dist) * push - 0.10 * mult * react;
+      } else {
+        // Swirl / acoustic eddy lift
+        const swirlAngle = Math.atan2(p.y[i] - halfH, p.x[i] - halfW) + Math.PI * 0.5;
+        const push = (0.12 + hash1 * 0.24) * mult * react;
+        impulseX = Math.cos(swirlAngle) * push;
+        impulseY = Math.sin(swirlAngle) * push - 0.12 * mult * react;
+      }
+
+      // Smoothly accumulate into beat momentum buffers (smoothly decayed each frame)
+      p.beatVx[i] += impulseX;
+      p.beatVy[i] += impulseY;
+
+      // Micro rotation nudge with strict cap to prevent rapid spinning
+      const rotKick = (hash3 - 0.5) * 0.0014 * mult * react;
+      p.rotSpeed[i] = Math.max(-0.007, Math.min(0.007, p.rotSpeed[i] + rotKick));
+    }
+  }
+
+  onSubBeatImpulse(strength) {
+    if (sliderParticles === 0 || ambientLevel === 0 || reducedMotion) return;
+    const p = this.pool;
+    for (let i = 0; i < p.count; i++) {
+      const react = p.reactivity[i];
+      p.beatVy[i] -= (0.04 + dustHash(i, 10) * 0.08) * strength * react;
+    }
+  }
+
+  updateAndRender(dt, now) {
+    if (sliderParticles === 0 || ambientLevel === 0 || reducedMotion || miniMode) {
+      if (this.ctx && this.pool.count > 0) {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.pool.clear();
+      }
+      return;
+    }
+
+    if (!this.setupDone) this.init();
+    if (!this.ctx) return;
+
+    const curW = this.canvas.clientWidth || window.innerWidth;
+    const curH = this.canvas.clientHeight || window.innerHeight;
+    if (curW > 0 && curH > 0 && (Math.abs(curW - this.width) > 2 || Math.abs(curH - this.height) > 2)) {
+      this.handleResize(curW, curH);
+    }
+    if (this.width <= 0 || this.height <= 0) return;
+
+    const ctx = this.ctx;
+    const p = this.pool;
+    const targetCount = sliderParticles;
+    const clampedDt = Math.min(50, dt || 16.6);
+
+    // Smoothly spawn towards targetCount across the whole view
+    if (p.count < targetCount && (now - this.lastSpawn > 80)) {
+      this.lastSpawn = now;
+      const i = p.count;
+      this.spawnParticle(i, true);
+      p.count++;
+    }
+
+    ctx.save();
+    ctx.scale(this.dpr, this.dpr);
+    ctx.clearRect(0, 0, this.width, this.height);
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Exponential acoustic air drag (~280ms relaxation) for silky smooth beat transition
+    const acousticDrag = Math.exp(-clampedDt / 280);
+
+    const activeCount = Math.min(p.count, targetCount);
+    for (let i = 0; i < activeCount; i++) {
+      p.life[i] += clampedDt;
+
+      // When life expires, smoothly respawn at a new position anywhere across the screen
+      if (p.life[i] >= p.maxLife[i]) {
+        this.spawnParticle(i, true);
+      } else if (p.y[i] < -35) {
+        p.y[i] = this.height + 15;
+        p.x[i] = Math.random() * this.width;
+        p.prevX[i] = p.x[i];
+        p.prevY[i] = p.y[i];
+      } else if (p.y[i] > this.height + 35) {
+        p.y[i] = -15;
+        p.x[i] = Math.random() * this.width;
+        p.prevX[i] = p.x[i];
+        p.prevY[i] = p.y[i];
+      } else if (p.x[i] < -35) {
+        p.x[i] = this.width + 15;
+        p.prevX[i] = p.x[i];
+      } else if (p.x[i] > this.width + 35) {
+        p.x[i] = -15;
+        p.prevX[i] = p.x[i];
+      }
+
+      p.prevX[i] = p.x[i];
+      p.prevY[i] = p.y[i];
+
+      // Smooth decay of beat-induced velocity momentum
+      p.beatVx[i] *= acousticDrag;
+      p.beatVy[i] *= acousticDrag;
+
+      const seed = p.seed[i];
+      const t = p.life[i] * 0.001;
+      const curlX = Math.sin(t * 0.7 + seed) * 0.35 + Math.cos(t * 1.3 + seed * 2) * 0.15;
+      const curlY = Math.cos(t * 0.6 + seed * 1.5) * 0.22 - 0.14;
+
+      p.vx[i] = p.vx[i] * 0.95 + curlX * 0.05;
+      p.vy[i] = p.vy[i] * 0.95 + curlY * 0.05;
+
+      // Effective velocity combines base atmospheric curl and smooth beat impulse
+      const effVx = p.vx[i] + p.beatVx[i];
+      const effVy = p.vy[i] + p.beatVy[i];
+
+      p.x[i] += effVx * clampedDt * 0.06;
+      p.y[i] += effVy * clampedDt * 0.06;
+
+      // Continuous damping of rotation speed back towards base serene speed
+      p.rotSpeed[i] = p.rotSpeed[i] * 0.95 + p.baseRotSpeed[i] * 0.05;
+      p.rot[i] += p.rotSpeed[i];
+
+      // Lifecycle opacity curve: smooth sine entrance and fadeout
+      const progress = p.life[i] / p.maxLife[i];
+      let alpha = 1.0;
+      if (progress < 0.20) {
+        alpha = Math.sin((progress / 0.20) * (Math.PI / 2));
+      } else if (progress > 0.80) {
+        alpha = Math.sin(((1.0 - progress) / 0.20) * (Math.PI / 2));
+      }
+
+      // Dynamic particle animations (Twinkling, Breathing, Ambient micro-shimmer)
+      let scaleMult = 1.0;
+      let bloomMult = 1.0;
+      const twType = p.twinkleType[i];
+
+      if (twType === 1) {
+        // Sparkling glint twinkle: sharp periodic flare in brightness, size, and bloom
+        const twCycle = Math.sin(t * p.twinkleFreq[i] + p.twinklePhase[i]);
+        const glint = Math.pow(Math.max(0, twCycle), 6);
+        const depth = p.twinkleDepth[i];
+        alpha *= (0.42 + 0.38 * Math.sin(t * 1.1 + seed) + glint * 1.3 * depth);
+        scaleMult = 1.0 + glint * 0.38 * depth;
+        bloomMult = 1.0 + glint * 0.85 * depth;
+      } else if (twType === 2) {
+        // Breathing swell: smooth rhythmic expansion and contraction
+        const breath = Math.sin(t * 0.85 + seed);
+        alpha *= (0.76 + breath * 0.24);
+        scaleMult = 1.0 + breath * 0.12;
+      } else {
+        // Steady ambient with subtle organic shimmer
+        const shimmer = 0.88 + Math.sin(t * 1.6 + seed) * 0.12;
+        alpha *= shimmer;
+      }
+
+      alpha = Math.min(1.0, Math.max(0, alpha));
+
+      const levelMult = Math.min(1.0, 0.45 + (sliderParticles / 80) * 0.55);
+      alpha *= levelMult;
+
+      // Master particle opacity from settings sub-option
+      const opacityFactor = Math.max(0.10, Math.min(1.0, (sliderParticleOpacity || 80) / 100));
+      alpha *= opacityFactor;
+
+      if (p.shapeType[i] === 0) {
+        alpha *= 0.65;
+      }
+
+      p.alpha[i] = alpha;
+
+      const r = p.r[i], g = p.g[i], b = p.b[i];
+
+      // Compute effective size based on sliderParticleSize (0% = uniform meanSize, 100% = full rawSize variation)
+      const varFactor = Math.max(0, Math.min(1.0, (sliderParticleSize !== undefined ? sliderParticleSize : 70) / 100));
+      const baseEffectiveSize = p.meanSize[i] * (1.0 - varFactor) + p.rawSize[i] * varFactor;
+      const size = baseEffectiveSize * scaleMult;
+
+      const bloom = p.bloom[i] * bloomMult;
+      const shape = p.shapeType[i];
+      const param = p.shapeParam[i];
+
+      if (shape === 0) {
+        drawAirBokehOrb(ctx, p.x[i], p.y[i], size, r, g, b, alpha, bloom);
+      } else if (shape === 1) {
+        drawAirBulbousCross(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+      } else if (shape === 2) {
+        drawAirDiamondStar(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+      } else if (shape === 3) {
+        drawAirPrismRing(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+      } else if (shape === 4) {
+        const driftAngle = Math.atan2(effVy, effVx);
+        drawAirBulbousSpore(ctx, p.x[i], p.y[i], size, driftAngle, r, g, b, alpha, bloom, param);
+      } else {
+        drawAirNebulaCloud(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
+      }
+    }
+
+    ctx.restore();
+  }
+}
+
+const airPipeline = new AirParticlePipeline();
+window.airPipeline = airPipeline;
+
 function buildDustField() {
+  if (window.airPipeline) window.airPipeline.init();
   const field = document.getElementById('dust-field');
   if (!field) return field;
-  if (field.childElementCount) {
-    // Already built. Drop whatever is in there before rebuilding: the count and
-    // the layout can both change (a mode or a size change that re-runs this),
-    // and appending a second field onto the first stacked two mote sets — twice
-    // the nodes, twice the compositing, and a "count" that no longer means
-    // anything.
-    field.textContent = '';
-  }
+  if (field.childElementCount) field.textContent = '';
   for (const mote of dustLayout(DUST_COUNT)) {
     const el = document.createElement('i');
     el.className = 'mote';
@@ -1822,20 +3108,14 @@ function buildDustField() {
   return field;
 }
 
-// Which of the cover's two region tints each mote carries. The mote's own
-// vertical place decides the half (an upper mote sits in front of the upper
-// half of the artwork), with a hash so motes near the middle do not form a hard
-// seam between the two hues. Written as an index, not a colour: when the cover
-// changes only these two numbers flip — no per-mote colour arithmetic.
 function moteTintIndex(mote) {
   const seam = mote.y + (dustHash(Math.round(mote.y * 1000), 7) - 0.5) * 0.3;
   return seam < 0.5 ? 0 : 1;
 }
 
-// Re-tint every mote from --mote-a / --mote-b. Called when either side changes:
-// a new cover, or a rebuild of the field itself.
 let moteTintCache = ['', '', 0];
 function applyMoteTints() {
+  if (window.airPipeline) window.airPipeline.updateColors();
   const field = document.getElementById('dust-field');
   if (!field) return;
   const root = document.documentElement;
@@ -1849,47 +3129,25 @@ function applyMoteTints() {
   for (const el of field.children) {
     const my = parseFloat(el.style.getPropertyValue('--my')) / 100;
     const idx = moteTintIndex({ y: my });
-    // No palette (a grey cover, or no cover yet): the theme accent does the
-    // lighting, exactly as before this palette existed.
     const tint = tints[idx];
     if (tint) el.style.setProperty('--mote-c', tint);
     else el.style.removeProperty('--mote-c');
   }
 }
 
-// Same three states as Beat sync and Big moments, deliberately: one intensity
-// system, not three. The level is one number read by one opacity, so Subtle and
-// Bold differ by nothing but this.
-const AMBIENT_MODES = ['on', 'bold', 'off'];
-const AMBIENT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
-// Every mode has a level, Off included: a table with a hole in it is what forces
-// a `||` fallback at the read site, and a fallback is how a wrong state silently
-// reads as a right one.
-const AMBIENT_LEVEL = { on: 0.62, bold: 1, off: 0 };
-let ambientMode = 'on';
-
-// Off, reduced motion and the mini player have to be exactly stock. The CSS takes
-// the field out of the tree for all three, so the class is what makes Off stock
-// (the level below only keeps the number honest).
 function applyAmbientMode() {
-  document.body.classList.toggle('ambient-off', ambientMode === 'off');
-  document.documentElement.style.setProperty('--dust-op', String(AMBIENT_LEVEL[ambientMode]));
-}
-
-function cycleAmbient() {
-  const idx = AMBIENT_MODES.indexOf(ambientMode);
-  ambientMode = AMBIENT_MODES[(idx + 1) % AMBIENT_MODES.length];
-  Settings.set('ambientMode', ambientMode);
-  applyAmbientMode();
-  syncSettingsPanel();
+  document.body.classList.toggle('ambient-off', ambientLevel === 0);
+  const op = AMBIENT_LEVEL_OPACITIES[ambientLevel] || 0;
+  document.documentElement.style.setProperty('--dust-op', String(op));
+  document.documentElement.style.setProperty('--fx-canvas-op', String(op));
+  if (window.airPipeline) {
+    window.airPipeline.resize();
+    window.airPipeline.seedParticles();
+  }
 }
 
 // =========================================================
 // Cover tilt
-// Where the pointer sits inside the art, normalised to -1..1: -1 at the left/top
-// edge, +1 at the right/bottom, 0 in the middle. Pure, so the preview gate can
-// assert the maths without depending on a layout, and clamped so a stale rect can
-// never hand the stage a rotation it cannot come back from.
 // =========================================================
 function tiltVector(clientX, clientY, rect) {
   const clamp = (v) => Math.max(-1, Math.min(1, v));
@@ -1902,15 +3160,6 @@ function tiltVector(clientX, clientY, rect) {
 }
 window.tiltVector = tiltVector;
 
-const TILT_MODES = ['on', 'bold', 'off'];
-const TILT_LABELS = { on: 'Subtle', bold: 'Bold', off: 'Off' };
-// A lean is read at a glance, so the two live states are close together: Bold is
-// about the most a square of artwork can lean before it reads as falling over.
-const TILT_AMP = { on: 0.7, bold: 1.2, off: 0 };
-let tiltMode = 'on';
-
-// The number is published on the ROOT, where its registered transition lives, so
-// the lean eases and releases instead of snapping to the pointer.
 function setTilt(x, y) {
   const root = document.documentElement;
   root.style.setProperty('--tilt-x', x.toFixed(3));
@@ -1918,21 +3167,11 @@ function setTilt(x, y) {
 }
 
 function resetTilt() {
-  // A release is not a position: drop whatever the pointer left queued, or the
-  // next frame would lean the sleeve straight back out.
   pendingTilt = null;
-  // A release also ends the hover, and the hover is what owns the cached rect.
-  // Every caller is a moment where the art moved (a layout change, the mini bar,
-  // reduced motion), so the measurement is stale by definition and the next
-  // pointer move re-measures once — the same cost as a fresh hover.
   tiltRects.clear();
   setTilt(0, 0);
 }
 
-// The newest pointer sample, published once per frame. A pointer can move several
-// times per frame and each `mousemove` used to write two custom properties on the
-// root — which every element inherits — so a fast pointer cost several restyles
-// per frame. One write per frame is the most the screen can show anyway.
 let pendingTilt = null;
 let tiltFrame = 0;
 function scheduleTilt(x, y) {
@@ -1946,10 +3185,6 @@ function scheduleTilt(x, y) {
   });
 }
 
-// The wrap's rect, measured once per hover rather than once per move: a rect read
-// inside a move handler forces a layout, and while a song is playing the lyric
-// engine is writing styles on every frame — which is exactly when the lean used
-// to crawl. Resizes and scrolling invalidate it.
 const tiltRects = new Map();
 function tiltRectFor(wrap) {
   let rect = tiltRects.get(wrap);
@@ -1960,50 +3195,25 @@ function tiltRectFor(wrap) {
   return rect;
 }
 
-// Deliberately NOT a registered property: a mode change is a deliberate act and
-// Off should be immediate, while the pointer's own value is the thing that eases.
 function applyTiltMode() {
-  document.documentElement.style.setProperty('--tilt-amp', String(TILT_AMP[tiltMode]));
+  document.documentElement.style.setProperty('--tilt-amp', String(TILT_LEVEL_AMPS[tiltLevel] || 0));
 }
 
-// One listener per art wrap. Only one is on screen in a given layout (split hides
-// the float, compact hides the side panel), so a single pair of numbers on the
-// root is enough — and it is what lets the backdrop, which is not inside either
-// wrap, counter-move with the same lean.
 function initArtTilt() {
   const wraps = [document.getElementById('float-art-wrap'), document.querySelector('.side-art-wrap')];
   for (const wrap of wraps) {
     if (!wrap) continue;
-    // Measured once on the way in, so the move handler runs no layout at all.
     wrap.addEventListener('mouseenter', () => { tiltRects.delete(wrap); tiltRectFor(wrap); });
     wrap.addEventListener('mousemove', (event) => {
-      if (tiltMode === 'off' || reducedMotion || miniMode) return;
+      if (tiltLevel === 0 || reducedMotion || miniMode) return;
       const v = tiltVector(event.clientX, event.clientY, tiltRectFor(wrap));
       scheduleTilt(v.x, v.y);
     });
     wrap.addEventListener('mouseleave', resetTilt);
   }
-  // Anything that moves the wrap out from under the cached rect: a resize, or the
-  // lyrics scrolling in the pane beside it.
   window.addEventListener('resize', () => tiltRects.clear());
   window.addEventListener('scroll', () => tiltRects.clear(), true);
-  // The pointer leaves the sleeve without a mouseleave when the window loses
-  // focus — Chromium does not synthesise one for a subtree that is still laid out
-  // — so Alt-Tab with the pointer parked on the card used to leave it leaning for
-  // as long as you were away. Same reset, same reason, as the mini bar's own
-  // blur handler in initPointerChrome.
   window.addEventListener('blur', resetTilt);
-}
-
-function cycleTilt() {
-  const idx = TILT_MODES.indexOf(tiltMode);
-  tiltMode = TILT_MODES[(idx + 1) % TILT_MODES.length];
-  Settings.set('tiltMode', tiltMode);
-  applyTiltMode();
-  // Off has to release a lean that is already on screen, not just stop accepting
-  // new ones: --tilt-amp alone would freeze the sleeve where the pointer left it.
-  if (tiltMode === 'off') resetTilt();
-  syncSettingsPanel();
 }
 
 // =========================================================
@@ -2595,7 +3805,7 @@ const SP_GROUP_SUMMARY = {
       ? ttmlSnapshot.entries.length : 0;
     return entries ? entries + (entries === 1 ? ' file' : ' files') : '';
   },
-  motion: () => settingsGroupStateText('qp-motion-style-state'),
+  motion: () => `${EFFECT_LEVEL_LABELS[beatLevel] || 'Subtle'} \u00b7 ${settingsGroupStateText('qp-motion-style-state')}`,
 };
 
 function settingsGroupStateText(id) {
@@ -2613,7 +3823,7 @@ function settingsGroupNode(slug) {
 }
 
 function settingsGroupOpen(slug) {
-  return Settings.get('spGroup_' + slug, '0') === '1';
+  return Settings.get('spGroup_' + slug, '1') === '1';
 }
 
 function applySettingsGroup(slug, open, persist) {
@@ -2772,7 +3982,9 @@ function settingsSearchableRows() {
       const rows = [...group.children].filter((el) =>
         el.classList.contains('qp-row') || el.classList.contains('ttml-bar') ||
         el.classList.contains('ttml-status') || el.classList.contains('ttml-current') ||
-        el.classList.contains('ttml-list') || el.classList.contains('sp-hint'));
+        el.classList.contains('ttml-list') || el.classList.contains('sp-hint') ||
+        el.classList.contains('sp-slider-card') || el.classList.contains('spicy-key-card') ||
+        el.classList.contains('font-bar') || el.classList.contains('font-list'));
       // The heading is named by the group itself, not by reading the title's
       // text: the title now carries a toggle whose summary the heading must not
       // pick up ("Sync+600ms").
@@ -3135,14 +4347,24 @@ try {
   if (LYRIC_ALIGNS.includes(savedAlign)) lyricAlign = savedAlign;
   const savedMotionStyle = Settings.get('motionStyle', 'auto');
   if (MOTION_STYLES.includes(savedMotionStyle)) motionStyle = savedMotionStyle;
-  const savedBeatMode = Settings.get('beatMode', 'on');
-  if (BEAT_MODES.includes(savedBeatMode)) beatMode = savedBeatMode;
-  const savedMomentsMode = Settings.get('momentsMode', 'on');
-  if (MOMENT_MODES.includes(savedMomentsMode)) momentsMode = savedMomentsMode;
-  const savedAmbientMode = Settings.get('ambientMode', 'on');
-  if (AMBIENT_MODES.includes(savedAmbientMode)) ambientMode = savedAmbientMode;
-  const savedTiltMode = Settings.get('tiltMode', 'on');
-  if (TILT_MODES.includes(savedTiltMode)) tiltMode = savedTiltMode;
+  const savedBeatLevel = Settings.get('beatLevel', null);
+  beatLevel = parseLevelSetting(savedBeatLevel !== null ? savedBeatLevel : Settings.get('beatMode', 'on'));
+  beatMode = getLegacyMode(beatLevel);
+
+  const savedChromaLevel = Settings.get('chromaLevel', null);
+  chromaLevel = parseLevelSetting(savedChromaLevel !== null ? savedChromaLevel : 2);
+
+  const savedMomentsLevel = Settings.get('momentLevel', null);
+  momentLevel = parseLevelSetting(savedMomentsLevel !== null ? savedMomentsLevel : Settings.get('momentsMode', 'on'));
+  momentsMode = getLegacyMode(momentLevel);
+
+  const savedAmbientLevel = Settings.get('ambientLevel', null);
+  ambientLevel = parseLevelSetting(savedAmbientLevel !== null ? savedAmbientLevel : Settings.get('ambientMode', 'on'));
+  ambientMode = getLegacyMode(ambientLevel);
+
+  const savedTiltLevel = Settings.get('tiltLevel', null);
+  tiltLevel = parseLevelSetting(savedTiltLevel !== null ? savedTiltLevel : Settings.get('tiltMode', 'on'));
+  tiltMode = getLegacyMode(tiltLevel);
   alwaysOnTop = Settings.get('ontop', '0') === '1';
   const savedCardPosition = Settings.get('cardPosition', 'left');
   if (CARD_POSITIONS.includes(savedCardPosition)) cardPosition = savedCardPosition;
@@ -3254,14 +4476,16 @@ function extractAccent(pixels) {
   const HUE_BUCKETS = 12;                       // 30 degrees each
   const weight = new Array(HUE_BUCKETS).fill(0);
   const sum = Array.from({ length: HUE_BUCKETS }, () => [0, 0, 0, 0]);
+  let totalR = 0, totalG = 0, totalB = 0, totalCount = 0;
   for (let i = 0; i + 3 < pixels.length; i += 4) {
     if (pixels[i + 3] < 128) continue;
     const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+    totalR += r; totalG += g; totalB += b; totalCount++;
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
     const chroma = max - min;
-    if (chroma < 32) continue;                  // grey: no hue to contribute
-    if (max < 32) continue;                     // black: nothing to light with
-    if (min > 224) continue;                    // blown out: white, not colour
+    if (chroma < 20) continue;                  // grey: allow gentle hues
+    if (max < 24) continue;                     // black: nothing to light with
+    if (min > 235) continue;                    // blown out: white, not colour
     let hue;
     if (max === r) hue = ((g - b) / chroma + 6) % 6;
     else if (max === g) hue = (b - r) / chroma + 2;
@@ -3275,13 +4499,23 @@ function extractAccent(pixels) {
   for (let i = 0; i < HUE_BUCKETS; i++) {
     if (weight[i] > 0 && (best < 0 || weight[i] > weight[best])) best = i;
   }
-  if (best < 0) return null;
-  const s = sum[best];
-  return clampAccentToLight({
-    r: Math.round(s[0] / s[3]),
-    g: Math.round(s[1] / s[3]),
-    b: Math.round(s[2] / s[3]),
-  });
+  if (best >= 0) {
+    const s = sum[best];
+    return clampAccentToLight({
+      r: Math.round(s[0] / s[3]),
+      g: Math.round(s[1] / s[3]),
+      b: Math.round(s[2] / s[3]),
+    });
+  }
+  // Low-chroma / pale artwork fallback (e.g. Radiohead OK Computer)
+  if (totalCount > 0) {
+    return clampAccentToLight({
+      r: Math.round(totalR / totalCount),
+      g: Math.round(totalG / totalCount),
+      b: Math.round(totalB / totalCount),
+    });
+  }
+  return null;
 }
 
 // The winner has to read as a LIGHT on a near-black UI: a dark, muddy album
@@ -3292,6 +4526,12 @@ function clampAccentToLight(rgb) {
   const r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   const l = (max + min) / 2;
+  // If the artwork is mostly black or very dark (e.g. Kanye West Donda),
+  // do not force it into a 60% lightness bright white halo!
+  if (l < 0.12) {
+    document.documentElement.style.setProperty('--art-glow', '0.06');
+    return { r: 24, g: 28, b: 36 };
+  }
   const d = max - min;
   let h = 0, s = 0;
   if (d > 0) {
@@ -3301,7 +4541,8 @@ function clampAccentToLight(rgb) {
     else h = ((r - g) / d + 4) / 6;
   }
   const S = Math.min(0.72, Math.max(0.38, s));
-  const L = Math.min(0.78, Math.max(0.60, l));
+  const L = Math.min(0.70, Math.max(0.44, l));
+  document.documentElement.style.setProperty('--art-glow', '0.35');
   const hue2rgb = (p, q, t) => {
     if (t < 0) t += 1;
     if (t > 1) t -= 1;
@@ -3334,15 +4575,17 @@ function extractPalette(pixels) {
   for (let half = 0; half < 2; half++) {
     const weight = new Array(HUE_BUCKETS).fill(0);
     const sum = Array.from({ length: HUE_BUCKETS }, () => [0, 0, 0, 0]);
+    let halfR = 0, halfG = 0, halfB = 0, halfCount = 0;
     for (let y = half * rows / 2; y < (half + 1) * rows / 2; y++) {
       for (let x = 0; x < rows; x++) {
         const i = (y * rows + x) * 4;
         if (i + 3 >= pixels.length) continue;
-        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
         if (pixels[i + 3] < 128) continue;
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+        halfR += r; halfG += g; halfB += b; halfCount++;
         const max = Math.max(r, g, b), min = Math.min(r, g, b);
         const chroma = max - min;
-        if (chroma < 32 || max < 32 || min > 224) continue;
+        if (chroma < 20 || max < 24 || min > 235) continue;
         let hue;
         if (max === r) hue = ((g - b) / chroma + 6) % 6;
         else if (max === g) hue = (b - r) / chroma + 2;
@@ -3357,13 +4600,22 @@ function extractPalette(pixels) {
     for (let i = 0; i < HUE_BUCKETS; i++) {
       if (weight[i] > 0 && (best < 0 || weight[i] > weight[best])) best = i;
     }
-    if (best < 0) { picks.push(null); continue; }
-    const s = sum[best];
-    picks.push({
-      r: Math.round(s[0] / s[3]),
-      g: Math.round(s[1] / s[3]),
-      b: Math.round(s[2] / s[3]),
-    });
+    if (best >= 0) {
+      const s = sum[best];
+      picks.push({
+        r: Math.round(s[0] / s[3]),
+        g: Math.round(s[1] / s[3]),
+        b: Math.round(s[2] / s[3]),
+      });
+    } else if (halfCount > 0) {
+      picks.push({
+        r: Math.round(halfR / halfCount),
+        g: Math.round(halfG / halfCount),
+        b: Math.round(halfB / halfCount),
+      });
+    } else {
+      picks.push(null);
+    }
   }
   return picks;
 }
@@ -3405,13 +4657,14 @@ window.halfRegionLuma = halfRegionLuma;
 // that leaves the accent where it was: a cover the canvas refuses is a reason to
 // keep the current light, never a reason to throw inside a track change.
 function applyCoverAccent(url) {
-  if (typeof url !== 'string' || !url.startsWith('data:image')) return;
+  if (typeof url !== 'string' || !url) return;
   if (!accentCanvas) {
     accentCanvas = document.createElement('canvas');
     accentCanvas.width = ACCENT_GRID;
     accentCanvas.height = ACCENT_GRID;
   }
   const image = new Image();
+  image.crossOrigin = 'anonymous';
   image.onload = () => {
     let rgb = null;
     let tints = null;
@@ -3466,9 +4719,13 @@ window.setCoverArt = function(url, isHiRes) {
   }
 
   // The instant thumbnail also feeds the header art immediately, and it is the
-  // copy the accent is read from: it is a data: URL, so the canvas can never be
-  // tainted by it.
-  if (!isHiRes) { updateHeaderArt(url); applyCoverAccent(url); }
+  // copy the accent is read from.
+  if (!isHiRes) {
+    updateHeaderArt(url);
+    applyCoverAccent(url);
+  } else {
+    applyCoverAccent(url);
+  }
 
   const layer = document.createElement('div');
   layer.className = 'cover-art-blur';
@@ -4064,9 +5321,16 @@ function tick() {
       if (lyrics.length > 0) {
         renderProgress(renderMs + latencyOffsetMs);
       }
+      if (window.audioDspClock) {
+        window.audioDspClock.recordJitter(renderMs, delta);
+        window.audioDspClock.process(renderMs, delta);
+      }
     }
 
     springSettled = updateSpringScroll(delta);
+    const beatSpringSettled = updateBeatSprings(delta);
+    if (window.airPipeline) window.airPipeline.updateAndRender(delta, now);
+    springSettled = springSettled && beatSpringSettled;
   } catch (err) {
     // One thrown frame used to kill the whole animation loop: the rAF chain was
     // never re-scheduled and renderLoopActive stayed true, so every later
@@ -4525,23 +5789,32 @@ function momentStrengthAt(plan, ms) {
 function momentStarts(lines, plan) {
   const out = [];
   const phases = (plan && plan.phases) || [];
+  const MIN_MOMENT_SEP_MS = 22000;
+  let lastMomentEnd = -99999;
+
   for (const phase of phases) {
     if (phase[2] !== 'drop') continue;
+    const strength = Math.max(0, Math.min(1, phase[3] || 0));
+    // Only genuine musical drops with high conviction
+    if (strength < 0.55) continue;
     const startMs = phase[0];
-    const holdMs = Math.min(MOMENT_MAX_HOLD_MS, Math.max(0, phase[1] - startMs));
-    out.push({ ms: startMs, endMs: startMs + holdMs, kind: 'drop',
-               strength: Math.max(0, Math.min(1, phase[3] || 0)) });
+    if (startMs - lastMomentEnd < MIN_MOMENT_SEP_MS) continue;
+    const holdMs = Math.min(MOMENT_MAX_HOLD_MS, Math.max(2500, phase[1] - startMs));
+    out.push({ ms: startMs, endMs: startMs + holdMs, kind: 'drop', strength });
+    lastMomentEnd = startMs + holdMs;
   }
+
   const hookLines = lines || [];
   for (const index of momentHooks(hookLines)) {
     const line = hookLines[index];
     const startMs = line.startTimeMs || 0;
-    if (out.some((m) => startMs >= m.ms && startMs <= m.endMs)) continue;
+    if (out.some((m) => Math.abs(startMs - m.ms) < MIN_MOMENT_SEP_MS || (startMs >= m.ms && startMs <= m.endMs))) continue;
+    const hookStrength = momentStrengthAt(plan, startMs);
+    if (hookStrength < 0.60) continue;
     const holdMs = plan
-      ? Math.min(MOMENT_MAX_HOLD_MS, Math.max(1000, 2 * plan.periodMs))
+      ? Math.min(MOMENT_MAX_HOLD_MS, Math.max(2000, 2 * plan.periodMs))
       : MOMENT_HOOK_HOLD_MS;
-    out.push({ ms: startMs, endMs: startMs + holdMs, kind: 'hook',
-               strength: momentStrengthAt(plan, startMs) });
+    out.push({ ms: startMs, endMs: startMs + holdMs, kind: 'hook', strength: hookStrength });
   }
   out.sort((a, b) => a.ms - b.ms);
   return out;
@@ -4577,9 +5850,10 @@ function motionScaleFactor() {
 let sectionDrive = 1;
 
 function updateSectionDrive(ms) {
-  if (beatMode === 'off' || reducedMotion || !beatPlan) { sectionDrive = 1; return; }
+  if (beatLevel === 0 || reducedMotion || !beatPlan) { sectionDrive = 1; return; }
   const run = beatRunAt(ms);
-  sectionDrive = run ? 0.9 + Math.max(0, Math.min(1, run[2])) * 0.25 : 1;
+  const scale = BEAT_LEVEL_SCALES[beatLevel] || 0.75;
+  sectionDrive = run ? 0.9 + Math.max(0, Math.min(1, run[2])) * 0.25 * scale : 1;
 }
 
 // Anticipation: the word about to be sung leans in as its timestamp approaches,
@@ -5806,53 +7080,54 @@ window.syncPlayhead = function(ms, mode) {
 
   if (now - lastUserSeekAt < SEEK_GUARD_MS) return;   // pre-seek echo: ignore
 
-  // A glide is a move the bridge already measured and bounded, so it is neither
-  // noise to drop nor a jump to escalate on this side's coarser threshold.
-  const glide = mode === 'glide';
   const predicted = isPlaying ? predictedPlayhead() : playheadMs;
   const diff = ms - predicted;
-  // Forward only. A large BACKWARD soft report is the parked/stale case the cap
-  // below absorbs — escalating it to a snap is what made the wipe jump back over
-  // letters it had already sung.
-  const snap = mode === 'snap' || (!glide && diff > SYNC_SNAP_MS);
-  // The bridge reports on every poll, so a report that agrees with where the wipe
-  // already is has nothing to say: dropping it here is what keeps a paused
-  // overlay parked instead of being woken twice a second for no reason.
-  if (!snap && !glide && Math.abs(diff) < SYNC_IGNORE_MS) return;
 
-  wakeRenderLoop();   // a real correction, even on a paused overlay, must repaint now
+  // Progression or seek in player: if diff is significant (> 600ms) or mode is snap,
+  // immediately land on the new playhead without stalling or waiting for pause/unpause!
+  const isProgression = mode === 'snap' || Math.abs(diff) > 600;
 
-  if (!snap && isPlaying) {
-    // Ease toward the report without ever jumping: keep the trajectory where it
-    // is and let the drift decay onto the new anchor. A backward soft report
-    // larger than the cap is a parked or stale number, not drift the eye can
-    // follow, so only a capped step back is taken — the wipe is never walked
-    // backwards over letters it has already sung.
-    const cur = predictedPlayhead();
-    const target = (!glide && diff < -SOFT_BACK_MAX_MS) ? cur - SOFT_BACK_MAX_MS : ms;
-    anchorPosMs = target;
+  if (isProgression) {
+    glideUntilMs = 0;
+    targetDriftMs = 0;
+    playheadMs = ms;
+    renderMs = ms;        // snap / seek landing updates renderMs immediately!
+    anchorPosMs = ms;
     anchorWallMs = now;
-    targetDriftMs = cur - target;
-    // Only a glide that is actually going to travel opens the window.
+    if (window.audioDspClock) window.audioDspClock.reset();
+    lastDisplayedSecond = -1;
+    lastSideFillSecond = -1;
+    lastArtFillSecond = -1;
+    updateTimer(ms);
+    lastActiveSig = "";
+    if (lyrics.length > 0) renderProgress(ms + latencyOffsetMs);
+    wakeRenderLoop();
+    return;
+  }
+
+  const glide = mode === 'glide';
+  if (!glide && Math.abs(diff) < SYNC_IGNORE_MS) return;
+
+  wakeRenderLoop();
+
+  if (isPlaying) {
+    const cur = predictedPlayhead();
+    anchorPosMs = ms;
+    anchorWallMs = now;
+    targetDriftMs = cur - ms;
     if (glide) glideUntilMs = now + SYNC_GLIDE_MS;
     return;
   }
 
-  // A paused overlay has no advancing wipe to ease, and a snap means the
-  // playhead really is somewhere else — land on it now.
   glideUntilMs = 0;
   targetDriftMs = 0;
   playheadMs = ms;
-  renderMs = ms;        // a landing is the one place the wipe may move backwards
+  renderMs = ms;
+  if (window.audioDspClock) window.audioDspClock.reset();
   lastDisplayedSecond = -1;
   lastSideFillSecond = -1;
   lastArtFillSecond = -1;
   updateTimer(ms);
-  // A paused move must repaint the words too, not just the timer — otherwise a
-  // seek landing while paused left the highlight frozen until the next
-  // pause/resume edge. Clearing the window signature is the cheap half of the
-  // snap path: renderProgress rewrites the lines around the window only, and
-  // jitter never reaches here, dropped above by SYNC_IGNORE_MS.
   lastActiveSig = "";
   if (lyrics.length > 0) renderProgress(ms + latencyOffsetMs);
 };

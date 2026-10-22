@@ -33,12 +33,24 @@
          the song's colour. It sits at z-index 2, under the card and the lyrics. -->
     <div class="moment-veil" aria-hidden="true"></div>
 
-    <!-- Room air: the motes of the album's own light that drift through the room.
-         One layer above the veil and below the card and the lyrics, so air sits in
-         front of the grade but behind everything readable. It never takes a
-         pointer event: the card, the drag strip and the mini bar are grabbed
-         through it. The motes are built once by app.js (buildDustField). -->
-    <div class="dust-field" id="dust-field" aria-hidden="true"></div>
+    <!-- SVG Filter for Dynamic Chromatic Aberration -->
+    <svg style="position: absolute; width: 0; height: 0; pointer-events: none;" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="vfx-chroma" x="-10%" y="-10%" width="120%" height="120%">
+          <feOffset in="SourceGraphic" dx="0" dy="0" result="red" id="chroma-r" />
+          <feOffset in="SourceGraphic" dx="0" dy="0" result="blue" id="chroma-b" />
+          <feColorMatrix in="red" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="red-c" />
+          <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="green-c" />
+          <feColorMatrix in="blue" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blue-c" />
+          <feBlend in="red-c" in2="green-c" mode="screen" result="rg" />
+          <feBlend in="rg" in2="blue-c" mode="screen" />
+        </filter>
+      </defs>
+    </svg>
+
+    <!-- Hardware-accelerated GPU particle canvas for fluid air effects & velocity trails -->
+    <canvas id="fx-canvas" class="fx-canvas" aria-hidden="true"></canvas>
+    <div class="dust-field" id="dust-field" aria-hidden="true" style="display:none"></div>
 
     <!-- Top drag strip: hold anywhere along the top edge to move the window.
          data-drag is the whole contract: a mousedown inside a marked surface is
@@ -338,14 +350,14 @@
              aria-label="Settings" aria-hidden="true" data-no-drag>
       <div class="sp-sheet">
         <header class="sp-head">
-          <div>
+          <div class="sp-head-info">
             <div class="sp-title">Settings</div>
-            <div class="sp-sub">Paprika Lyrics</div>
+            <div class="sp-sub"><span class="sp-sub-dot"></span>Paprika Lyrics</div>
           </div>
           <button class="sp-close" onclick="closeSettings()" title="Close (Esc)" aria-label="Close settings">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
-              <path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
           </button>
         </header>
@@ -373,13 +385,37 @@
              keep four readable labels. -->
         <div class="sp-tabs" id="qp-tabs" role="tablist" aria-label="Settings sections">
           <button class="sp-tab" role="tab" id="qp-tab-window" data-tab="window"
-                  aria-controls="qp-panel-window" aria-selected="true" tabindex="0">Window</button>
+                  aria-controls="qp-panel-window" aria-selected="true" tabindex="0">
+            <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            <span>Window</span>
+          </button>
           <button class="sp-tab" role="tab" id="qp-tab-lyrics" data-tab="lyrics"
-                  aria-controls="qp-panel-lyrics" aria-selected="false" tabindex="-1">Lyrics</button>
+                  aria-controls="qp-panel-lyrics" aria-selected="false" tabindex="-1">
+            <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 18V5l12-2v13"/>
+              <circle cx="6" cy="18" r="3"/>
+              <circle cx="18" cy="16" r="3"/>
+            </svg>
+            <span>Lyrics</span>
+          </button>
           <button class="sp-tab" role="tab" id="qp-tab-visuals" data-tab="visuals"
-                  aria-controls="qp-panel-visuals" aria-selected="false" tabindex="-1">Visuals</button>
+                  aria-controls="qp-panel-visuals" aria-selected="false" tabindex="-1">
+            <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            <span>Visuals</span>
+          </button>
           <button class="sp-tab" role="tab" id="qp-tab-diag" data-tab="diag"
-                  aria-controls="qp-panel-diag" aria-selected="false" tabindex="-1">Diagnostics</button>
+                  aria-controls="qp-panel-diag" aria-selected="false" tabindex="-1">
+            <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            <span>Diagnostics</span>
+          </button>
         </div>
 
         <div class="sp-body" id="qp-body">
@@ -581,27 +617,150 @@
                 <span class="qp-label">Motion style</span>
                 <span class="qp-state" id="qp-motion-style-state">Auto</span>
               </button>
-              <button class="qp-row qp-action" id="qp-beat" onclick="cycleBeatMode()">
-                <span class="qp-label">Beat sync</span>
-                <span class="qp-state" id="qp-beat-state">Subtle</span>
-              </button>
-              <button class="qp-row qp-action" id="qp-moments" onclick="cycleMoments()">
-                <span class="qp-label">Big moments</span>
-                <span class="qp-state" id="qp-moments-state">Subtle</span>
-              </button>
-              <button class="qp-row qp-action" id="qp-ambient" onclick="cycleAmbient()">
-                <span class="qp-label">Room air</span>
-                <span class="qp-state" id="qp-ambient-state">Subtle</span>
-              </button>
-              <button class="qp-row qp-action" id="qp-tilt" onclick="cycleTilt()">
-                <span class="qp-label">Cover tilt</span>
-                <span class="qp-state" id="qp-tilt-state">Subtle</span>
-              </button>
-              <p class="sp-hint">Big moments step the scene back and take the album's own
-                colour when a drop lands or a chorus hook arrives; the sleeve's light lifts and
-                the words themselves never move or tint. Room air drifts motes of that same
-                colour through the room, and a drop puffs them. Reduced motion, the mini player
-                and this row being Off all leave the track untouched.</p>
+
+              <!-- Advanced Continuous Visual Effects Sliders -->
+              <!-- Beat Sync Intensity Slider Card with Expandable Sub-Options -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Beat Sync Intensity</span>
+                  <span class="sp-slider-badge" id="badge-beat">45%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-beat" min="0" max="100" step="1" value="45" oninput="onVisualSliderInput('beat', this.value)" onchange="onVisualSliderChange('beat', this.value)" aria-label="Beat Sync Intensity">
+                <div class="sp-slider-labels">
+                  <span>Off</span>
+                  <span>Balanced</span>
+                  <span>100%</span>
+                </div>
+                <!-- Expandable Sub-Options Trigger for Beat Sync -->
+                <button type="button" class="sp-expand-btn" onclick="toggleSubSection('beat-sub')" id="btn-expand-beat" aria-expanded="false" aria-controls="beat-sub">
+                  <span class="sp-expand-title">Beat sub-options</span>
+                  <svg class="sp-chevron-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="sp-sub-section" id="beat-sub" hidden>
+                  <div class="sp-slider-card sp-sub-card">
+                    <div class="sp-slider-header">
+                      <span class="sp-slider-title">Chromatic Aberration</span>
+                      <span class="sp-slider-badge" id="badge-chroma">30%</span>
+                    </div>
+                    <input type="range" class="sp-range-slider" id="slider-chroma" min="0" max="100" step="1" value="30" oninput="onVisualSliderInput('chroma', this.value)" onchange="onVisualSliderChange('chroma', this.value)" aria-label="Chromatic Aberration Intensity">
+                    <div class="sp-slider-labels">
+                      <span>Off</span>
+                      <span>Subtle</span>
+                      <span>100%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Artwork Animations & Glow</span>
+                  <span class="sp-slider-badge" id="badge-art">40%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-art" min="0" max="100" step="1" value="40" oninput="onVisualSliderInput('art', this.value)" onchange="onVisualSliderChange('art', this.value)" aria-label="Artwork Animations and Lamp Glow">
+                <div class="sp-slider-labels">
+                  <span>Off</span>
+                  <span>Gentle</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              <!-- Room Air Particles Card with Expandable Sub-Options -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Room Air Particles</span>
+                  <span class="sp-slider-badge" id="badge-particles">28 motes</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-particles" min="0" max="80" step="1" value="28" oninput="onVisualSliderInput('particles', this.value)" onchange="onVisualSliderChange('particles', this.value)" aria-label="Room Air Particles Count">
+                <div class="sp-slider-labels">
+                  <span>0</span>
+                  <span>28 motes</span>
+                  <span>80</span>
+                </div>
+                <!-- Expandable Sub-Options Trigger for Room Air -->
+                <button type="button" class="sp-expand-btn" onclick="toggleSubSection('air-sub')" id="btn-expand-air" aria-expanded="false" aria-controls="air-sub">
+                  <span class="sp-expand-title">Air details & variation</span>
+                  <svg class="sp-chevron-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="sp-sub-section" id="air-sub" hidden>
+                  <div class="sp-slider-card sp-sub-card">
+                    <div class="sp-slider-header">
+                      <span class="sp-slider-title">Particle Opacity</span>
+                      <span class="sp-slider-badge" id="badge-particle-opacity">80%</span>
+                    </div>
+                    <input type="range" class="sp-range-slider" id="slider-particle-opacity" min="10" max="100" step="5" value="80" oninput="onVisualSliderInput('particle-opacity', this.value)" onchange="onVisualSliderChange('particle-opacity', this.value)" aria-label="Particle Opacity">
+                    <div class="sp-slider-labels">
+                      <span>Faint (10%)</span>
+                      <span>80%</span>
+                      <span>Vivid (100%)</span>
+                    </div>
+                  </div>
+
+                  <div class="sp-slider-card sp-sub-card">
+                    <div class="sp-slider-header">
+                      <span class="sp-slider-title">Size Variation</span>
+                      <span class="sp-slider-badge" id="badge-particle-size">70%</span>
+                    </div>
+                    <input type="range" class="sp-range-slider" id="slider-particle-size" min="0" max="100" step="5" value="70" oninput="onVisualSliderInput('particle-size', this.value)" onchange="onVisualSliderChange('particle-size', this.value)" aria-label="Size Variation">
+                    <div class="sp-slider-labels">
+                      <span>Uniform</span>
+                      <span>Dynamic</span>
+                      <span>Wide</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Big Moments</span>
+                  <span class="sp-slider-badge" id="badge-moments">35%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-moments" min="0" max="100" step="1" value="35" oninput="onVisualSliderInput('moments', this.value)" onchange="onVisualSliderChange('moments', this.value)" aria-label="Big Moments Intensity">
+                <div class="sp-slider-labels">
+                  <span>Off</span>
+                  <span>Smooth</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Cover 3D Tilt</span>
+                  <span class="sp-slider-badge" id="badge-tilt">50%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-tilt" min="0" max="100" step="1" value="50" oninput="onVisualSliderInput('tilt', this.value)" onchange="onVisualSliderChange('tilt', this.value)" aria-label="Cover 3D Tilt Intensity">
+                <div class="sp-slider-labels">
+                  <span>Off</span>
+                  <span>Natural</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              <!-- Retain legacy action buttons hidden for backward compatibility -->
+              <div style="display:none" aria-hidden="true">
+                <button class="qp-row qp-action" id="qp-beat" onclick="cycleBeatMode()">
+                  <span class="qp-label">Beat sync</span>
+                  <span class="qp-state" id="qp-beat-state">Subtle</span>
+                </button>
+                <button class="qp-row qp-action" id="qp-moments" onclick="cycleMoments()">
+                  <span class="qp-label">Big moments</span>
+                  <span class="qp-state" id="qp-moments-state">Subtle</span>
+                </button>
+                <button class="qp-row qp-action" id="qp-ambient" onclick="cycleAmbient()">
+                  <span class="qp-label">Room air</span>
+                  <span class="qp-state" id="qp-ambient-state">Subtle</span>
+                </button>
+                <button class="qp-row qp-action" id="qp-tilt" onclick="cycleTilt()">
+                  <span class="qp-label">Cover tilt</span>
+                  <span class="qp-state" id="qp-tilt-state">Subtle</span>
+                </button>
+              </div>
+              <p class="sp-hint">Fine-tune visual effects across 5 intensity levels (0: Off, 1: Min, 2: Subtle, 3: Vivid, 4: Apex). Beat sync locks visual pulses and chromatic aberration to audio transients; Room air traces fluid particle trails; Big moments amplify drops with synchronized color grading.</p>
             </section>
           </div>
 
@@ -626,10 +785,15 @@
         </div>
 
         <!-- Settings footer: version + close hint -->
-        <div style="flex-shrink:0;padding:10px 16px;border-top:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:10px;color:rgba(255,255,255,0.28);font-family:var(--ui-font);letter-spacing:.04em;">Paprika Lyrics</span>
-          <span style="font-size:10px;color:rgba(255,255,255,0.22);font-family:var(--ui-font);letter-spacing:.04em;">Esc to close</span>
-        </div>
+        <footer class="sp-foot">
+          <div class="sp-foot-brand">
+            <span class="sp-foot-logo">Paprika</span>
+            <span class="sp-foot-badge">Settings</span>
+          </div>
+          <div class="sp-foot-meta">
+            <span class="sp-foot-hint"><kbd>Esc</kbd> to dismiss</span>
+          </div>
+        </footer>
       </div>
     </section>
 

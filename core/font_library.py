@@ -586,8 +586,12 @@ class FontLibrary:
             if rel:
                 target = self._safe_path(rel)
                 if target is not None:
-                    os.startfile(str(target))      # noqa: S606 - Windows shell
-                    return True
+                    try:
+                        import subprocess
+                        subprocess.run(["explorer.exe", f"/select,{target.resolve()}"], check=False)
+                        return True
+                    except Exception:
+                        pass
             os.startfile(str(self.directory))      # noqa: S606 - Windows shell
             return True
         except Exception as exc:
