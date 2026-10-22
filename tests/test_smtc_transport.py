@@ -1315,6 +1315,23 @@ class SessionPickingTest(unittest.TestCase):
         self._pick(bridge, [session])
         self.assertEqual(bridge.clock.anchor_ms, 200_000.0)
 
+    def test_manual_lock_source_keeps_chosen_session(self):
+        bridge = make_bridge(None)
+        bridge.HANDOVER_QUIET_S = 0.01
+        spotify = FakeSession(app_id="Spotify.exe", playing=True, title="Song A")
+        chrome = FakeSession(app_id="chrome.exe", playing=True, title="Lofi Beats")
+        # Normal arbitration picks first playing
+        self.assertIs(self._pick(bridge, [spotify, chrome])["session"], spotify)
+        # Lock to Chrome: even while Spotify is also playing, Chrome is chosen and kept
+        bridge.lock_source("chrome.exe")
+        self.assertIs(self._pick(bridge, [spotify, chrome])["session"], chrome)
+        # Lock stays even if Chrome is paused while Spotify is playing!
+        chrome.playing = False
+        self.assertIs(self._pick(bridge, [spotify, chrome])["session"], chrome)
+        # Unlocking restores normal arbitration
+        bridge.unlock_source()
+        self.assertIs(self._pick(bridge, [spotify, chrome])["session"], spotify)
+
 
 if __name__ == "__main__":
     unittest.main()

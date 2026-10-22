@@ -145,6 +145,8 @@ class SmtcBridge:
         # from what sessions report, never from object identity.
         self.followed_key = ""
         self.pinned_app_id = ""
+        self.locked_source_key: str | None = None
+        self._last_available_sources: list = []
         self.challenger_since: tuple[str, float] | None = None
         # The next position this bridge sends is a place the UI must land on
         # exactly (a track change, a seek, a play/pause transition) rather than a
@@ -464,6 +466,9 @@ class SmtcBridge:
             "timeline": bool(timeline_ok),
             "duration": bool(duration_ms and duration_ms > 0),
             "source": source_to_dict(source_info),
+            "available_sources": getattr(self, "_last_available_sources", []),
+            "locked_source_key": self.locked_source_key,
+            "is_source_locked": bool(self.locked_source_key),
         }
         self._push_js(f"window.setTransportState({json.dumps(state)});")
 
@@ -1122,36 +1127,65 @@ class SmtcBridge:
             return None
 
         descriptors = []
+        available_sources = []
+        from core.source_detector import detect_source, source_to_dict
         for index, live in enumerate(sessions):
             app_id = self._session_app_id(live)
             info = None
             title = ""
+            artist = ""
             try:
                 info = await live.try_get_media_properties_async()
                 title = getattr(info, "title", "") or ""
+                artist = getattr(info, "artist", "") or ""
             except Exception as exc:
                 debug_log("[SMTC] session properties read failed:", exc)
             title = " ".join(str(title).split())
+            artist = " ".join(str(artist).split())
             # The app id alone merges every tab of one browser, which is exactly
             # the confusion this key exists to remove. With no title to report,
             # the slot in the session list is the best remaining identity.
             key = f"{app_id}\u0001{title}" if title else f"{app_id}\u0001#{index}"
+            is_play = self._is_playing(live)
+            src_desc = detect_source(app_id, title=title, artist=artist)
             descriptors.append({
                 "key": key,
                 "app_id": app_id,
-                "playing": self._is_playing(live),
+                "playing": is_play,
                 "session": live,
                 "info": info,
+                "title": title,
+                "artist": artist,
+                "source": src_desc,
+            })
+            available_sources.append({
+                "key": key,
+                "app_id": app_id,
+                "title": title,
+                "artist": artist,
+                "playing": is_play,
+                "source": source_to_dict(src_desc),
+                "is_current": False,
+                "is_locked": False,
             })
 
         previous = self.followed_key
         chosen_key, self.followed_key, self.challenger_since = select_session(
             descriptors, previous, self.challenger_since, time.time(),
             pinned_app_id=self.pinned_app_id, quiet_s=self.HANDOVER_QUIET_S,
+            locked_key=self.locked_source_key,
         )
         if previous and chosen_key != previous:
             self.clock.reset()
             self._force_snap = True
+
+        for item in available_sources:
+            item["is_current"] = (item["key"] == chosen_key)
+            item["is_locked"] = bool(self.locked_source_key and (
+                self.locked_source_key in (item["key"], item["app_id"], item["source"]["id"], item["source"]["group"])
+            ))
+
+        self._last_available_sources = available_sources
 
         if chosen_key is None:
             return None
@@ -1160,6 +1194,26 @@ class SmtcBridge:
                 self.pinned_app_id = descriptor["app_id"]
                 return descriptor
         return None
+
+    def lock_source(self, key_or_id: str | None):
+        """Locks playback tracking to a specific media session or source app."""
+        self.locked_source_key = key_or_id.strip() if key_or_id else None
+        self.followed_key = ""
+        self.clock.reset()
+        self._force_snap = True
+        self.reload_requested = True
+
+    def unlock_source(self):
+        """Unlocks source lock and returns to automatic player selection."""
+        self.locked_source_key = None
+        self.followed_key = ""
+        self.clock.reset()
+        self._force_snap = True
+        self.reload_requested = True
+
+    def get_available_sources(self) -> list:
+        """Returns the list of currently detected active media sessions."""
+        return list(getattr(self, "_last_available_sources", []))
 
     def start(self, window):
         """Entry point for the pywebview background worker thread."""

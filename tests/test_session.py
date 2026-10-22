@@ -134,6 +134,29 @@ class SelectSessionTest(unittest.TestCase):
         self.assertEqual(chosen, video["key"])
         self.assertEqual(pin, video["key"])
 
+    def test_locked_source_wins_over_other_playing_session(self):
+        # Even when Spotify and YouTube are both playing simultaneously,
+        # locking to YouTube forces YouTube to be followed.
+        spotify = d("spotify.exe\x01Song", app_id="spotify.exe", playing=True)
+        youtube = d("chrome.exe\x01Video", app_id="chrome.exe", playing=True)
+        chosen, pin, _ = select_session([spotify, youtube], "", None, 0, locked_key="chrome.exe")
+        self.assertEqual(chosen, youtube["key"])
+        self.assertEqual(pin, youtube["key"])
+
+    def test_locked_source_stays_even_when_paused_while_another_plays(self):
+        # A locked session stays selected even when paused while another session plays.
+        spotify = d("spotify.exe\x01Song", app_id="spotify.exe", playing=False)
+        youtube = d("chrome.exe\x01Video", app_id="chrome.exe", playing=True)
+        chosen, pin, _ = select_session([spotify, youtube], "", None, 0, locked_key=spotify["key"])
+        self.assertEqual(chosen, spotify["key"])
+        self.assertEqual(pin, spotify["key"])
+
+    def test_locked_source_falls_back_when_not_in_descriptors(self):
+        # When the locked session is not running, falls back gracefully to standard arbitration.
+        spotify = d("spotify.exe\x01Song", app_id="spotify.exe", playing=True)
+        chosen, pin, _ = select_session([spotify], "", None, 0, locked_key="nonexistent.exe")
+        self.assertEqual(chosen, spotify["key"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,7 +55,8 @@ def _best(descriptors, prefer_app: str = ""):
 
 
 def select_session(descriptors, pinned_key, challenger_since, now,
-                   pinned_app_id: str = "", quiet_s: float = HANDOVER_QUIET_S):
+                   pinned_app_id: str = "", quiet_s: float = HANDOVER_QUIET_S,
+                   locked_key: str | None = None):
     """
     Choose which session the overlay should follow.
 
@@ -67,10 +68,21 @@ def select_session(descriptors, pinned_key, challenger_since, now,
 
     (extra keys, e.g. the live session object, are ignored.)
 
+    If ``locked_key`` is specified, it overrides automatic handover arbitration
+    and forces the overlay to adhere to the requested session (matching either
+    exact session key or source app_id), even while multiple other apps are playing.
+
     Returns ``(chosen_key | None, pinned_key, challenger_since)``.
     """
     if not descriptors:
         return None, "", None
+
+    # Manual lock overrides automatic arbitration and forces the overlay to keep the chosen session
+    if locked_key:
+        match = next((d for d in descriptors
+                      if d["key"] == locked_key or d.get("app_id") == locked_key), None)
+        if match:
+            return match["key"], match["key"], None
 
     pinned = (next((d for d in descriptors if d["key"] == pinned_key), None)
               if pinned_key else None)

@@ -191,6 +191,7 @@
           <span class="source-pill-dot"></span>
           <span class="source-pill-icon" id="source-pill-icon"></span>
           <span class="source-pill-source" id="source-pill-source">Media Player</span>
+          <span class="source-pill-lock" id="source-pill-lock" title="Source locked (keeps playing this app)" hidden>🔒</span>
           <span class="source-pill-sep">•</span>
           <span class="source-pill-profile" id="source-pill-profile">Default</span>
           <svg class="source-pill-chevron" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
@@ -336,6 +337,7 @@
           <span class="source-pill-dot"></span>
           <span class="source-pill-icon" id="side-source-pill-icon"></span>
           <span class="source-pill-source" id="side-source-pill-source">Media Player</span>
+          <span class="source-pill-lock" id="side-source-pill-lock" title="Source locked (keeps playing this app)" hidden>🔒</span>
           <span class="source-pill-sep">•</span>
           <span class="source-pill-profile" id="side-source-pill-profile">Default</span>
           <svg class="source-pill-chevron" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
@@ -809,6 +811,11 @@
                 </div>
               </div>
 
+              <div class="profile-create-bar">
+                <input type="text" id="settings-new-profile-input" class="sp-input profile-create-input" placeholder="New profile name..." maxlength="24" onkeydown="onSettingsAddKeyDown(event)">
+                <button class="sp-action-btn profile-create-btn" onclick="submitSettingsAddProfile()">+ Add Profile</button>
+              </div>
+
               <div class="profile-select-row">
                 <select id="profile-select" class="sp-select profile-dropdown" onchange="onProfileDropdownChange(this.value)">
                 </select>
@@ -817,6 +824,16 @@
 
               <!-- Profile Quick Settings -->
               <div class="profile-settings-card">
+                <div class="qp-row">
+                  <div class="qp-text-wrap">
+                    <span class="qp-label">Locked Player Source</span>
+                    <span class="qp-sub">Keep following this player even while others are played</span>
+                  </div>
+                  <select id="profile-source-lock-select" class="source-mapping-select" onchange="onSourceLockSelectChange(this.value)">
+                    <option value="">Auto-Follow (Active Player)</option>
+                  </select>
+                </div>
+
                 <div class="qp-row">
                   <div class="qp-text-wrap">
                     <span class="qp-label">Base Sync Offset</span>
@@ -892,13 +909,38 @@
       </div>
     </section>
 
-    <!-- Quick Profile Selector Floating Menu -->
+    <!-- Quick Source & Profile Hub Floating Menu -->
     <div class="quick-profile-popup" id="quick-profile-popup" data-no-drag hidden>
       <div class="qp-popup-header">
-        <span class="qp-popup-title">Switch Profile</span>
+        <span class="qp-popup-title">Players & Profiles</span>
         <button class="qp-popup-close" onclick="closeQuickProfileMenu()">&times;</button>
       </div>
+
+      <!-- Active Players Section -->
+      <div class="qp-section-row">
+        <span class="qp-section-label">Active Players</span>
+        <button class="qp-auto-source-btn" id="qp-btn-auto-source" onclick="unlockSource(event)" title="Auto-follow whichever player is actively playing">
+          <span class="qp-auto-dot" id="qp-auto-dot"></span> Auto-Follow
+        </button>
+      </div>
+      <div class="qp-sources-list" id="quick-sources-list"></div>
+
+      <div class="qp-menu-divider"></div>
+
+      <!-- Profiles Section -->
+      <div class="qp-section-row">
+        <span class="qp-section-label">Profiles</span>
+        <button class="qp-add-btn" id="qp-btn-toggle-add" onclick="toggleQuickAddProfileInput(event)" title="Create New Profile">+ New</button>
+      </div>
+      
+      <!-- Inline Add Profile Form -->
+      <div class="qp-inline-add-row" id="qp-inline-add-row" hidden>
+        <input type="text" id="qp-input-new-profile" class="qp-inline-input" placeholder="Profile name..." maxlength="24" onkeydown="onQuickAddKeyDown(event)">
+        <button class="qp-inline-submit-btn" onclick="submitQuickAddProfile(event)">Add</button>
+      </div>
+
       <div class="qp-popup-list" id="quick-profile-list"></div>
+
       <div class="qp-popup-footer">
         <button class="qp-popup-manage" onclick="openProfilesSettings()">Configure Profiles & Rules...</button>
       </div>

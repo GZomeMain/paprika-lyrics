@@ -5020,8 +5020,8 @@ window.setTrackDuration = function(ms) {
 // about the player rather than as the overlay being broken.
 window.setTransportState = function(state) {
   transportState = (state && typeof state === 'object') ? state : null;
-  if (window.ProfileManager && state && state.source) {
-    window.ProfileManager.onSourceDetected(state.source);
+  if (window.ProfileManager && state) {
+    window.ProfileManager.onSourceDetected(state.source, state);
   }
   renderDiagnostics();
 };
@@ -7622,6 +7622,8 @@ const ProfileManager = {
   sourceMap: Object.assign({}, DEFAULT_SOURCE_MAP),
   autoSwitch: true,
   currentSource: null,
+  availableSources: [],
+  lockedSourceKey: null,
   lastAutoSwitchedSourceId: null,
   _saveTimer: null,
 
@@ -7629,7 +7631,6 @@ const ProfileManager = {
     const storedProfiles = Settings.get('profiles_data', null);
     if (!storedProfiles) {
       this.profiles = JSON.parse(JSON.stringify(BUILTIN_PROFILES));
-      // Seamlessly seed default profile with existing user configuration
       const def = this.profiles.default;
       def.sliderBeat = parseInt(Settings.get('sliderBeat', '45'), 10);
       def.sliderChroma = parseInt(Settings.get('sliderChroma', '30'), 10);
@@ -7675,7 +7676,6 @@ const ProfileManager = {
 
     this.autoSwitch = Settings.get('autoSwitchSources', '1') === '1';
 
-    // Background sync with host persistence
     const syncFromBackend = () => {
       const api = window.pywebview && window.pywebview.api;
       if (api && api.get_profiles) {
@@ -7740,7 +7740,6 @@ const ProfileManager = {
     this.activeProfileId = id;
     const p = this.profiles[id];
 
-    // Apply visual sliders and effect levels
     sliderBeat = p.sliderBeat ?? 45;
     beatLevel = p.beatLevel ?? 2;
     sliderChroma = p.sliderChroma ?? 30;
@@ -7769,17 +7768,14 @@ const ProfileManager = {
     Settings.set('sliderTilt', sliderTilt);
     Settings.set('tiltLevel', tiltLevel);
 
-    // Apply layout if defined
     if (p.layout && LAYOUTS.includes(p.layout)) {
       layoutMode = p.layout;
       applyLayoutState();
     }
 
-    // Apply fonts if defined
     if (p.lyricFont && typeof applyFont === 'function') applyFont(p.lyricFont);
     if (p.uiFont && typeof applyUiFont === 'function') applyUiFont(p.uiFont);
 
-    // Latency compensation
     if (currentTrackOffsetIsDefault) {
       latencyOffsetMs = typeof p.latencyOffsetMs === 'number' ? p.latencyOffsetMs : 0;
       updateLatencyUI();
@@ -7788,7 +7784,6 @@ const ProfileManager = {
       }
     }
 
-    // Update Visual Engine states
     if (window.syncVisualSliders) window.syncVisualSliders();
     startBeatEngine();
     startMomentEngine();
@@ -7808,13 +7803,28 @@ const ProfileManager = {
     }
   },
 
-  onSourceDetected(source) {
-    if (!source || typeof source !== 'object') return;
-    this.currentSource = source;
+  onSourceDetected(source, state) {
+    if (state) {
+      if (Array.isArray(state.available_sources)) {
+        this.availableSources = state.available_sources;
+      }
+      this.lockedSourceKey = state.locked_source_key || null;
+    }
+    if (source && typeof source === 'object') {
+      this.currentSource = source;
+    }
     this.renderPills();
 
+    const popup = document.getElementById('quick-profile-popup');
+    if (popup && !popup.hidden) {
+      this.renderQuickSourcesList();
+    }
+    if (document.body.classList.contains('settings-open')) {
+      this.renderLockDropdown();
+    }
+
     // Check auto-switching
-    if (this.autoSwitch && source.id) {
+    if (this.autoSwitch && !this.lockedSourceKey && source && source.id) {
       const targetProfileId = this.sourceMap[source.id] || this.sourceMap[source.group] || this.sourceMap['generic'];
       if (targetProfileId && targetProfileId !== this.activeProfileId && this.profiles[targetProfileId]) {
         if (this.lastAutoSwitchedSourceId !== source.id) {
@@ -7825,6 +7835,82 @@ const ProfileManager = {
         this.lastAutoSwitchedSourceId = source.id;
       }
     }
+  },
+
+  switchAndLockSource(sourceKey, sourceName) {
+    this.lockedSourceKey = sourceKey;
+    const api = window.pywebview && window.pywebview.api;
+    if (api && api.lock_source) {
+      api.lock_source(sourceKey);
+    }
+    const matched = this.availableSources.find(s => s.key === sourceKey || s.app_id === sourceKey);
+    if (matched && matched.source) {
+      this.currentSource = matched.source;
+      if (this.autoSwitch) {
+        const targetProf = this.sourceMap[matched.source.id] || this.sourceMap[matched.source.group] || this.sourceMap['generic'];
+        if (targetProf && this.profiles[targetProf] && targetProf !== this.activeProfileId) {
+          this.applyProfile(targetProf, false);
+        }
+      }
+    }
+    this.renderPills();
+    this.renderQuickSourcesList();
+    this.renderLockDropdown();
+    showProfileToast(`Locked to ${sourceName || 'player'} (keeps playing even if others play)`);
+  },
+
+  unlockSource() {
+    this.lockedSourceKey = null;
+    const api = window.pywebview && window.pywebview.api;
+    if (api && api.unlock_source) {
+      api.unlock_source();
+    }
+    this.renderPills();
+    this.renderQuickSourcesList();
+    this.renderLockDropdown();
+    showProfileToast('Auto-following active music player');
+  },
+
+  createProfile(name) {
+    name = (name || '').trim();
+    if (!name) return;
+    const newId = 'profile_' + Date.now().toString(36);
+    const active = this.getActiveProfile();
+    const newProfile = Object.assign({}, active, {
+      id: newId,
+      name: name,
+      isBuiltin: false
+    });
+    this.profiles[newId] = newProfile;
+    this.applyProfile(newId, true, 'Created profile');
+    showProfileToast(`Created & activated profile "${name}"`);
+    this.renderQuickProfileList();
+    this.renderProfilesPanel();
+  },
+
+  deleteProfile(id) {
+    const p = this.profiles[id];
+    if (!p) return;
+    if (p.isBuiltin) {
+      showProfileToast('Built-in profiles cannot be deleted');
+      return;
+    }
+    delete this.profiles[id];
+
+    for (const src of Object.keys(this.sourceMap)) {
+      if (this.sourceMap[src] === id) {
+        this.sourceMap[src] = 'default';
+      }
+    }
+
+    if (this.activeProfileId === id) {
+      this.applyProfile('default', true, 'Fallback after deletion');
+    } else {
+      this.save();
+      this.renderQuickProfileList();
+      this.renderProfilesPanel();
+    }
+    showProfileToast(`Deleted profile "${p.name}"`);
   },
 
   setSourceMapping(sourceId, profileId) {
@@ -7875,19 +7961,23 @@ const ProfileManager = {
     else if (src.id === 'browser') dotColor = '#3b82f6';
     else if (src.id === 'generic') dotColor = '#888888';
 
+    const isLocked = !!this.lockedSourceKey;
+
     // 1. Float Pill
     const pill = document.getElementById('source-pill');
     if (pill) {
       const iconEl = document.getElementById('source-pill-icon');
       const srcEl = document.getElementById('source-pill-source');
       const profEl = document.getElementById('source-pill-profile');
+      const lockEl = document.getElementById('source-pill-lock');
       const dotEl = pill.querySelector('.source-pill-dot');
       if (iconEl) iconEl.innerHTML = iconSvg;
       if (srcEl) srcEl.textContent = src.name || 'Media Player';
       if (profEl) profEl.textContent = active.name;
+      if (lockEl) lockEl.hidden = !isLocked;
       if (dotEl) {
-        dotEl.style.background = dotColor;
-        dotEl.style.boxShadow = `0 0 6px ${dotColor}99`;
+        dotEl.style.background = isLocked ? '#ffb703' : dotColor;
+        dotEl.style.boxShadow = `0 0 6px ${isLocked ? '#ffb703' : dotColor}99`;
       }
     }
 
@@ -7897,15 +7987,89 @@ const ProfileManager = {
       const sideIconEl = document.getElementById('side-source-pill-icon');
       const sideSrcEl = document.getElementById('side-source-pill-source');
       const sideProfEl = document.getElementById('side-source-pill-profile');
+      const sideLockEl = document.getElementById('side-source-pill-lock');
       const sideDotEl = sidePill.querySelector('.source-pill-dot');
       if (sideIconEl) sideIconEl.innerHTML = iconSvg;
       if (sideSrcEl) sideSrcEl.textContent = src.name || 'Media Player';
       if (sideProfEl) sideProfEl.textContent = active.name;
+      if (sideLockEl) sideLockEl.hidden = !isLocked;
       if (sideDotEl) {
-        sideDotEl.style.background = dotColor;
-        sideDotEl.style.boxShadow = `0 0 6px ${dotColor}99`;
+        sideDotEl.style.background = isLocked ? '#ffb703' : dotColor;
+        sideDotEl.style.boxShadow = `0 0 6px ${isLocked ? '#ffb703' : dotColor}99`;
       }
     }
+  },
+
+  renderQuickSourcesList() {
+    const container = document.getElementById('quick-sources-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const autoBtn = document.getElementById('qp-btn-auto-source');
+    if (autoBtn) {
+      autoBtn.classList.toggle('active', !this.lockedSourceKey);
+    }
+
+    const list = (this.availableSources && this.availableSources.length > 0)
+      ? this.availableSources
+      : (this.currentSource ? [{
+          key: this.currentSource.raw_app_id || this.currentSource.id,
+          app_id: this.currentSource.raw_app_id || this.currentSource.id,
+          title: (currentTrackMeta && currentTrackMeta.title) || 'Active Track',
+          artist: (currentTrackMeta && currentTrackMeta.artist) || '',
+          playing: isPlaying,
+          source: this.currentSource,
+          is_current: true,
+          is_locked: !!this.lockedSourceKey
+        }] : []);
+
+    if (list.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'qp-source-card';
+      empty.style.opacity = '0.6';
+      empty.style.cursor = 'default';
+      empty.innerHTML = `
+        <div class="qp-source-left">
+          <span class="qp-source-icon">${SOURCE_ICONS.generic}</span>
+          <div class="qp-source-meta">
+            <span class="qp-source-name">No active player detected</span>
+            <span class="qp-source-track">Play audio in Spotify, YouTube, etc.</span>
+          </div>
+        </div>
+      `;
+      container.appendChild(empty);
+      return;
+    }
+
+    list.forEach((s) => {
+      const card = document.createElement('div');
+      const sInfo = s.source || {};
+      const sId = sInfo.id || 'generic';
+      const sIcon = SOURCE_ICONS[sInfo.icon] || SOURCE_ICONS[sId] || SOURCE_ICONS.generic;
+      const sName = sInfo.name || s.app_id || 'Media Player';
+      const isLocked = this.lockedSourceKey && (this.lockedSourceKey === s.key || this.lockedSourceKey === s.app_id || this.lockedSourceKey === sId);
+      const isCur = s.is_current || (this.currentSource && this.currentSource.id === sId);
+
+      card.className = `qp-source-card ${isCur ? 'current' : ''} ${isLocked ? 'locked' : ''}`;
+      card.onclick = (e) => {
+        e.stopPropagation();
+        this.switchAndLockSource(s.key, sName);
+      };
+
+      card.innerHTML = `
+        <div class="qp-source-left">
+          <span class="qp-source-icon">${sIcon}</span>
+          <div class="qp-source-meta">
+            <span class="qp-source-name">${sName}</span>
+            <span class="qp-source-track">${s.title ? (s.title + (s.artist ? ' • ' + s.artist : '')) : (s.playing ? 'Playing' : 'Ready')}</span>
+          </div>
+        </div>
+        <div class="qp-source-status-badge">
+          ${isLocked ? '<span>🔒 Locked</span>' : (isCur ? '<span>Active</span>' : (s.playing ? '<span>▶ Playing</span>' : '<span>Switch</span>'))}
+        </div>
+      `;
+      container.appendChild(card);
+    });
   },
 
   renderQuickProfileList() {
@@ -7915,19 +8079,68 @@ const ProfileManager = {
     const activeId = this.activeProfileId;
 
     Object.values(this.profiles).forEach((prof) => {
-      const btn = document.createElement('button');
-      btn.className = `qp-popup-item ${prof.id === activeId ? 'active' : ''}`;
-      btn.innerHTML = `
-        <span>${prof.name}</span>
-        ${prof.id === activeId ? '<span class="qp-popup-item-check">✓</span>' : ''}
-      `;
-      btn.onclick = (e) => {
+      const row = document.createElement('div');
+      row.className = `qp-popup-item ${prof.id === activeId ? 'active' : ''}`;
+      row.onclick = (e) => {
         e.stopPropagation();
         this.applyProfile(prof.id, true);
         closeQuickProfileMenu();
       };
-      list.appendChild(btn);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = prof.name;
+      nameSpan.style.flex = '1';
+
+      row.appendChild(nameSpan);
+
+      if (prof.id === activeId) {
+        const check = document.createElement('span');
+        check.className = 'qp-popup-item-check';
+        check.textContent = '✓';
+        row.appendChild(check);
+      }
+
+      if (!prof.isBuiltin) {
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'qp-profile-del-btn';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = `Delete "${prof.name}"`;
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deleteProfileById(prof.id, e);
+        };
+        row.appendChild(delBtn);
+      }
+
+      list.appendChild(row);
     });
+  },
+
+  renderLockDropdown() {
+    const select = document.getElementById('profile-source-lock-select');
+    if (!select) return;
+    select.innerHTML = '<option value="">Auto-Follow (Active Player)</option>';
+
+    const sources = this.availableSources || [];
+    sources.forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s.key;
+      const sName = (s.source && s.source.name) || s.app_id || 'Player';
+      opt.textContent = `${sName}${s.title ? ': ' + s.title : ''}${s.playing ? ' (Playing)' : ''}`;
+      if (this.lockedSourceKey && (this.lockedSourceKey === s.key || this.lockedSourceKey === s.app_id)) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+
+    if (this.lockedSourceKey && !sources.some(s => s.key === this.lockedSourceKey || s.app_id === this.lockedSourceKey)) {
+      const opt = document.createElement('option');
+      opt.value = this.lockedSourceKey;
+      opt.textContent = `Locked: ${this.lockedSourceKey}`;
+      opt.selected = true;
+      select.appendChild(opt);
+    }
   },
 
   renderProfilesPanel() {
@@ -7972,6 +8185,8 @@ const ProfileManager = {
       autoToggle.checked = !!this.autoSwitch;
     }
 
+    this.renderLockDropdown();
+
     const mappingList = document.getElementById('source-mapping-list');
     if (mappingList) {
       mappingList.innerHTML = '';
@@ -8012,7 +8227,7 @@ const ProfileManager = {
 
 window.ProfileManager = ProfileManager;
 
-// Global UI Event Bridges for HTML Buttons
+// Global UI Event Bridges
 window.toggleQuickProfileMenu = function(e) {
   if (e) e.stopPropagation();
   const popup = document.getElementById('quick-profile-popup');
@@ -8022,7 +8237,7 @@ window.toggleQuickProfileMenu = function(e) {
     const target = (e && e.currentTarget) || document.getElementById('source-pill');
     if (target) {
       const rect = target.getBoundingClientRect();
-      const popupWidth = 240;
+      const popupWidth = 270;
       let left = rect.left;
       let top = rect.bottom + 8;
       if (left + popupWidth > window.innerWidth - 12) {
@@ -8031,6 +8246,9 @@ window.toggleQuickProfileMenu = function(e) {
       popup.style.left = `${Math.max(12, left)}px`;
       popup.style.top = `${Math.max(12, top)}px`;
     }
+    const addRow = document.getElementById('qp-inline-add-row');
+    if (addRow) addRow.hidden = true;
+    ProfileManager.renderQuickSourcesList();
     ProfileManager.renderQuickProfileList();
     popup.hidden = false;
   } else {
@@ -8049,31 +8267,76 @@ window.openProfilesSettings = function() {
   openSettingsTab('profiles');
 };
 
+window.deleteProfileById = function(id, e) {
+  if (e) e.stopPropagation();
+  ProfileManager.deleteProfile(id);
+};
+
+window.toggleQuickAddProfileInput = function(e) {
+  if (e) e.stopPropagation();
+  const row = document.getElementById('qp-inline-add-row');
+  if (!row) return;
+  row.hidden = !row.hidden;
+  if (!row.hidden) {
+    const input = document.getElementById('qp-input-new-profile');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+  }
+};
+
+window.onQuickAddKeyDown = function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitQuickAddProfile(e);
+  } else if (e.key === 'Escape') {
+    const row = document.getElementById('qp-inline-add-row');
+    if (row) row.hidden = true;
+  }
+};
+
+window.submitQuickAddProfile = function(e) {
+  if (e) e.stopPropagation();
+  const input = document.getElementById('qp-input-new-profile');
+  if (!input) return;
+  const val = input.value.trim();
+  if (val) {
+    ProfileManager.createProfile(val);
+    input.value = '';
+    const row = document.getElementById('qp-inline-add-row');
+    if (row) row.hidden = true;
+  }
+};
+
 window.promptNewProfile = function() {
-  const name = prompt('Enter a name for the new profile:', 'Custom Profile');
-  if (!name || !name.trim()) return;
-  const newId = 'profile_' + Date.now().toString(36);
-  const active = ProfileManager.getActiveProfile();
-  const newProfile = Object.assign({}, active, {
-    id: newId,
-    name: name.trim(),
-    isBuiltin: false
-  });
-  ProfileManager.profiles[newId] = newProfile;
-  ProfileManager.applyProfile(newId, true, 'Created profile');
+  const input = document.getElementById('settings-new-profile-input');
+  if (input) {
+    input.focus();
+    input.select();
+  }
+};
+
+window.submitSettingsAddProfile = function() {
+  const input = document.getElementById('settings-new-profile-input');
+  if (!input) return;
+  const val = input.value.trim();
+  if (val) {
+    ProfileManager.createProfile(val);
+    input.value = '';
+  }
+};
+
+window.onSettingsAddKeyDown = function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitSettingsAddProfile();
+  }
 };
 
 window.duplicateCurrentProfile = function() {
   const active = ProfileManager.getActiveProfile();
-  const newId = 'profile_' + Date.now().toString(36);
-  const newName = `${active.name} (Copy)`;
-  const cloned = Object.assign({}, active, {
-    id: newId,
-    name: newName,
-    isBuiltin: false
-  });
-  ProfileManager.profiles[newId] = cloned;
-  ProfileManager.applyProfile(newId, true, 'Duplicated profile');
+  ProfileManager.createProfile(`${active.name} (Copy)`);
 };
 
 window.deleteCurrentProfile = function() {
@@ -8082,18 +8345,7 @@ window.deleteCurrentProfile = function() {
     showProfileToast('Built-in profiles cannot be deleted');
     return;
   }
-  if (!confirm(`Delete profile "${active.name}"?`)) return;
-
-  const doomedId = active.id;
-  delete ProfileManager.profiles[doomedId];
-
-  for (const src of Object.keys(ProfileManager.sourceMap)) {
-    if (ProfileManager.sourceMap[src] === doomedId) {
-      ProfileManager.sourceMap[src] = 'default';
-    }
-  }
-
-  ProfileManager.applyProfile('default', true, 'Deleted profile');
+  ProfileManager.deleteProfile(active.id);
 };
 
 window.resetActiveProfileToDefaults = function() {
@@ -8126,6 +8378,21 @@ window.resetActiveProfileToDefaults = function() {
 
 window.onProfileDropdownChange = function(val) {
   ProfileManager.applyProfile(val, true);
+};
+
+window.onSourceLockSelectChange = function(val) {
+  if (!val) {
+    ProfileManager.unlockSource();
+  } else {
+    const s = ProfileManager.availableSources.find(src => src.key === val || src.app_id === val);
+    const sName = (s && s.source && s.source.name) || val;
+    ProfileManager.switchAndLockSource(val, sName);
+  }
+};
+
+window.unlockSource = function(e) {
+  if (e) e.stopPropagation();
+  ProfileManager.unlockSource();
 };
 
 window.adjustProfileLatency = function(delta) {

@@ -934,6 +934,20 @@ class WindowApi:
         CACHE.save_profiles(data or {})
         return True
 
+    def lock_source(self, key_or_id: str) -> bool:
+        """Locks playback to a specific media session or source app."""
+        SMTC_BRIDGE.lock_source(key_or_id)
+        return True
+
+    def unlock_source(self) -> bool:
+        """Unlocks manual source lock and returns to automatic player selection."""
+        SMTC_BRIDGE.unlock_source()
+        return True
+
+    def get_available_sources(self) -> list:
+        """Returns the list of currently detected active media sessions."""
+        return SMTC_BRIDGE.get_available_sources()
+
     def get_spicy_api_key(self) -> dict:
         """Returns the current Spicy Lyrics API key configuration."""
         import config

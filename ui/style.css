@@ -5147,3 +5147,280 @@ body.mini #lyrics-container {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* =========================================================
+   Source Lock & Dynamic Profile Quick Management Styles
+   ========================================================= */
+
+.source-pill-lock {
+  font-size: 10px;
+  line-height: 1;
+  color: #ffb703;
+  margin-left: 1px;
+  animation: pulseLock 2s infinite ease-in-out;
+}
+
+@keyframes pulseLock {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); filter: drop-shadow(0 0 4px #ffb703); }
+}
+
+/* Upgraded Quick Menu */
+.quick-profile-popup {
+  width: 270px;
+  max-width: 90vw;
+}
+
+.qp-section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 5px;
+}
+
+.qp-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.qp-auto-source-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.qp-auto-source-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.qp-auto-source-btn.active {
+  background: rgba(29, 185, 84, 0.22);
+  border-color: rgba(29, 185, 84, 0.45);
+  color: #1db954;
+}
+
+.qp-auto-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #777;
+  transition: all 0.15s ease;
+}
+
+.qp-auto-source-btn.active .qp-auto-dot {
+  background: #1db954;
+  box-shadow: 0 0 6px #1db954;
+}
+
+.qp-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.qp-source-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.qp-source-card:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.qp-source-card.current {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.qp-source-card.locked {
+  border-color: rgba(255, 183, 3, 0.5);
+  background: rgba(255, 183, 3, 0.08);
+  box-shadow: 0 0 12px rgba(255, 183, 3, 0.12);
+}
+
+.qp-source-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.qp-source-icon {
+  width: 15px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.qp-source-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.qp-source-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qp-source-track {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qp-source-status-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.qp-source-card.locked .qp-source-status-badge {
+  background: rgba(255, 183, 3, 0.22);
+  color: #ffb703;
+  font-weight: 700;
+}
+
+.qp-menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 6px 0;
+}
+
+.qp-add-btn {
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.qp-add-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.qp-inline-add-row {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0 6px;
+  animation: qpFadeIn 0.15s ease;
+}
+
+.qp-inline-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  padding: 5px 8px;
+  outline: none;
+}
+
+.qp-inline-input:focus {
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.qp-inline-submit-btn {
+  background: #1db954;
+  border: none;
+  border-radius: 6px;
+  color: #000;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.qp-inline-submit-btn:hover {
+  background: #1ed760;
+  transform: scale(1.02);
+}
+
+.qp-profile-del-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 16px;
+  padding: 0 5px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.qp-profile-del-btn:hover {
+  color: #ff6b6b;
+  background: rgba(255, 60, 60, 0.25);
+}
+
+/* Settings Profiles inline creation */
+.profile-create-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.profile-create-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #fff;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.profile-create-btn {
+  white-space: nowrap;
+}
