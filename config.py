@@ -303,7 +303,7 @@ SPICY_PROBE_TRACK_ID = "0VjIjW4GlUZAMYd2vXMi3b"
 #
 # Not to be confused with PARSER_VERSION below: that one versions the CACHED
 # PAYLOAD FORMAT and exists to invalidate caches, not to describe the release.
-APP_VERSION = "0.2.2-rc1"
+APP_VERSION = "0.3"
 
 # Operational Constants
 # Bumped to 10: LRCLIB fallback lines now carry musical word timing (BPM/
