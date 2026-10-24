@@ -303,7 +303,7 @@ SPICY_PROBE_TRACK_ID = "0VjIjW4GlUZAMYd2vXMi3b"
 #
 # Not to be confused with PARSER_VERSION below: that one versions the CACHED
 # PAYLOAD FORMAT and exists to invalidate caches, not to describe the release.
-APP_VERSION = "0.3"
+APP_VERSION = "0.4"
 
 # Operational Constants
 # Bumped to 10: LRCLIB fallback lines now carry musical word timing (BPM/
@@ -312,7 +312,8 @@ APP_VERSION = "0.3"
 # Bumped to 11: repeated sections are matched to their OWN occurrence via
 # track-wide offset consensus, so cached payloads that stacked duplicate
 # chorus lines at one instant are no longer trustworthy.
-PARSER_VERSION = 11
+# Bumped to 12: Cached payloads now store creator & provider attribution (Section 6).
+PARSER_VERSION = 12
 # Unified single source of truth for the per-track sync offset. A track whose
 # lyrics came from the on-disk cache opens at DEFAULT_LATENCY_MS; a fresh fetch
 # (a cache miss, so the pipeline is doing network work the cached path never

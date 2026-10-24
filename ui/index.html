@@ -50,6 +50,24 @@
           <!-- Mask strictly with the original image alpha to preserve pristine rounded corners with zero edge roughness -->
           <feComposite in="full-c" in2="SourceGraphic" operator="in" />
         </filter>
+
+        <!-- SVG Filter for Dynamic Background Posterization (Discrete Color Quantization & Anti-Vibration Blend) -->
+        <filter id="vfx-posterize" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+          <!-- Step 1: Discrete color quantization of the input artwork -->
+          <feComponentTransfer id="posterize-transfer" in="SourceGraphic" result="quantized">
+            <feFuncR id="posterize-r" type="identity" />
+            <feFuncG id="posterize-g" type="identity" />
+            <feFuncB id="posterize-b" type="identity" />
+            <feFuncA id="posterize-a" type="identity" />
+          </feComponentTransfer>
+
+          <!-- Step 2: Sub-pixel gaussian anti-scintillation to eliminate edge chatter / vibration during drift -->
+          <feGaussianBlur id="posterize-smooth" in="quantized" stdDeviation="0" result="smooth-quantized" />
+
+          <!-- Step 3: Arithmetic composite cross-fading seamlessly between SourceGraphic (blurry) and posterized layers -->
+          <feComposite id="posterize-composite" in="smooth-quantized" in2="SourceGraphic"
+                       operator="arithmetic" k1="0" k2="0" k3="1" k4="0" />
+        </filter>
       </defs>
     </svg>
 
@@ -324,128 +342,120 @@
       </div>
     </aside>
 
-    <!-- Revamped Quick Controls Style Bar (Right Edge, Slim Vertical Bar ~48px) -->
+    <!-- Revamped Quick Controls Style Bar (Right Edge, Slim Vertical Bar ~46px) -->
     <aside class="app-sidebar latency-rail" id="latency-rail" aria-label="Quick Controls Sidebar" data-no-drag>
       <div class="sidebar-inner latency-rail-inner">
-        <!-- Top Utility Section: Pin & Settings -->
+        <!-- Top Utility Section: Settings, Pin & Profiles Hub -->
         <div class="sidebar-group sidebar-group-top">
-          <button class="sidebar-icon-btn" id="sidebar-btn-pin" onclick="toggleSidebarPin()"
-                  data-tooltip="Pin style bar open" aria-label="Pin sidebar open">
-            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="17" x2="12" y2="22"/>
-              <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h.5a1.5 1.5 0 0 0 0-3h-7a1.5 1.5 0 0 0 0 3H9v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
-            </svg>
-          </button>
-          <button class="sidebar-icon-btn" onclick="openProfilesSettings()"
-                  data-tooltip="Settings & Profiles (Ctrl+,)" aria-label="Open settings">
-            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <button class="sidebar-icon-btn sidebar-corner-top" id="sidebar-btn-settings" onclick="toggleSettings(event); event.stopPropagation();"
+                  data-tooltip="Settings Console (Ctrl+,)" aria-label="Open settings console">
+            <svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3.2"/>
               <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/>
             </svg>
           </button>
+          <button class="sidebar-icon-btn" id="sidebar-btn-pin" onclick="toggleSidebarPin(event); event.stopPropagation();"
+                  data-tooltip="Pin style bar open" aria-label="Pin sidebar open">
+            <svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="17" x2="12" y2="22"/>
+              <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h.5a1.5 1.5 0 0 0 0-3h-7a1.5 1.5 0 0 0 0 3H9v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn sidebar-source-indicator" id="sidebar-current-source"
+                  onclick="toggleQuickProfileMenu(event); event.stopPropagation();"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleQuickProfileMenu(event);}"
+                  data-tooltip="Players & Profiles Hub" aria-label="Players and Profiles Hub">
+            <span class="sidebar-source-icon" id="sidebar-source-icon">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+            </span>
+          </button>
         </div>
 
         <div class="sidebar-divider" role="separator"></div>
 
-        <!-- Media Source & Lock Toggle -->
-        <div class="sidebar-group sidebar-group-source">
-          <div class="sidebar-source-indicator" id="sidebar-current-source" onclick="toggleCurrentSourceLock(event)"
-               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleCurrentSourceLock(event);}"
-               role="button" tabindex="0" data-tooltip="Media Player" aria-label="Active media source (Click to toggle lock)">
-            <span class="sidebar-source-icon" id="sidebar-source-icon"></span>
-            <span class="sidebar-source-dot" id="sidebar-source-dot"></span>
+        <!-- Silky Tactile Latency Rail -->
+        <div class="sidebar-group sidebar-group-sync expanded-sync-group">
+          <!-- Advance Up Arrow Button (Replaces +50 text) -->
+          <button class="sidebar-icon-btn sidebar-arrow-btn latency-rail-btn" id="latency-rail-plus"
+                  onclick="nudgeLatency(50)" data-tooltip="Advance +50ms (Hold to ramp)" aria-label="Sync earlier by 50ms">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="18 15 12 9 6 15"></polyline>
+            </svg>
+          </button>
+
+          <!-- Digital Readout + RST Detent Action -->
+          <div class="sidebar-sync-header">
+            <span class="sidebar-sync-val" id="latency-rail-value" onclick="resetLatencyToZero(event); event.stopPropagation();" title="Click to reset sync to 0ms">+0ms</span>
+            <button class="sidebar-rst-btn" id="sidebar-btn-rst" onclick="resetLatencyToZero(event); event.stopPropagation();" title="Reset sync to 0ms (Ctrl+0)" aria-label="Reset latency to zero">RST</button>
           </div>
-          <button class="sidebar-icon-btn sidebar-lock-btn" id="sidebar-lock-btn" onclick="toggleCurrentSourceLock(event)"
-                  data-tooltip="Auto-follow player (Click to lock)" aria-label="Toggle player lock">
-            <svg class="sidebar-lock-svg icon-unlocked" id="sidebar-lock-unlocked" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="5" y="11" width="14" height="10" rx="2"/>
-              <path d="M8 11V7a4 4 0 0 1 7.7-1.5"/>
-            </svg>
-            <svg class="sidebar-lock-svg icon-locked" id="sidebar-lock-locked" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" hidden>
-              <rect x="5" y="11" width="14" height="10" rx="2"/>
-              <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-            </svg>
-          </button>
-        </div>
 
-        <div class="sidebar-divider" role="separator"></div>
-
-        <!-- Vertical Playback Transport -->
-        <div class="sidebar-group sidebar-group-transport">
-          <button class="sidebar-icon-btn sidebar-media-btn" onclick="skipPrevious()"
-                  data-tooltip="Previous Track" aria-label="Previous track">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-              <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
-            </svg>
-          </button>
-          <button class="sidebar-icon-btn sidebar-media-btn sidebar-play-btn" id="sidebar-btn-play" onclick="togglePlayback()"
-                  data-tooltip="Play / Pause (Space)" aria-label="Play or pause">
-            <svg class="sidebar-play-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-          </button>
-          <button class="sidebar-icon-btn sidebar-media-btn" onclick="skipNext()"
-                  data-tooltip="Next Track" aria-label="Next track">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
-            </svg>
-          </button>
-        </div>
-
-        <div class="sidebar-divider" role="separator"></div>
-
-        <!-- Vertical Audio Sync -->
-        <div class="sidebar-group sidebar-group-sync">
-          <button class="sidebar-icon-btn sidebar-step-btn latency-rail-btn" id="latency-rail-plus"
-                  data-tooltip="Earlier by 50ms (Ctrl+])" aria-label="Sync earlier by 50ms">+50</button>
-          <div class="sidebar-sync-slider-col">
-            <span class="sidebar-sync-val" id="latency-rail-value">+0ms</span>
+          <!-- Silky Smooth Taller Vertical Fader (Clean, zero text collisions) -->
+          <div class="sidebar-sync-slider-col" id="sidebar-sync-slider-col" data-no-drag>
             <div class="sidebar-sync-slider latency-slider" id="latency-slider"
                  role="slider" tabindex="0" aria-valuemin="-3000" aria-valuemax="3000" aria-valuenow="0" aria-valuetext="+0ms"
                  data-tooltip="Drag to adjust sync (-3000ms..+3000ms)" aria-label="Audio sync slider" data-no-drag>
               <div class="latency-slider-track"></div>
               <div class="latency-slider-fill" id="latency-slider-fill"></div>
               <div class="latency-slider-center"></div>
-              <div class="latency-slider-thumb" id="latency-slider-thumb"></div>
+              <div class="latency-slider-thumb" id="latency-slider-thumb">
+                <span class="latency-thumb-notch"></span>
+              </div>
             </div>
           </div>
-          <button class="sidebar-icon-btn sidebar-step-btn latency-rail-btn" id="latency-rail-minus"
-                  data-tooltip="Later by 50ms (Ctrl+[)" aria-label="Sync later by 50ms">-50</button>
+
+          <!-- Delay Down Arrow Button (Replaces -50 text) -->
+          <button class="sidebar-icon-btn sidebar-arrow-btn latency-rail-btn" id="latency-rail-minus"
+                  onclick="nudgeLatency(-50)" data-tooltip="Delay -50ms (Hold to ramp)" aria-label="Sync later by 50ms">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- Latency Mode Controls: Always Vertical Stack (DEF on top, AUTO below) -->
+          <div class="sidebar-latency-modes vertical-modes">
+            <button class="sidebar-mode-btn" id="sidebar-btn-default-latency" onclick="cycleDefaultLatency(event); event.stopPropagation();"
+                    data-tooltip="Default Latency: Fixed fallback vs per-track" aria-label="Toggle Default Latency">
+              <span>DEF</span>
+            </button>
+            <button class="sidebar-mode-btn" id="sidebar-btn-auto-latency" onclick="cycleAutoLatency(event); event.stopPropagation();"
+                    data-tooltip="Auto Latency: Learn player timing error" aria-label="Toggle Auto Latency">
+              <span>AUTO</span>
+            </button>
+          </div>
         </div>
 
         <div class="sidebar-divider" role="separator"></div>
 
-        <!-- Vertical Action Stack -->
+        <!-- Quick Utility Toggles: Always on Top, Layout, Fullscreen, Pronunciation -->
         <div class="sidebar-group sidebar-group-actions">
-          <button class="sidebar-icon-btn" id="sb-toggle-trans" onclick="toggleTranslations()"
-                  data-tooltip="Toggle Pronunciation / Romaji (T)" aria-label="Toggle Pronunciation">
-            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m5 8 6 6"/>
-              <path d="m4 14 6-6 2-3"/>
-              <path d="M2 5h12"/>
-              <path d="M7 2h1"/>
-              <path d="m22 22-5-10-5 10"/>
-              <path d="M14 18h6"/>
-            </svg>
-          </button>
-          <button class="sidebar-icon-btn" id="sb-toggle-layout" onclick="cycleLayout()"
-                  data-tooltip="Toggle Layout (Compact / Split)" aria-label="Cycle layout">
-            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
-              <path d="M9.5 4.5v15"/>
-            </svg>
-          </button>
-          <button class="sidebar-icon-btn" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop()"
-                  data-tooltip="Toggle Always On Top" aria-label="Toggle always on top">
-            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <button class="sidebar-icon-btn" id="sb-toggle-ontop" onclick="toggleAlwaysOnTop(event); event.stopPropagation();"
+                  data-tooltip="Always On Top" aria-label="Toggle always on top">
+            <svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
               <path d="m8.5 13 3.5-3.5 3.5 3.5M12 9.5v7"/>
             </svg>
           </button>
-          <button class="sidebar-icon-btn" id="sb-toggle-fs" onclick="toggleFullscreen()"
+          <button class="sidebar-icon-btn" id="sb-toggle-layout" onclick="cycleLayout(event); event.stopPropagation();"
+                  data-tooltip="Toggle Layout (Compact / Split)" aria-label="Cycle layout">
+            <svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2"/>
+              <path d="M9.5 4.5v15"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn" id="sb-toggle-fs" onclick="toggleFullscreen(event); event.stopPropagation();"
                   data-tooltip="Toggle Fullscreen (F11)" aria-label="Toggle fullscreen">
-            <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+            </svg>
+          </button>
+          <button class="sidebar-icon-btn sidebar-corner-bottom" id="sb-toggle-trans" onclick="toggleTranslations(event); event.stopPropagation();"
+                  data-tooltip="Toggle Pronunciation / Romaji" aria-label="Toggle pronunciation">
+            <svg class="icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m4.5 18 4.5-9 4.5 9M6 15h6M13.5 6h7M17 6v12M14.5 12h5"/>
             </svg>
           </button>
         </div>
@@ -463,8 +473,7 @@
       <div class="sp-sheet">
         <header class="sp-head">
           <div class="sp-head-info">
-            <div class="sp-title">Settings</div>
-            <div class="sp-sub"><span class="sp-sub-dot"></span>Paprika Lyrics</div>
+            <div class="sp-title">Settings Console</div>
           </div>
           <button class="sp-close" onclick="closeSettings()" title="Close (Esc)" aria-label="Close settings">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -495,7 +504,10 @@
              mid-song is one click away instead of one scroll away. The strip
              scrolls sideways rather than wrapping — a 320px window still has to
              keep four readable labels. -->
-        <div class="sp-tabs" id="qp-tabs" role="tablist" aria-label="Settings sections">
+        <!-- Main Console Deck: Slates (80-85%) + Vertical Latency Channel (15-20%) -->
+        <div class="sp-console-deck">
+          <div class="sp-slates-area">
+            <div class="sp-tabs" id="qp-tabs" role="tablist" aria-label="Settings sections">
           <button class="sp-tab" role="tab" id="qp-tab-window" data-tab="window"
                   aria-controls="qp-panel-window" aria-selected="true" tabindex="0">
             <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -530,11 +542,11 @@
             <span>Profiles</span>
           </button>
           <button class="sp-tab" role="tab" id="qp-tab-diag" data-tab="diag"
-                  aria-controls="qp-panel-diag" aria-selected="false" tabindex="-1">
+                  aria-controls="qp-panel-diag" aria-selected="false" tabindex="-1" title="Diagnostics &amp; Credits">
             <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
             </svg>
-            <span>Diagnostics</span>
+            <span>Diagnostics &amp; Credits</span>
           </button>
         </div>
 
@@ -642,6 +654,19 @@
                 <span class="qp-label">Alignment</span>
                 <span class="qp-state" id="qp-align-state">Left</span>
               </button>
+              <div class="sp-slider-card" id="qp-typescale-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Typographic scale</span>
+                  <span class="sp-slider-badge" id="badge-typescale">30px</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-typescale" min="18" max="60" step="1" value="30"
+                       oninput="onTypeScaleInput(this.value)" aria-label="Lyric Typographic Scale">
+                <div class="sp-slider-labels">
+                  <span>18px</span>
+                  <span>30px</span>
+                  <span>60px</span>
+                </div>
+              </div>
             </section>
 
             <section class="sp-group">
@@ -693,10 +718,11 @@
                 <div class="spicy-key-feedback" id="spicy-key-feedback" role="status" aria-live="polite"></div>
                 <div class="spicy-key-hint">
                   Unlocks studio-quality syllable (word-by-word) synced lyrics. Get a free key at
-                  <a href="https://developers.spicylyrics.org" target="_blank" rel="noopener noreferrer">developers.spicylyrics.org</a>.
+                  <a href="https://developers.spicylyrics.org" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">developers.spicylyrics.org</a>.
                 </div>
               </div>
             </section>
+
 
             <!-- Local TTML library. The panel is rendered entirely from the
                  snapshot the Python library returns (ui/app.js renderTtmlPanel):
@@ -874,6 +900,86 @@
               </div>
               <p class="sp-hint">Fine-tune ambient atmosphere, audio-reactive pulses, and particle intensity.</p>
             </section>
+
+            <!-- Background & Posterize Controls -->
+            <section class="sp-group" id="qp-group-background" data-group-name="Background">
+              <h2 class="sp-group-title">Background</h2>
+              <button class="qp-row qp-action" id="qp-bg-posterize-style" onclick="cyclePosterizeMode()">
+                <span class="qp-label">Posterize style</span>
+                <span class="qp-state" id="qp-bg-posterize-state">Off</span>
+              </button>
+
+              <!-- Background Blur Slider Card -->
+              <div class="sp-slider-card" id="qp-bg-blur-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Background Blur</span>
+                  <span class="sp-slider-badge" id="badge-bg-blur">14px</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-bg-blur" min="0" max="60" step="1" value="14"
+                       oninput="onVisualSliderInput('bg-blur', this.value)" onchange="onVisualSliderChange('bg-blur', this.value)" aria-label="Background Blur Radius">
+                <div class="sp-slider-labels">
+                  <span>Crisp (0px)</span>
+                  <span>Reduced (14px)</span>
+                  <span>Soft (60px)</span>
+                </div>
+              </div>
+
+              <!-- Posterize Effect Slider Card with Expandable Sub-Options -->
+              <div class="sp-slider-card" id="qp-bg-posterize-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Posterize Effect</span>
+                  <span class="sp-slider-badge" id="badge-bg-posterize">Off</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-bg-posterize" min="0" max="100" step="1" value="0"
+                       oninput="onVisualSliderInput('bg-posterize', this.value)" onchange="onVisualSliderChange('bg-posterize', this.value)" aria-label="Posterize Effect Intensity">
+                <div class="sp-slider-labels">
+                  <span>Blurry (0%)</span>
+                  <span>Silkscreen</span>
+                  <span>Graphic (100%)</span>
+                </div>
+                <!-- Expandable Sub-Options Trigger for Posterize & Backdrop Tuning -->
+                <button type="button" class="sp-expand-btn" onclick="toggleSubSection('bg-sub')" id="btn-expand-bg" aria-expanded="false" aria-controls="bg-sub">
+                  <span class="sp-expand-title">Tonal steps & contrast</span>
+                  <svg class="sp-chevron-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="sp-sub-section" id="bg-sub" hidden>
+                  <div class="sp-slider-card sp-sub-card">
+                    <div class="sp-slider-header">
+                      <span class="sp-slider-title">Tonal Contrast</span>
+                      <span class="sp-slider-badge" id="badge-bg-contrast">128%</span>
+                    </div>
+                    <input type="range" class="sp-range-slider" id="slider-bg-contrast" min="80" max="200" step="5" value="128"
+                           oninput="onVisualSliderInput('bg-contrast', this.value)" onchange="onVisualSliderChange('bg-contrast', this.value)" aria-label="Background Tonal Contrast">
+                    <div class="sp-slider-labels">
+                      <span>Mellow (80%)</span>
+                      <span>Balanced</span>
+                      <span>Punchy (200%)</span>
+                    </div>
+                  </div>
+                  <div class="sp-slider-card sp-sub-card">
+                    <div class="sp-slider-header">
+                      <span class="sp-slider-title">Backdrop Dimming</span>
+                      <span class="sp-slider-badge" id="badge-bg-dim">74%</span>
+                    </div>
+                    <input type="range" class="sp-range-slider" id="slider-bg-dim" min="20" max="100" step="2" value="74"
+                           oninput="onVisualSliderInput('bg-dim', this.value)" onchange="onVisualSliderChange('bg-dim', this.value)" aria-label="Backdrop Brightness / Dimming">
+                    <div class="sp-slider-labels">
+                      <span>Dark (20%)</span>
+                      <span>Legible</span>
+                      <span>Vivid (100%)</span>
+                    </div>
+                  </div>
+                  <!-- Edge Vibration / Sub-pixel Motion Jitter Toggle -->
+                  <button class="qp-row qp-action" id="qp-bg-jitter" onclick="toggleBgJitter()" title="Raw discrete pixel quantization chatter during motion">
+                    <span class="qp-label">Edge vibration</span>
+                    <span class="qp-state" id="qp-bg-jitter-state">Off</span>
+                  </button>
+                </div>
+              </div>
+              <p class="sp-hint">Transition smoothly between soft ambient blur and stylized silkscreen posterization.</p>
+            </section>
           </div>
 
           <!-- Profiles & Source Management Page -->
@@ -982,24 +1088,140 @@
                  heading would be a dropdown that opens onto a single row with a
                  chevron of its own. See initSettingsGroups in app.js. -->
             <section class="sp-group" data-static>
-              <h2 class="sp-group-title">Diagnostics</h2>
+              <div class="sp-group-head">
+                <h2 class="sp-group-title">Diagnostics</h2>
+              </div>
               <button class="qp-row qp-action" id="qp-info-toggle" onclick="toggleDiagnostics()"
                       aria-expanded="false" aria-controls="qp-info">
                 <span class="qp-label">Resolve report</span>
                 <span class="qp-state" id="qp-info-caret">Show</span>
               </button>
               <div class="qp-info" id="qp-info">
-                <div class="qp-info-body" id="qp-info-body"></div>
+                <div class="qp-info-body" id="qp-info-body">
+                </div>
               </div>
             </section>
-          </div>
-        </div>
+            <p class="sp-hint">Live telemetry of active lyrics provider, playback sync, TTML parser, and Spotify transport timeline.</p>
 
-        <!-- Settings footer: version + close hint -->
+            <!-- Contribution and Credits (Section 6 attribution) -->
+            <section class="sp-group" id="qp-group-credits" data-static>
+              <div class="sp-group-head">
+                <h2 class="sp-group-title">Contribution &amp; Credits</h2>
+              </div>
+              <div class="sp-credits-card" id="sp-credits-card">
+                <div class="sp-credits-head">
+                  <span class="sp-credits-tag">CURRENT TRACK</span>
+                  <span class="sp-credits-badge" id="sp-credits-provider-badge">Spicy Lyrics</span>
+                </div>
+                <div class="qp-row qp-static" id="sp-credits-writers-row">
+                  <span class="qp-label">Songwriters</span>
+                  <span class="qp-value sp-credits-val" id="sp-credits-writers">—</span>
+                </div>
+                <div class="qp-row qp-static" id="sp-credits-maker-row">
+                  <span class="qp-label">Sync Maker</span>
+                  <span class="qp-value sp-credits-val" id="sp-credits-maker">—</span>
+                </div>
+                <div class="qp-row qp-static" id="sp-credits-uploader-row">
+                  <span class="qp-label">Sync Uploader</span>
+                  <span class="qp-value sp-credits-val" id="sp-credits-uploader">—</span>
+                </div>
+                <div class="sp-hint sp-credits-empty-hint" id="sp-credits-empty-hint" style="display: none;">No individual contributor metadata provided for this track.</div>
+                <div class="sp-credits-footer-links">
+                  <p class="sp-hint">Lyrics and synchronized timings provided via <a href="https://developers.spicylyrics.org" class="sp-link" onclick="openExternalUrl(this.href); return false;">Spicy Lyrics API</a>, community contributors, Apple Music, Spotify, and LRCLIB.</p>
+                  <div class="sp-credits-actions">
+                    <button type="button" class="sp-action-btn" onclick="openExternalUrl('https://spicylyrics.org');">Spicy Lyrics</button>
+                    <button type="button" class="sp-action-btn" onclick="openExternalUrl('https://developers.spicylyrics.org');">API Portal</button>
+                    <button type="button" class="sp-action-btn" onclick="openExternalUrl('https://lrclib.net');">LRCLIB</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div><!-- /#qp-panel-diag -->
+        </div><!-- /#qp-body -->
+          </div><!-- /.sp-slates-area -->
+
+          <!-- Dedicated Vertical Latency Channel (15–20% width on standard, reflows on compact) -->
+          <aside class="sp-latency-channel" id="sp-latency-channel" aria-label="Audio sync latency calibration">
+            <!-- Top acoustic louvers -->
+            <div class="sp-louvers" aria-hidden="true">
+              <span class="sp-louver-fin"></span>
+              <span class="sp-louver-fin"></span>
+              <span class="sp-louver-fin"></span>
+            </div>
+
+            <div class="sp-channel-header">
+              <span class="sp-channel-tag">SYNC CALIBRATION</span>
+              <span class="sp-channel-sub">OFFSET</span>
+            </div>
+
+            <!-- High-contrast Digital Readout -->
+            <div class="sp-readout-bay">
+              <div class="sp-digital-readout" id="latency-display" role="status" aria-label="Audio sync latency readout" title="Click to reset to 0ms">+0ms</div>
+              <div class="sp-detent-indicator" id="sp-detent-indicator" aria-hidden="true" style="display:none;">
+                <span class="sp-detent-text">0ms DETENT</span>
+              </div>
+            </div>
+
+            <!-- Vertical Fader Assembly -->
+            <div class="sp-fader-assembly">
+              <div class="sp-fader-scale" aria-hidden="true">
+                <span class="sp-scale-mark" data-val="+3s">+3s</span>
+                <span class="sp-scale-mark" data-val="+1.5s">+1.5s</span>
+                <span class="sp-scale-mark sp-scale-zero" data-val="0">0</span>
+                <span class="sp-scale-mark" data-val="-1.5s">-1.5s</span>
+                <span class="sp-scale-mark" data-val="-3s">-3s</span>
+              </div>
+
+              <div class="sp-fader-well">
+                <div class="sp-modal-fader" id="modal-latency-fader" role="slider"
+                     aria-label="Audio sync latency fader"
+                     aria-valuemin="-3000" aria-valuemax="3000" aria-valuenow="0" aria-valuetext="+0ms"
+                     tabindex="0">
+                  <div class="sp-fader-track" id="modal-fader-track">
+                    <div class="sp-fader-detent-notch" aria-hidden="true"></div>
+                    <div class="sp-fader-fill" id="modal-fader-fill"></div>
+                    <div class="sp-fader-knob" id="modal-fader-knob">
+                      <div class="sp-knob-rib"></div>
+                      <div class="sp-knob-rib"></div>
+                      <div class="sp-knob-center-line"></div>
+                      <div class="sp-knob-rib"></div>
+                      <div class="sp-knob-rib"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick-Nudge Tactile Keycaps -->
+            <div class="sp-nudge-rack">
+              <div class="sp-nudge-duo">
+                <button type="button" class="sp-hardware-keycap" onclick="nudgeLatency(-50)" title="-50ms later" aria-label="Minus 50 milliseconds">-50</button>
+                <button type="button" class="sp-hardware-keycap" onclick="nudgeLatency(-10)" title="-10ms later" aria-label="Minus 10 milliseconds">-10</button>
+              </div>
+              <button type="button" class="sp-hardware-keycap sp-keycap-rst" onclick="resetLatencyToZero()" title="Reset to 0ms" aria-label="Reset latency to zero">RST</button>
+              <div class="sp-nudge-duo">
+                <button type="button" class="sp-hardware-keycap" onclick="nudgeLatency(10)" title="+10ms earlier" aria-label="Plus 10 milliseconds">+10</button>
+                <button type="button" class="sp-hardware-keycap" onclick="nudgeLatency(50)" title="+50ms earlier" aria-label="Plus 50 milliseconds">+50</button>
+              </div>
+            </div>
+
+            <!-- Bottom acoustic louvers -->
+            <div class="sp-louvers sp-louvers-bottom" aria-hidden="true">
+              <span class="sp-louver-fin"></span>
+              <span class="sp-louver-fin"></span>
+              <span class="sp-louver-fin"></span>
+            </div>
+          </aside>
+        </div><!-- /.sp-console-deck -->
+
+        <!-- Settings footer: version + attribution + close hint -->
         <footer class="sp-foot">
           <div class="sp-foot-brand">
             <span class="sp-foot-logo">Paprika</span>
             <span class="sp-foot-badge">Settings</span>
+          </div>
+          <div class="sp-foot-attribution">
+            Lyrics powered by <a href="https://spicylyrics.org" class="sp-foot-link" onclick="openExternalUrl(this.href); return false;">Spicy Lyrics</a>
           </div>
           <div class="sp-foot-meta">
             <span class="sp-foot-hint"><kbd>Esc</kbd> to dismiss</span>

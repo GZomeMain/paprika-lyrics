@@ -101,8 +101,9 @@ class GlobalHotkeyManager:
         if vk_right is None:
             vk_right = VK_OEM_6
 
-        ok1 = user32.RegisterHotKey(None, HOTKEY_DEC_ID, MOD_CONTROL | MOD_NOREPEAT, vk_left)
-        ok2 = user32.RegisterHotKey(None, HOTKEY_INC_ID, MOD_CONTROL | MOD_NOREPEAT, vk_right)
+        # RegisterHotKey for sync latency allows continuous repeat when held down
+        ok1 = user32.RegisterHotKey(None, HOTKEY_DEC_ID, MOD_CONTROL, vk_left)
+        ok2 = user32.RegisterHotKey(None, HOTKEY_INC_ID, MOD_CONTROL, vk_right)
         ok3 = user32.RegisterHotKey(
             None, HOTKEY_CLICKTHROUGH_ID, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_T
         )

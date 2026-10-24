@@ -1380,22 +1380,64 @@ function cycleDefaultLatency() {
 function nudgeLatency(deltaMs) {
   window.adjustLatency(deltaMs);
 }
+window.nudgeLatency = nudgeLatency;
+
+function resetLatencyToZero() {
+  if (latencyOffsetMs !== 0) {
+    window.adjustLatency(-latencyOffsetMs);
+  } else {
+    if (window.renderLatencySlider) window.renderLatencySlider();
+    if (window.renderModalLatencyFader) window.renderModalLatencyFader();
+    updateLatencyUI();
+    syncSettingsPanel();
+  }
+  const detentTag = document.getElementById('sp-detent-indicator');
+  if (detentTag) {
+    detentTag.classList.remove('detent-pulse');
+    void detentTag.offsetWidth;
+    detentTag.classList.add('detent-pulse');
+  }
+  const displayTag = document.getElementById('latency-display');
+  if (displayTag) {
+    displayTag.classList.remove('detent-pulse');
+    void displayTag.offsetWidth;
+    displayTag.classList.add('detent-pulse');
+  }
+}
+window.resetLatencyToZero = resetLatencyToZero;
+
+function onTypeScaleInput(val) {
+  const size = parseInt(val, 10);
+  if (isNaN(size)) return;
+  applyZoom(size);
+  const badge = document.getElementById('badge-typescale');
+  if (badge) setValueText(badge, `${size}px`);
+}
+window.onTypeScaleInput = onTypeScaleInput;
 
 // Writes text only when it actually changed, and pulses it once — so a setting
 // that flips gives visible feedback instead of silently swapping a word.
-function setValueText(el, text) {
+function setValueText(el, text, flash = true) {
   if (!el || el.textContent === text) return;
   el.textContent = text;
-  el.classList.remove('value-flash');
-  void el.offsetWidth; // restart the animation if it is already running
-  el.classList.add('value-flash');
+  if (flash) {
+    el.classList.remove('value-flash');
+    void el.offsetWidth; // restart the animation if it is already running
+    el.classList.add('value-flash');
+  }
 }
 
 function updateLatencyUI() {
-  const txt = `${latencyOffsetMs > 0 ? '+' : ''}${latencyOffsetMs}ms`;
-  setValueText(document.getElementById('qp-latency'), txt);
-  setValueText(document.getElementById('latency-rail-value'), txt);
+  const isDetent = latencyOffsetMs === 0;
+  const latTxt = `${latencyOffsetMs > 0 ? '+' : ''}${latencyOffsetMs}ms`;
+  const dispTxt = isDetent ? '0ms DETENT' : latTxt;
+  const fader = document.getElementById('modal-latency-fader');
+  const isDragging = fader && fader.classList.contains('dragging');
+  setValueText(document.getElementById('qp-latency'), latTxt, !isDragging);
+  setValueText(document.getElementById('latency-display'), dispTxt, !isDragging);
+  setValueText(document.getElementById('latency-rail-value'), latTxt, !isDragging);
   if (window.renderLatencySlider) window.renderLatencySlider();
+  if (window.renderModalLatencyFader) window.renderModalLatencyFader();
 }
 
 function syncSettingsPanel() {
@@ -1410,6 +1452,9 @@ function syncSettingsPanel() {
   setValueText(document.getElementById('qp-moments-state'), EFFECT_LEVEL_LABELS[momentLevel] || 'Subtle');
   setValueText(document.getElementById('qp-ambient-state'), EFFECT_LEVEL_LABELS[ambientLevel] || 'Subtle');
   setValueText(document.getElementById('qp-tilt-state'), EFFECT_LEVEL_LABELS[tiltLevel] || 'Subtle');
+  setValueText(document.getElementById('qp-bg-posterize-state'), POSTERIZE_LABELS[posterizeStyle] || 'Off');
+  const bJitterEl = document.getElementById('qp-bg-jitter-state');
+  if (bJitterEl) setValueText(bJitterEl, bgJitter ? 'On' : 'Off');
   syncSegmentedControls();
   setValueText(document.querySelector('#qp-clickthrough .qp-state'), clickThrough ? 'On' : 'Off');
   setValueText(document.getElementById('qp-layout-state'),
@@ -1423,11 +1468,24 @@ function syncSettingsPanel() {
   setValueText(document.getElementById('qp-hover-fade-state'), HOVER_FADE_LABELS[hoverFade] || 'Off');
   // Off, or On plus the offset the last track-load derived, so a silently
   // applied offset is never invisible to the user it is meant to help.
+  renderCreditsInSettings();
   setValueText(document.getElementById('qp-auto-latency-state'),
     autoLatency !== 'on' ? 'Off'
       : (lastAutoLatencyMs ? `On \u00b7 ${lastAutoLatencyMs > 0 ? '+' : ''}${lastAutoLatencyMs}ms` : 'On'));
   setValueText(document.getElementById('qp-default-latency-state'), useDefaultLatency ? 'On' : 'Off');
+  const sbDef = document.getElementById('sidebar-btn-default-latency');
+  if (sbDef) sbDef.classList.toggle('active', !!useDefaultLatency);
+  const sbAuto = document.getElementById('sidebar-btn-auto-latency');
+  if (sbAuto) sbAuto.classList.toggle('active', autoLatency === 'on');
   setValueText(document.getElementById('qp-opacity-state'), OPACITY_LABELS[opacityIndex] || 'Off');
+
+  const typeSlider = document.getElementById('slider-typescale');
+  if (typeSlider && parseInt(typeSlider.value, 10) !== lyricFontSize) {
+    typeSlider.value = lyricFontSize;
+  }
+  const typeBadge = document.getElementById('badge-typescale');
+  if (typeBadge) setValueText(typeBadge, `${lyricFontSize}px`);
+
   updateLatencyUI();
   renderDiagnostics();
   syncSettingsGroupSummaries();
@@ -1577,6 +1635,210 @@ if (isNaN(sliderMoments)) sliderMoments = 35;
 let sliderTilt = parseInt(Settings.get('sliderTilt', '50'), 10);
 if (isNaN(sliderTilt)) sliderTilt = 50;
 
+// Background Blur & Posterize Variables (Discrete Color Quantization & Blur Tuning)
+let sliderBgBlur = parseInt(Settings.get('sliderBgBlur', '14'), 10);
+if (isNaN(sliderBgBlur)) sliderBgBlur = 14;
+let sliderBgPosterize = parseInt(Settings.get('sliderBgPosterize', '0'), 10);
+if (isNaN(sliderBgPosterize)) sliderBgPosterize = 0;
+let sliderBgContrast = parseInt(Settings.get('sliderBgContrast', '128'), 10);
+if (isNaN(sliderBgContrast)) sliderBgContrast = 128;
+let sliderBgDim = parseInt(Settings.get('sliderBgDim', '74'), 10);
+if (isNaN(sliderBgDim)) sliderBgDim = 74;
+
+let posterizeStyle = Settings.get('posterizeStyle', 'off');
+const POSTERIZE_STYLES = ['off', 'silk', 'pop', 'graphic'];
+const POSTERIZE_LABELS = { off: 'Off', silk: 'Silkscreen', pop: 'Pop Art', graphic: 'Graphic' };
+let bgJitter = Settings.get('bgJitter', 'off') === 'on';
+let posterizeAnimRaf = null;
+
+function applyEffectiveBgBlur(posterizeVal, baseBlurVal) {
+  const p = Math.max(0, Math.min(100, parseInt(posterizeVal, 10) || 0));
+  const base = Math.max(0, parseInt(baseBlurVal !== undefined ? baseBlurVal : sliderBgBlur, 10) || 0);
+  // Organic transition: at 0% posterize, lush dreamy blur (38px).
+  // At 100% posterize, crisp reduced blur (base, default 14px).
+  const ambientBlur = Math.max(38, base);
+  const t = p / 100;
+  const effectivePx = Math.round(ambientBlur * (1 - t) + base * t);
+
+  document.documentElement.style.setProperty('--bg-blur', `${effectivePx}px`);
+  for (const ab of document.querySelectorAll('.ambient-backdrop')) {
+    ab.style.setProperty('--bg-blur', `${effectivePx}px`);
+  }
+  return effectivePx;
+}
+
+function applyBgBlur(val) {
+  const px = Math.max(0, parseInt(val, 10) || 0);
+  sliderBgBlur = px;
+  applyEffectiveBgBlur(sliderBgPosterize, px);
+}
+window.applyBgBlur = applyBgBlur;
+
+function applyPosterizeFilter(val) {
+  val = Math.max(0, Math.min(100, parseInt(val, 10) || 0));
+  const r = document.getElementById('posterize-r');
+  const g = document.getElementById('posterize-g');
+  const b = document.getElementById('posterize-b');
+  const blend = document.getElementById('posterize-composite');
+  const smooth = document.getElementById('posterize-smooth');
+
+  // Dynamically modulate effective background blur alongside posterize transition
+  applyEffectiveBgBlur(val, sliderBgBlur);
+
+  if (!r || !g || !b || !blend) return;
+
+  if (val === 0) {
+    // 100% Blurry Effect: identity quantization & zero posterize blend
+    r.setAttribute('type', 'identity');
+    g.setAttribute('type', 'identity');
+    b.setAttribute('type', 'identity');
+    r.removeAttribute('tableValues');
+    g.removeAttribute('tableValues');
+    b.removeAttribute('tableValues');
+    blend.setAttribute('k2', '0');
+    blend.setAttribute('k3', '1');
+    if (smooth) smooth.setAttribute('stdDeviation', '0');
+    return;
+  }
+
+  // Continuous blend factor from 0.0 (smooth blur) to 1.0 (full posterize)
+  const t = val / 100;
+  const k2 = t.toFixed(3);
+  const k3 = (1 - t).toFixed(3);
+  blend.setAttribute('k2', k2);
+  blend.setAttribute('k3', k3);
+
+  // Anti-scintillation sub-pixel smoothing (eliminates vibrating/chattering edges during drift unless user enables edge vibration)
+  if (smooth) {
+    if (bgJitter) {
+      smooth.setAttribute('stdDeviation', '0');
+    } else {
+      const stdDev = (0.55 + 0.25 * t).toFixed(2);
+      smooth.setAttribute('stdDeviation', stdDev);
+    }
+  }
+
+  // Smoothly adapt quantization steps from soft 11-step gradations to 4-step graphic blocks
+  const steps = Math.max(3, Math.round(12 - t * 8));
+  const tableValues = Array.from({ length: steps }, (_, i) => (i / (steps - 1)).toFixed(3)).join(' ');
+
+  r.setAttribute('type', 'discrete');
+  g.setAttribute('type', 'discrete');
+  b.setAttribute('type', 'discrete');
+  r.setAttribute('tableValues', tableValues);
+  g.setAttribute('tableValues', tableValues);
+  b.setAttribute('tableValues', tableValues);
+}
+window.applyPosterizeFilter = applyPosterizeFilter;
+
+function toggleBgJitter() {
+  bgJitter = !bgJitter;
+  Settings.set('bgJitter', bgJitter ? 'on' : 'off');
+  const el = document.getElementById('qp-bg-jitter-state');
+  if (el) setValueText(el, bgJitter ? 'On' : 'Off');
+  applyPosterizeFilter(sliderBgPosterize);
+  if (window.ProfileManager) window.ProfileManager.syncFromCurrentVisuals();
+  syncSettingsPanel();
+}
+window.toggleBgJitter = toggleBgJitter;
+
+function applyBgContrast(val) {
+  const pct = Math.max(80, Math.min(200, parseInt(val, 10) || 128));
+  const c = (pct / 100).toFixed(2);
+  document.documentElement.style.setProperty('--bg-contrast', c);
+  for (const ab of document.querySelectorAll('.ambient-backdrop')) {
+    ab.style.setProperty('--bg-contrast', c);
+  }
+}
+window.applyBgContrast = applyBgContrast;
+
+function applyBgDim(val) {
+  const pct = Math.max(20, Math.min(100, parseInt(val, 10) || 74));
+  const b = (pct / 100).toFixed(2);
+  document.documentElement.style.setProperty('--bg-brightness', b);
+  for (const ab of document.querySelectorAll('.ambient-backdrop')) {
+    ab.style.setProperty('--bg-brightness', b);
+  }
+}
+window.applyBgDim = applyBgDim;
+
+function animatePosterizeTransition(targetVal, targetContrast, duration = 320) {
+  if (posterizeAnimRaf) {
+    cancelAnimationFrame(posterizeAnimRaf);
+    posterizeAnimRaf = null;
+  }
+  const startVal = sliderBgPosterize;
+  const startContrast = sliderBgContrast;
+  const startTime = performance.now();
+
+  function step(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(1, elapsed / duration);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    const curVal = Math.round(startVal + (targetVal - startVal) * ease);
+    const curContrast = Math.round(startContrast + (targetContrast - startContrast) * ease);
+
+    sliderBgPosterize = curVal;
+    sliderBgContrast = curContrast;
+    applyPosterizeFilter(curVal);
+    applyBgContrast(curContrast);
+
+    const slider = document.getElementById('slider-bg-posterize');
+    if (slider) slider.value = curVal;
+    const badge = document.getElementById('badge-bg-posterize');
+    if (badge) badge.textContent = curVal === 0 ? 'Off' : `${curVal}%`;
+
+    const sliderC = document.getElementById('slider-bg-contrast');
+    if (sliderC) sliderC.value = curContrast;
+    const badgeC = document.getElementById('badge-bg-contrast');
+    if (badgeC) badgeC.textContent = `${curContrast}%`;
+
+    if (progress < 1) {
+      posterizeAnimRaf = requestAnimationFrame(step);
+    } else {
+      posterizeAnimRaf = null;
+      sliderBgPosterize = targetVal;
+      sliderBgContrast = targetContrast;
+      applyPosterizeFilter(targetVal);
+      applyBgContrast(targetContrast);
+      Settings.set('sliderBgPosterize', targetVal);
+      Settings.set('sliderBgContrast', targetContrast);
+      syncVisualSliders();
+    }
+  }
+  posterizeAnimRaf = requestAnimationFrame(step);
+}
+
+function cyclePosterizeMode() {
+  const idx = POSTERIZE_STYLES.indexOf(posterizeStyle);
+  posterizeStyle = POSTERIZE_STYLES[(idx + 1) % POSTERIZE_STYLES.length];
+  Settings.set('posterizeStyle', posterizeStyle);
+
+  let targetPosterize = 0;
+  let targetContrast = 110;
+
+  if (posterizeStyle === 'silk') {
+    targetPosterize = 55;
+    targetContrast = 128;
+  } else if (posterizeStyle === 'pop') {
+    targetPosterize = 75;
+    targetContrast = 155;
+  } else if (posterizeStyle === 'graphic') {
+    targetPosterize = 100;
+    targetContrast = 180;
+  } else if (posterizeStyle === 'off') {
+    targetPosterize = 0;
+    targetContrast = 110;
+  }
+
+  setValueText(document.getElementById('qp-bg-posterize-state'), POSTERIZE_LABELS[posterizeStyle] || 'Off');
+  animatePosterizeTransition(targetPosterize, targetContrast);
+
+  if (window.ProfileManager) window.ProfileManager.syncFromCurrentVisuals();
+  syncSettingsPanel();
+}
+window.cyclePosterizeMode = cyclePosterizeMode;
+
 function toggleSubSection(id) {
   const section = document.getElementById(id);
   const btn = document.querySelector(`[aria-controls="${id}"]`);
@@ -1592,7 +1854,7 @@ function toggleSubSection(id) {
 window.toggleSubSection = toggleSubSection;
 
 function restoreSubSections() {
-  ['beat-sub', 'air-sub'].forEach(id => {
+  ['beat-sub', 'air-sub', 'bg-sub'].forEach(id => {
     const isExpanded = Settings.get(`expand_${id}`, '0') === '1';
     const section = document.getElementById(id);
     const btn = document.querySelector(`[aria-controls="${id}"]`);
@@ -1614,16 +1876,24 @@ function syncVisualSliders() {
     { id: 'slider-particle-opacity', badge: 'badge-particle-opacity', val: sliderParticleOpacity, unit: '%' },
     { id: 'slider-particle-size', badge: 'badge-particle-size', val: sliderParticleSize, unit: '%' },
     { id: 'slider-moments', badge: 'badge-moments', val: sliderMoments, unit: '%' },
-    { id: 'slider-tilt', badge: 'badge-tilt', val: sliderTilt, unit: '%' }
+    { id: 'slider-tilt', badge: 'badge-tilt', val: sliderTilt, unit: '%' },
+    { id: 'slider-bg-blur', badge: 'badge-bg-blur', val: sliderBgBlur, unit: 'px' },
+    { id: 'slider-bg-posterize', badge: 'badge-bg-posterize', val: sliderBgPosterize, unit: '%' },
+    { id: 'slider-bg-contrast', badge: 'badge-bg-contrast', val: sliderBgContrast, unit: '%' },
+    { id: 'slider-bg-dim', badge: 'badge-bg-dim', val: sliderBgDim, unit: '%' }
   ];
   for (const s of sliders) {
     const el = document.getElementById(s.id);
     if (el) el.value = s.val;
     const b = document.getElementById(s.badge);
-    if (b) b.textContent = s.val === 0 ? 'Off' : `${s.val}${s.unit}`;
+    if (b) b.textContent = (s.id === 'slider-bg-blur' && s.val === 0) ? '0px' : (s.val === 0 ? 'Off' : `${s.val}${s.unit}`);
   }
   document.documentElement.style.setProperty('--art-slider-scale', (sliderArt / 100).toFixed(2));
   document.documentElement.style.setProperty('--tilt-amp', String((sliderTilt / 100) * 1.2));
+  applyBgBlur(sliderBgBlur);
+  applyPosterizeFilter(sliderBgPosterize);
+  applyBgContrast(sliderBgContrast);
+  applyBgDim(sliderBgDim);
   restoreSubSections();
 }
 window.syncVisualSliders = syncVisualSliders;
@@ -1682,10 +1952,43 @@ function onVisualSliderInput(name, value) {
     if (val === 0) resetTilt();
     const b = document.getElementById('badge-tilt');
     if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+  } else if (name === 'bg-blur') {
+    sliderBgBlur = val;
+    applyBgBlur(val);
+    const b = document.getElementById('badge-bg-blur');
+    if (b) b.textContent = `${val}px`;
+  } else if (name === 'bg-posterize') {
+    if (posterizeAnimRaf) {
+      cancelAnimationFrame(posterizeAnimRaf);
+      posterizeAnimRaf = null;
+    }
+    sliderBgPosterize = val;
+    applyPosterizeFilter(val);
+    const b = document.getElementById('badge-bg-posterize');
+    if (b) b.textContent = val === 0 ? 'Off' : `${val}%`;
+    if (val === 0) posterizeStyle = 'off';
+    else if (val >= 90) posterizeStyle = 'graphic';
+    else if (val >= 70) posterizeStyle = 'pop';
+    else posterizeStyle = 'silk';
+    setValueText(document.getElementById('qp-bg-posterize-state'), POSTERIZE_LABELS[posterizeStyle] || 'Off');
+  } else if (name === 'bg-contrast') {
+    sliderBgContrast = val;
+    applyBgContrast(val);
+    const b = document.getElementById('badge-bg-contrast');
+    if (b) b.textContent = `${val}%`;
+  } else if (name === 'bg-dim') {
+    sliderBgDim = val;
+    applyBgDim(val);
+    const b = document.getElementById('badge-bg-dim');
+    if (b) b.textContent = `${val}%`;
   }
 }
 
 function onVisualSliderChange(name, value) {
+  onVisualSliderChange_handler(name, value);
+}
+
+function onVisualSliderChange_handler(name, value) {
   onVisualSliderInput(name, value);
   const val = Math.max(0, parseInt(value, 10) || 0);
   if (name === 'beat') {
@@ -1712,6 +2015,15 @@ function onVisualSliderChange(name, value) {
     Settings.set('sliderTilt', val);
     Settings.set('tiltLevel', tiltLevel);
     if (val === 0) resetTilt();
+  } else if (name === 'bg-blur') {
+    Settings.set('sliderBgBlur', val);
+  } else if (name === 'bg-posterize') {
+    Settings.set('sliderBgPosterize', val);
+    Settings.set('posterizeStyle', posterizeStyle);
+  } else if (name === 'bg-contrast') {
+    Settings.set('sliderBgContrast', val);
+  } else if (name === 'bg-dim') {
+    Settings.set('sliderBgDim', val);
   }
   if (window.ProfileManager) window.ProfileManager.syncFromCurrentVisuals();
   syncSettingsPanel();
@@ -2359,9 +2671,9 @@ function drawAirGeometricFlower(ctx, x, y, size, rot, r, g, b, alpha, bloom, sha
     ctx.fill();
   }
 
-  // Brilliant starlight white center core
+  // Brilliant starlight white center core (scales faithfully with particle alpha)
   const coreRad = Math.max(1.0, size * 0.22);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.96)})`;
   ctx.beginPath();
   ctx.arc(0, 0, coreRad, 0, Math.PI * 2);
   ctx.fill();
@@ -2415,9 +2727,9 @@ function drawAirDiamondStar(ctx, x, y, size, rot, r, g, b, alpha, bloom, shapePa
   ctx.closePath();
   ctx.fill();
 
-  // Pure white crystal core
+  // Pure white crystal core (scales faithfully with particle alpha)
   const centerRad = Math.max(1.1, size * 0.24);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.96)})`;
   ctx.beginPath();
   ctx.arc(0, 0, centerRad, 0, Math.PI * 2);
   ctx.fill();
@@ -2489,9 +2801,9 @@ function drawAirCelestialSparkle(ctx, x, y, size, rot, r, g, b, alpha, bloom, sh
 
   ctx.restore();
 
-  // Diamond center glint
+  // Diamond center glint (scales faithfully with particle alpha)
   const coreRad = Math.max(1.2, size * 0.22);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, alpha * 0.96)})`;
   ctx.beginPath();
   ctx.arc(0, 0, coreRad, 0, Math.PI * 2);
   ctx.fill();
@@ -2527,6 +2839,7 @@ class AirParticlePipeline {
     this.lastSpawn = 0;
     this.colorA = { r: 185, g: 205, b: 255 };
     this.colorB = { r: 220, g: 235, b: 255 };
+    this.coverPixelGrid = null;
     this.setupDone = false;
     this.resizeObserver = null;
   }
@@ -2589,7 +2902,39 @@ class AirParticlePipeline {
     }
   }
 
-  computeParticleColor(yPos, seedIndex) {
+  setCoverPixelGrid(pixels) {
+    this.coverPixelGrid = pixels;
+    this.updateColors();
+  }
+
+  sampleBackdropColor(normX, normY) {
+    if (!this.coverPixelGrid) return null;
+    const nx = Math.max(0, Math.min(0.999, normX));
+    const ny = Math.max(0, Math.min(0.999, normY));
+    const gx = Math.min(23, Math.max(0, Math.floor(nx * 24)));
+    const gy = Math.min(23, Math.max(0, Math.floor(ny * 24)));
+    const idx = (gy * 24 + gx) * 4;
+    if (idx + 2 >= this.coverPixelGrid.length) return null;
+    return {
+      r: this.coverPixelGrid[idx],
+      g: this.coverPixelGrid[idx + 1],
+      b: this.coverPixelGrid[idx + 2]
+    };
+  }
+
+  computeParticleColor(yPos, seedIndex, xPos = null) {
+    if (xPos !== null && this.coverPixelGrid && this.width > 0 && this.height > 0) {
+      const bg = this.sampleBackdropColor(xPos / this.width, yPos / this.height);
+      if (bg) {
+        const bgLuma = (bg.r * 299 + bg.g * 587 + bg.b * 114) / 1000;
+        const lift = Math.max(0, 75 - bgLuma) * 0.75;
+        return {
+          r: Math.min(255, Math.round(bg.r + lift)),
+          g: Math.min(255, Math.round(bg.g + lift)),
+          b: Math.min(255, Math.round(bg.b + lift))
+        };
+      }
+    }
     const isTop = yPos < (this.height * 0.52 + (dustHash(seedIndex, 7) - 0.5) * (this.height * 0.2));
     const base = isTop ? this.colorA : this.colorB;
 
@@ -2620,7 +2965,7 @@ class AirParticlePipeline {
 
     const p = this.pool;
     for (let i = 0; i < p.count; i++) {
-      const c = this.computeParticleColor(p.y[i], i);
+      const c = this.computeParticleColor(p.y[i], i, p.x[i]);
       p.r[i] = c.r;
       p.g[i] = c.g;
       p.b[i] = c.b;
@@ -2670,7 +3015,7 @@ class AirParticlePipeline {
       const life = dustHash(i, 4) * maxLife;
       const colorIdx = i % 2;
       const seed = dustHash(i, 6) * 100;
-      const col = this.computeParticleColor(y, i);
+      const col = this.computeParticleColor(y, i, x);
       const rot = dustHash(i, 12) * Math.PI * 2;
 
       // Significantly reduced rotation speeds: mostly meditative drift, high speeds rare & strictly capped
@@ -2794,7 +3139,7 @@ class AirParticlePipeline {
     p.twinklePhase[i] = Math.random() * Math.PI * 2;
     p.twinkleDepth[i] = 0.6 + Math.random() * 0.6;
 
-    const col = this.computeParticleColor(p.y[i], i);
+    const col = this.computeParticleColor(p.y[i], i, p.x[i]);
     p.r[i] = col.r;
     p.g[i] = col.g;
     p.b[i] = col.b;
@@ -3002,7 +3347,30 @@ class AirParticlePipeline {
 
       p.alpha[i] = alpha;
 
-      const r = p.r[i], g = p.g[i], b = p.b[i];
+      // Dynamic spatial color sampling from background quadrant, modulated by particle opacity
+      let r = p.r[i], g = p.g[i], b = p.b[i];
+      if (this.coverPixelGrid && this.width > 0 && this.height > 0) {
+        const bg = this.sampleBackdropColor(p.x[i] / this.width, p.y[i] / this.height);
+        if (bg) {
+          const bgLuma = (bg.r * 299 + bg.g * 587 + bg.b * 114) / 1000;
+          const lift = Math.max(0, 75 - bgLuma) * 0.75;
+          const targetR = Math.min(255, bg.r + lift);
+          const targetG = Math.min(255, bg.g + lift);
+          const targetB = Math.min(255, bg.b + lift);
+
+          // Particles absorb the local background color; higher opacity deepens the saturation
+          const colorWeight = Math.min(1.0, 0.45 + alpha * 0.55);
+          r = Math.round(p.r[i] * (1 - colorWeight) + targetR * colorWeight);
+          g = Math.round(p.g[i] * (1 - colorWeight) + targetG * colorWeight);
+          b = Math.round(p.b[i] * (1 - colorWeight) + targetB * colorWeight);
+
+          // Opacity modulation: lower opacity softens the particle towards luminous starlight
+          const starlightWhiteness = (1.0 - alpha) * 0.35;
+          r = Math.min(255, Math.round(r * (1 - starlightWhiteness) + 255 * starlightWhiteness));
+          g = Math.min(255, Math.round(g * (1 - starlightWhiteness) + 255 * starlightWhiteness));
+          b = Math.min(255, Math.round(b * (1 - starlightWhiteness) + 255 * starlightWhiteness));
+        }
+      }
 
       // Compute effective size based on sliderParticleSize (0% = uniform meanSize, 100% = full rawSize variation)
       const varFactor = Math.max(0, Math.min(1.0, (sliderParticleSize !== undefined ? sliderParticleSize : 70) / 100));
@@ -3175,8 +3543,263 @@ let diagnostics = null;
 let transportState = null;
 let transportNotice = "";
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function openExternalUrl(url) {
+  if (!url) return;
+  try {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_external_url === 'function') {
+      window.pywebview.api.open_external_url(url);
+      return;
+    }
+  } catch (e) {
+    console.warn("pywebview open_external_url failed, falling back:", e);
+  }
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch (e) {
+    console.error("Failed to open external url:", e);
+  }
+}
+window.openExternalUrl = openExternalUrl;
+
+let currentAttribution = null;
+let currentLyricsSource = "";
+
+function formatCreditUsername(nameOrId) {
+  if (!nameOrId) return '';
+  const s = String(nameOrId).trim();
+  return s.startsWith('@') ? s : '@' + s;
+}
+
+function renderCreditsInSettings() {
+  const badgeEl = document.getElementById('sp-credits-provider-badge');
+  const writersRow = document.getElementById('sp-credits-writers-row');
+  const writersEl = document.getElementById('sp-credits-writers');
+  const makerRow = document.getElementById('sp-credits-maker-row');
+  const makerEl = document.getElementById('sp-credits-maker');
+  const uploaderRow = document.getElementById('sp-credits-uploader-row');
+  const uploaderEl = document.getElementById('sp-credits-uploader');
+
+  if (!badgeEl) return;
+
+  const attr = currentAttribution || (diagnostics && diagnostics.attribution) || null;
+  const provLabel = (attr && attr.provider_label) || (diagnostics && diagnostics.source) || currentLyricsSource || 'Not loaded';
+  badgeEl.textContent = provLabel;
+
+  if (attr && Array.isArray(attr.songwriters) && attr.songwriters.length > 0) {
+    if (writersRow) writersRow.style.display = '';
+    if (writersEl) writersEl.textContent = attr.songwriters.join(', ');
+  } else {
+    if (writersRow) writersRow.style.display = 'none';
+    if (writersEl) writersEl.textContent = '—';
+  }
+
+  if (attr && attr.maker && (attr.maker.username || attr.maker.id)) {
+    if (makerRow) makerRow.style.display = '';
+    if (makerEl) {
+      const u = attr.maker;
+      const url = u.url || ('https://spicylyrics.org/uid/' + u.id);
+      const uname = formatCreditUsername(u.username || u.id);
+      makerEl.innerHTML = `<a class="sp-credit-user-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${u.avatar ? `<img class="sp-credit-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="sp-credit-username">${escapeHtml(uname)}</span></a>`;
+    }
+  } else {
+    if (makerRow) makerRow.style.display = 'none';
+    if (makerEl) makerEl.textContent = '—';
+  }
+
+  if (attr && attr.uploader && (attr.uploader.username || attr.uploader.id)) {
+    if (uploaderRow) uploaderRow.style.display = '';
+    if (uploaderEl) {
+      const u = attr.uploader;
+      const url = u.url || ('https://spicylyrics.org/uid/' + u.id);
+      const uname = formatCreditUsername(u.username || u.id);
+      uploaderEl.innerHTML = `<a class="sp-credit-user-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${u.avatar ? `<img class="sp-credit-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="sp-credit-username">${escapeHtml(uname)}</span></a>`;
+    }
+  } else {
+    if (uploaderRow) uploaderRow.style.display = 'none';
+    if (uploaderEl) uploaderEl.textContent = '—';
+  }
+
+  const emptyHint = document.getElementById('sp-credits-empty-hint');
+  const hasDetails = (attr && Array.isArray(attr.songwriters) && attr.songwriters.length > 0) ||
+                     (attr && attr.maker && (attr.maker.username || attr.maker.id)) ||
+                     (attr && attr.uploader && (attr.uploader.username || attr.uploader.id));
+  if (emptyHint) {
+    emptyHint.style.display = hasDetails ? 'none' : '';
+  }
+}
+
+function appendLyricsCredits(containerEl, attr, srcLabel) {
+  if (!containerEl) return;
+
+  const existing = document.getElementById('lyrics-credits');
+  if (existing) existing.remove();
+
+  const attrObj = (attr && typeof attr === 'object') ? attr : {};
+  const songwriters = Array.isArray(attrObj.songwriters) ? attrObj.songwriters.filter(Boolean) : [];
+  const maker = (attrObj.maker && typeof attrObj.maker === 'object') ? attrObj.maker : null;
+  const uploader = (attrObj.uploader && typeof attrObj.uploader === 'object') ? attrObj.uploader : null;
+
+  let provider = attrObj.provider;
+  if (!provider) {
+    const s = (srcLabel || '').toLowerCase();
+    if (s.includes('apple')) provider = 'apple_music';
+    else if (s.includes('spotify')) provider = 'spotify';
+    else if (s.includes('lrclib')) provider = 'lrclib';
+    else if (s.includes('local')) provider = 'local';
+    else if (s.includes('spicy')) provider = 'community';
+    else provider = 'community';
+  }
+  const providerLabel = attrObj.provider_label || (
+    provider === 'apple_music' ? 'Apple Music' :
+    provider === 'spotify' ? 'Spotify' :
+    provider === 'lrclib' ? 'LRCLIB' :
+    provider === 'local' ? 'Local lyrics' : 'Community lyrics'
+  );
+
+  const creditsEl = document.createElement('div');
+  creditsEl.className = 'lyrics-credits';
+  creditsEl.id = 'lyrics-credits';
+
+  // Line 1: Songwriters ("Written by Kevin R. Parker")
+  if (songwriters.length > 0) {
+    const writersEl = document.createElement('div');
+    writersEl.className = 'lyrics-credits-writers';
+    writersEl.innerHTML = `Written by <strong>${escapeHtml(songwriters.join(', '))}</strong>`;
+    creditsEl.appendChild(writersEl);
+  }
+
+  // Line 2: Attribution line
+  const rowEl = document.createElement('div');
+  rowEl.className = 'lyrics-credits-attribution';
+
+  if (provider === 'community') {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = providerLabel || 'Community lyrics';
+    rowEl.appendChild(provSpan);
+
+    if (maker && (maker.username || maker.id)) {
+      const dot = document.createElement('span');
+      dot.className = 'lyrics-credit-dot';
+      dot.textContent = '·';
+      rowEl.appendChild(dot);
+
+      const makerItem = document.createElement('span');
+      makerItem.className = 'lyrics-credit-item';
+      const uname = formatCreditUsername(maker.username || maker.id);
+      makerItem.innerHTML = `Made by <a class="lyrics-credit-link" href="${escapeHtml(maker.url || ('https://spicylyrics.org/uid/' + maker.id))}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${maker.avatar ? `<img class="lyrics-credit-avatar" src="${escapeHtml(maker.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="lyrics-credit-username">${escapeHtml(uname)}</span></a>`;
+      rowEl.appendChild(makerItem);
+    }
+
+    if (uploader && (uploader.username || uploader.id) && (!maker || (uploader.username !== maker.username && uploader.id !== maker.id))) {
+      const dot = document.createElement('span');
+      dot.className = 'lyrics-credit-dot';
+      dot.textContent = '·';
+      rowEl.appendChild(dot);
+
+      const uploaderItem = document.createElement('span');
+      uploaderItem.className = 'lyrics-credit-item';
+      const uname = formatCreditUsername(uploader.username || uploader.id);
+      uploaderItem.innerHTML = `Uploaded by <a class="lyrics-credit-link" href="${escapeHtml(uploader.url || ('https://spicylyrics.org/uid/' + uploader.id))}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${uploader.avatar ? `<img class="lyrics-credit-avatar" src="${escapeHtml(uploader.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="lyrics-credit-username">${escapeHtml(uname)}</span></a>`;
+      rowEl.appendChild(uploaderItem);
+    }
+  } else if (provider === 'apple_music') {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = 'Apple Music';
+    rowEl.appendChild(provSpan);
+
+    const dot = document.createElement('span');
+    dot.className = 'lyrics-credit-dot';
+    dot.textContent = '·';
+    rowEl.appendChild(dot);
+
+    const descSpan = document.createElement('span');
+    descSpan.className = 'lyrics-credit-desc';
+    descSpan.textContent = 'Lyrics provided by Apple Music';
+    rowEl.appendChild(descSpan);
+  } else if (provider === 'spotify') {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = 'Spotify';
+    rowEl.appendChild(provSpan);
+
+    const dot = document.createElement('span');
+    dot.className = 'lyrics-credit-dot';
+    dot.textContent = '·';
+    rowEl.appendChild(dot);
+
+    const descSpan = document.createElement('span');
+    descSpan.className = 'lyrics-credit-desc';
+    descSpan.textContent = 'Lyrics provided by Spotify';
+    rowEl.appendChild(descSpan);
+  } else if (provider === 'lrclib') {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = 'LRCLIB';
+    rowEl.appendChild(provSpan);
+
+    const dot = document.createElement('span');
+    dot.className = 'lyrics-credit-dot';
+    dot.textContent = '·';
+    rowEl.appendChild(dot);
+
+    const descSpan = document.createElement('span');
+    descSpan.className = 'lyrics-credit-desc';
+    descSpan.innerHTML = `<a class="lyrics-credit-link" href="https://lrclib.net" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">Open-source lyrics</a>`;
+    rowEl.appendChild(descSpan);
+  } else if (provider === 'local') {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = 'Local lyrics';
+    rowEl.appendChild(provSpan);
+
+    if (attrObj.file) {
+      const dot = document.createElement('span');
+      dot.className = 'lyrics-credit-dot';
+      dot.textContent = '·';
+      rowEl.appendChild(dot);
+
+      const fileSpan = document.createElement('span');
+      fileSpan.className = 'lyrics-credit-desc';
+      fileSpan.textContent = attrObj.file;
+      rowEl.appendChild(fileSpan);
+    }
+  } else {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = providerLabel || 'Spicy Lyrics';
+    rowEl.appendChild(provSpan);
+  }
+
+  creditsEl.appendChild(rowEl);
+  containerEl.appendChild(creditsEl);
+}
+
+window.setAttribution = function(attr) {
+  currentAttribution = (attr && typeof attr === 'object') ? attr : null;
+  renderCreditsInSettings();
+  if (container && lyrics && lyrics.length > 0) {
+    appendLyricsCredits(container, currentAttribution, currentLyricsSource);
+  }
+};
+
 window.setDiagnostics = function(diag) {
   diagnostics = (diag && typeof diag === 'object') ? diag : null;
+  if (diagnostics && diagnostics.attribution) {
+    currentAttribution = diagnostics.attribution;
+    renderCreditsInSettings();
+  }
   renderDiagnostics();
 };
 
@@ -3235,6 +3858,10 @@ function renderDiagnostics() {
       : (momentsFired.total
         ? `${momentsFired.total} fired \u00b7 ${momentsFired.drop} drop(s) \u00b7 ${momentsFired.hook} hook(s)`
         : 'none yet')],
+    ...(d.attribution && d.attribution.provider_label ? [['Provider', d.attribution.provider_label]] : []),
+    ...(d.attribution && Array.isArray(d.attribution.songwriters) && d.attribution.songwriters.length ? [['Songwriters', d.attribution.songwriters.join(', ')]] : []),
+    ...(d.attribution && d.attribution.maker && (d.attribution.maker.username || d.attribution.maker.id) ? [['Sync Maker', formatCreditUsername(d.attribution.maker.username || d.attribution.maker.id)]] : []),
+    ...(d.attribution && d.attribution.uploader && (d.attribution.uploader.username || d.attribution.uploader.id) ? [['Sync Uploader', formatCreditUsername(d.attribution.uploader.username || d.attribution.uploader.id)]] : []),
     ['Track ID', d.track_id || '\u2014'],
     // Which build produced this report, and which cached-payload format it
     // speaks: the two numbers a bug report needs. Both come from config.py.
@@ -3881,6 +4508,10 @@ function openSettingsTab(id) {
   } else if (window.toggleSettingsAddProfile) {
     window.toggleSettingsAddProfile(false);
   }
+  if (want === 'diag') {
+    renderCreditsInSettings();
+    renderDiagnostics();
+  }
 }
 
 // Arrow keys move between tabs, Home/End jump to the ends — the ARIA tabs
@@ -3936,7 +4567,7 @@ function settingsSearchableRows() {
         el.classList.contains('sp-slider-card') || el.classList.contains('spicy-key-card') ||
         el.classList.contains('font-bar') || el.classList.contains('font-list') ||
         el.classList.contains('profile-select-row') || el.classList.contains('profile-settings-card') ||
-        el.classList.contains('source-mapping-list'));
+        el.classList.contains('source-mapping-list') || el.classList.contains('sp-credits-card'));
       // The heading is named by the group itself, not by reading the title's
       // text: the title now carries a toggle whose summary the heading must not
       // pick up ("Sync+600ms").
@@ -4033,9 +4664,13 @@ function runSettingsSearch(raw) {
       // and the label is what matched, otherwise anywhere in the row — a hint
       // that matched through its prose shows ITS sentence marked, and the file
       // list shows the file the query named.
-      const label = row.querySelector('.qp-label');
-      if (label && settingsRowText(label).includes(query)) markSettingsText(label, query);
-      else markSettingsText(row, query);
+      if (row.classList.contains('sp-credits-card')) {
+        markSettingsText(row, query);
+      } else {
+        const label = row.querySelector('.qp-label');
+        if (label && settingsRowText(label).includes(query)) markSettingsText(label, query);
+        else markSettingsText(row, query);
+      }
       section.appendChild(row);
     }
     body.appendChild(section);
@@ -4115,6 +4750,11 @@ function openSettings(open) {
   applyWindowOpacity();
   const gear = document.getElementById('art-btn-settings');
   if (gear) gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const sbGear = document.getElementById('sidebar-btn-settings');
+  if (sbGear) {
+    sbGear.classList.toggle('active', open);
+    sbGear.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
 
   // Focus management for the modal dialog: move focus in on open, restore it
   // on close, and keep Tab cycling inside the sheet while it is up (the dialog
@@ -4134,6 +4774,14 @@ function openSettings(open) {
     if (search) search.value = '';
     runSettingsSearch('');
     openSettingsTab(settingsTab);
+    if (window.renderModalLatencyFader) {
+      window.renderModalLatencyFader();
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          if (window.renderModalLatencyFader) window.renderModalLatencyFader();
+        });
+      }
+    }
     // Focus lands on the close button, which is where a dialog's focus belongs.
     // This can be synchronous only because the sheet's visibility flips with the
     // class rather than fading in behind it (see .settings-page in style.css): a
@@ -4284,6 +4932,14 @@ function applyZoom(size) {
   try {
     localStorage.setItem('lyric_font_size', lyricFontSize);
   } catch (e) {}
+
+  const typeSlider = document.getElementById('slider-typescale');
+  if (typeSlider && parseInt(typeSlider.value, 10) !== lyricFontSize) {
+    typeSlider.value = lyricFontSize;
+  }
+  const typeBadge = document.getElementById('badge-typescale');
+  if (typeBadge) setValueText(typeBadge, `${lyricFontSize}px`);
+
   // A bigger lyric size can push a word past the column; a smaller one can let a fitted
   // line back to its full size.
   fitLyricLines();
@@ -4632,6 +5288,10 @@ function applyCoverAccent(url) {
       ctx.clearRect(0, 0, ACCENT_GRID, ACCENT_GRID);
       ctx.drawImage(image, 0, 0, ACCENT_GRID, ACCENT_GRID);
       const pixels = ctx.getImageData(0, 0, ACCENT_GRID, ACCENT_GRID).data;
+      window._coverPixelGrid = pixels;
+      if (window.airPipeline) {
+        window.airPipeline.setCoverPixelGrid(pixels);
+      }
       rgb = extractAccent(pixels);
       // The air's two region tints ride the same read: one canvas scan per
       // track change, no second image decode.
@@ -4660,6 +5320,10 @@ window.setCoverArt = function(url, isHiRes) {
   if (!backdrop) return;
 
   if (!url) {
+    window._coverPixelGrid = null;
+    if (window.airPipeline) {
+      window.airPipeline.setCoverPixelGrid(null);
+    }
     // No artwork at all: the theme's own lamp, not the last track's colour.
     // The air's palette goes too — its tints describe a cover that isn't there.
     const root = document.documentElement;
@@ -4905,6 +5569,30 @@ function initLatencyRail() {
   };
   bindHold(minus, -50);
   bindHold(plus, 50);
+  const arrowUp = document.getElementById('latency-rail-arrow-up');
+  const arrowDown = document.getElementById('latency-rail-arrow-down');
+  if (arrowUp) bindHold(arrowUp, 10);
+  if (arrowDown) bindHold(arrowDown, -10);
+  const handleResetLatency = (e) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (typeof window.resetLatencyToZero === 'function') {
+      window.resetLatencyToZero();
+    } else if (latencyOffsetMs !== 0) {
+      window.adjustLatency(-latencyOffsetMs);
+    }
+    const rst = document.getElementById('sidebar-btn-rst');
+    if (rst) {
+      rst.classList.remove('active');
+      void rst.offsetWidth;
+      rst.classList.add('active');
+      setTimeout(() => rst.classList.remove('active'), 180);
+    }
+  };
+  const rstBtn = document.getElementById('sidebar-btn-rst');
+  if (rstBtn) rstBtn.addEventListener('click', handleResetLatency);
 
   // ---- Vertical sync slider (−3000..+3000 ms, zero at the middle) ----
   const slider = document.getElementById('latency-slider');
@@ -4912,9 +5600,14 @@ function initLatencyRail() {
   const LAT_MIN = -3000, LAT_MAX = 3000;
 
   window.renderLatencySlider = function() {
-    const h = slider.clientHeight || 72;
-    if (!h) return;
     const clampedLat = Math.max(LAT_MIN, Math.min(LAT_MAX, latencyOffsetMs));
+    const txt = `${clampedLat > 0 ? '+' : ''}${clampedLat}ms`;
+    const valEl = document.getElementById('latency-rail-value');
+    if (valEl) {
+      valEl.textContent = txt;
+    }
+    const h = slider.clientHeight || 98;
+    if (!h) return;
     const frac = (clampedLat - LAT_MIN) / (LAT_MAX - LAT_MIN); // 0 at -3000ms, 0.5 at 0ms, 1 at +3000ms
     const thumbY = (1 - frac) * h;
     const zeroY = h / 2;
@@ -4929,15 +5622,18 @@ function initLatencyRail() {
     if (thumb) {
       thumb.style.top = thumbY + 'px';
     }
-    slider.classList.toggle('zero', Math.abs(latencyOffsetMs) < 25);
+    slider.classList.toggle('zero', Math.abs(clampedLat) < 25);
     slider.setAttribute('aria-valuenow', clampedLat);
-    slider.setAttribute('aria-valuetext', `${clampedLat > 0 ? '+' : ''}${clampedLat}ms`);
+    slider.setAttribute('aria-valuetext', txt);
   };
 
   const setFromEvent = (e) => {
     const rect = slider.getBoundingClientRect();
     const frac = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / Math.max(1, rect.height)));
-    const target = Math.round((LAT_MIN + frac * (LAT_MAX - LAT_MIN)) / 50) * 50;
+    let rawTarget = LAT_MIN + frac * (LAT_MAX - LAT_MIN);
+    let target = Math.round(rawTarget / 10) * 10;
+    // Silky magnetic snap at 0ms within +/-35ms
+    if (Math.abs(target) <= 35) target = 0;
     const clamped = Math.max(LAT_MIN, Math.min(LAT_MAX, target));
     if (clamped !== latencyOffsetMs) {
       window.adjustLatency(clamped - latencyOffsetMs);
@@ -4953,7 +5649,7 @@ function initLatencyRail() {
     if (!isDraggingSlider) return;
     isDraggingSlider = false;
     slider.classList.remove('dragging');
-    if (e && e.pointerId !== undefined) {
+    if (e && e.pointerId !== undefined && slider.releasePointerCapture) {
       try { slider.releasePointerCapture(e.pointerId); } catch (_) {}
     }
     window.removeEventListener('pointermove', onDragMove);
@@ -4961,6 +5657,11 @@ function initLatencyRail() {
     window.removeEventListener('pointercancel', onDragEnd);
     window.removeEventListener('mousemove', onDragMove);
     window.removeEventListener('mouseup', onDragEnd);
+    slider.removeEventListener('pointermove', onDragMove);
+    slider.removeEventListener('pointerup', onDragEnd);
+    slider.removeEventListener('pointercancel', onDragEnd);
+    slider.removeEventListener('lostpointercapture', onDragEnd);
+    updateLatencyUI();
     if (!rail.matches(':hover') && !pointerAtEdge(e) && !window.sidebarPinned) {
       conceal();
     }
@@ -4972,7 +5673,7 @@ function initLatencyRail() {
     e.stopPropagation();
     isDraggingSlider = true;
     slider.classList.add('dragging');
-    if (e.pointerId !== undefined) {
+    if (e.pointerId !== undefined && slider.setPointerCapture) {
       try { slider.setPointerCapture(e.pointerId); } catch (_) {}
     }
     setFromEvent(e);
@@ -4981,9 +5682,18 @@ function initLatencyRail() {
     window.addEventListener('pointercancel', onDragEnd);
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragEnd);
+    slider.addEventListener('pointermove', onDragMove);
+    slider.addEventListener('pointerup', onDragEnd);
+    slider.addEventListener('pointercancel', onDragEnd);
+    slider.addEventListener('lostpointercapture', onDragEnd);
   };
   slider.addEventListener('pointerdown', onDragStart);
   slider.addEventListener('mousedown', onDragStart);
+  const sliderCol = slider.closest('.sidebar-sync-slider-col');
+  if (sliderCol) {
+    sliderCol.addEventListener('pointerdown', onDragStart);
+    sliderCol.addEventListener('mousedown', onDragStart);
+  }
 
   slider.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -5006,20 +5716,14 @@ function initLatencyRail() {
       window.adjustLatency(-200);
     } else if (e.key === 'Home' || e.key === 'End' || e.key === '0') {
       e.preventDefault();
-      resetLatencyToZero(e);
+      handleResetLatency(e);
     }
   });
 
-  const resetLatencyToZero = (e) => {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (latencyOffsetMs !== 0) {
-      window.adjustLatency(-latencyOffsetMs);
-    }
-  };
-  slider.addEventListener('dblclick', resetLatencyToZero);
+  slider.addEventListener('dblclick', handleResetLatency);
   const valEl = document.getElementById('latency-rail-value');
   if (valEl) {
-    valEl.addEventListener('dblclick', resetLatencyToZero);
+    valEl.addEventListener('dblclick', handleResetLatency);
     valEl.style.cursor = 'pointer';
     valEl.title = 'Double-click to reset sync to 0ms';
   }
@@ -5033,6 +5737,226 @@ function initLatencyRail() {
   });
 }
 initLatencyRail();
+
+function initModalLatencyFader() {
+  const fader = document.getElementById('modal-latency-fader');
+  const track = document.getElementById('modal-fader-track');
+  const knob = document.getElementById('modal-fader-knob');
+  const fill = document.getElementById('modal-fader-fill');
+  const channel = document.getElementById('sp-latency-channel');
+  if (!fader || !track || !knob) return;
+
+  const LAT_MIN = -3000, LAT_MAX = 3000;
+  let isDragging = false;
+
+  const isFaderHorizontal = () => {
+    return (track.clientWidth > track.clientHeight) || window.matchMedia('(max-width: 580px)').matches;
+  };
+
+  window.renderModalLatencyFader = function() {
+    const isHorizontal = isFaderHorizontal();
+    const clampedLat = Math.max(LAT_MIN, Math.min(LAT_MAX, latencyOffsetMs));
+    const frac = (clampedLat - LAT_MIN) / (LAT_MAX - LAT_MIN); // 0 at -3000, 0.5 at 0, 1 at +3000
+    const isDetent = Math.abs(clampedLat) === 0;
+
+    fader.setAttribute('aria-valuenow', clampedLat);
+    fader.setAttribute('aria-valuetext', `${clampedLat > 0 ? '+' : ''}${clampedLat}ms`);
+    fader.classList.toggle('detent-zero', isDetent);
+    if (channel) channel.classList.toggle('detent-zero', isDetent);
+
+    const displayTag = document.getElementById('latency-display');
+    const dispTxt = isDetent ? '0ms DETENT' : `${clampedLat > 0 ? '+' : ''}${clampedLat}ms`;
+    if (displayTag) setValueText(displayTag, dispTxt, !isDragging);
+
+    const detentTag = document.getElementById('sp-detent-indicator');
+    if (detentTag) {
+      detentTag.classList.toggle('active', isDetent);
+      const txt = detentTag.querySelector('.sp-detent-text');
+      if (txt) txt.textContent = isDetent ? '0ms DETENT' : (clampedLat > 0 ? `+${clampedLat}ms` : `${clampedLat}ms`);
+    }
+
+    if (isHorizontal) {
+      const w = track.clientWidth || 240;
+      const thumbX = frac * w;
+      const zeroX = w * 0.5;
+      const left = Math.min(thumbX, zeroX);
+      const width = Math.max(2, Math.abs(zeroX - thumbX));
+      if (fill) {
+        fill.style.top = '0px';
+        fill.style.height = '100%';
+        fill.style.left = left + 'px';
+        fill.style.width = width + 'px';
+      }
+      if (knob) {
+        knob.style.top = '';
+        knob.style.left = thumbX + 'px';
+      }
+    } else {
+      const h = track.clientHeight || 180;
+      // top of vertical track is +3000ms (frac=1), bottom is -3000ms (frac=0)
+      const thumbY = (1 - frac) * h;
+      const zeroY = h * 0.5;
+      const top = Math.min(thumbY, zeroY);
+      const height = Math.max(2, Math.abs(zeroY - thumbY));
+      if (fill) {
+        fill.style.left = '0px';
+        fill.style.width = '100%';
+        fill.style.top = top + 'px';
+        fill.style.height = height + 'px';
+      }
+      if (knob) {
+        knob.style.left = '';
+        knob.style.top = thumbY + 'px';
+      }
+    }
+  };
+
+  const setFromPointer = (e) => {
+    const isHorizontal = isFaderHorizontal();
+    const rect = track.getBoundingClientRect();
+    let frac = 0.5;
+    if (isHorizontal) {
+      frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+    } else {
+      frac = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / Math.max(1, rect.height)));
+    }
+    const rawTarget = LAT_MIN + frac * (LAT_MAX - LAT_MIN);
+    let target = Math.round(rawTarget / 10) * 10;
+    // Magnetic center detent snap near 0ms
+    if (Math.abs(target) <= 35) {
+      target = 0;
+      knob.classList.add('snapping');
+      if (fill) fill.classList.add('snapping');
+    } else {
+      knob.classList.remove('snapping');
+      if (fill) fill.classList.remove('snapping');
+    }
+    const clamped = Math.max(LAT_MIN, Math.min(LAT_MAX, target));
+    if (clamped !== latencyOffsetMs) {
+      window.adjustLatency(clamped - latencyOffsetMs);
+    }
+  };
+
+  const onPointerMove = (e) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    setFromPointer(e);
+  };
+
+  const onPointerEnd = (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    fader.classList.remove('dragging');
+    knob.classList.remove('snapping');
+    if (fill) fill.classList.remove('snapping');
+    if (e && e.pointerId !== undefined) {
+      try { fader.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerEnd);
+    window.removeEventListener('pointercancel', onPointerEnd);
+    window.removeEventListener('mousemove', onPointerMove);
+    window.removeEventListener('mouseup', onPointerEnd);
+    updateLatencyUI();
+  };
+
+  const onPointerStart = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.button && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { fader.focus({ preventScroll: true }); } catch (_) {}
+    isDragging = true;
+    fader.classList.add('dragging');
+    if (e.pointerId !== undefined) {
+      try { fader.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+    setFromPointer(e);
+    if (e.pointerId !== undefined) {
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerEnd);
+      window.addEventListener('pointercancel', onPointerEnd);
+    } else {
+      window.addEventListener('mousemove', onPointerMove);
+      window.addEventListener('mouseup', onPointerEnd);
+    }
+  };
+
+  if (window.PointerEvent) {
+    fader.addEventListener('pointerdown', onPointerStart);
+    fader.addEventListener('lostpointercapture', onPointerEnd);
+  } else {
+    fader.addEventListener('mousedown', onPointerStart);
+  }
+
+  fader.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    let dir = 0;
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      dir = e.deltaX > 0 ? 1 : -1;
+    } else if (e.deltaY !== 0) {
+      dir = e.deltaY < 0 ? 1 : -1;
+    }
+    if (dir === 0) return;
+    const delta = (e.shiftKey ? 10 : 50) * dir;
+    window.adjustLatency(delta);
+  }, { passive: false });
+
+  fader.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 10 : 50;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight' || e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      window.adjustLatency(step);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === '-' || e.key === '_') {
+      e.preventDefault();
+      window.adjustLatency(-step);
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      window.adjustLatency(200);
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      window.adjustLatency(-200);
+    } else if (e.key === 'Home' || e.key === 'End' || e.key === '0') {
+      e.preventDefault();
+      resetLatencyToZero();
+    }
+  });
+
+  fader.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    resetLatencyToZero();
+  });
+
+  const displayEl = document.getElementById('latency-display');
+  if (displayEl) {
+    displayEl.addEventListener('click', (e) => {
+      e.preventDefault();
+      resetLatencyToZero();
+    });
+    displayEl.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      resetLatencyToZero();
+    });
+    displayEl.style.cursor = 'pointer';
+    displayEl.title = 'Click to reset to 0ms';
+  }
+
+  const detentIndicatorEl = document.getElementById('sp-detent-indicator');
+  if (detentIndicatorEl) {
+    detentIndicatorEl.addEventListener('click', (e) => {
+      e.preventDefault();
+      resetLatencyToZero();
+    });
+    detentIndicatorEl.style.cursor = 'pointer';
+    detentIndicatorEl.title = 'Click to reset to 0ms';
+  }
+
+  window.renderModalLatencyFader();
+  window.addEventListener('resize', () => {
+    if (window.renderModalLatencyFader) window.renderModalLatencyFader();
+  });
+}
+initModalLatencyFader();
 
 syncSettingsPanel();
 
@@ -6827,7 +7751,14 @@ function fitLyricLines() {
   }
 }
 
-window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, trackKey, savedLatencyOffset, plan, offsetIsDefault) {
+window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, trackKey, savedLatencyOffset, plan, offsetIsDefault, attribution) {
+  currentLyricsSource = sourceName || "";
+  if (attribution && typeof attribution === 'object') {
+    currentAttribution = attribution;
+  } else if (diagnostics && diagnostics.attribution) {
+    currentAttribution = diagnostics.attribution;
+  }
+  renderCreditsInSettings();
   wakeRenderLoop();
   try {
     const titleEl = document.getElementById('title');
@@ -7095,6 +8026,9 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
         words: wordsDom
       };
     });
+
+    // On-screen contribution & credit attribution at bottom of lyrics container (Section 6)
+    appendLyricsCredits(container, currentAttribution, sourceName);
 
     // Reported in Diagnostics so the pools can be verified per track.
     chorusCount = chorusLineCount;
@@ -7501,6 +8435,7 @@ window.adjustLatency = function(deltaMs) {
     setAutoTrim(player, getAutoTrim(player) + deltaMs / 2);
   }
   if (window.renderLatencySlider) window.renderLatencySlider();
+  updateLatencyUI();
   syncSettingsPanel();
 
   clearTimeout(latencySaveTimer);
@@ -7519,12 +8454,22 @@ window.addEventListener('keydown', (e) => {
   const t = e.target;
   const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
   if (typing) return; // don't hijack keys while a form control has focus
-  if (e.ctrlKey && (e.key === '[' || e.code === 'BracketLeft')) {
+
+  const isBracketLeft = e.ctrlKey && (e.key === '[' || e.key === '{' || e.code === 'BracketLeft');
+  const isBracketRight = e.ctrlKey && (e.key === ']' || e.key === '}' || e.code === 'BracketRight');
+  const isZeroReset = e.ctrlKey && (e.key === '0' || e.code === 'Digit0' || e.key === '\\' || e.code === 'Backslash');
+
+  if (isBracketLeft) {
     e.preventDefault();
-    if (!globalHotkeysBound) window.adjustLatency(-50);
-  } else if (e.ctrlKey && (e.key === ']' || e.code === 'BracketRight')) {
+    // Allow continuous hold to keep reducing latency without spamming
+    window.adjustLatency(-50);
+  } else if (isBracketRight) {
     e.preventDefault();
-    if (!globalHotkeysBound) window.adjustLatency(50);
+    // Allow continuous hold to keep advancing latency without spamming
+    window.adjustLatency(50);
+  } else if (isZeroReset) {
+    e.preventDefault();
+    resetLatencyToZero();
   } else if (e.ctrlKey && e.key === ',') {
     e.preventDefault();
     toggleSettings();
@@ -7656,7 +8601,13 @@ const BUILTIN_PROFILES = {
     sliderParticleOpacity: 80,
     sliderParticleSize: 70,
     sliderMoments: 35,
-    sliderTilt: 50
+    sliderTilt: 50,
+    sliderBgBlur: 14,
+    sliderBgPosterize: 0,
+    sliderBgContrast: 128,
+    sliderBgDim: 74,
+    posterizeStyle: "off",
+    bgJitter: false
   },
   vivid: {
     id: "vivid",
@@ -7678,7 +8629,12 @@ const BUILTIN_PROFILES = {
     sliderParticleOpacity: 90,
     sliderParticleSize: 85,
     sliderMoments: 65,
-    sliderTilt: 75
+    sliderTilt: 75,
+    sliderBgBlur: 10,
+    sliderBgPosterize: 75,
+    sliderBgContrast: 155,
+    sliderBgDim: 82,
+    posterizeStyle: "pop"
   },
   minimal: {
     id: "minimal",
@@ -7700,7 +8656,12 @@ const BUILTIN_PROFILES = {
     sliderParticleOpacity: 0,
     sliderParticleSize: 50,
     sliderMoments: 0,
-    sliderTilt: 0
+    sliderTilt: 0,
+    sliderBgBlur: 32,
+    sliderBgPosterize: 0,
+    sliderBgContrast: 100,
+    sliderBgDim: 65,
+    posterizeStyle: "off"
   },
   youtube: {
     id: "youtube",
@@ -7722,7 +8683,13 @@ const BUILTIN_PROFILES = {
     sliderParticleOpacity: 80,
     sliderParticleSize: 70,
     sliderMoments: 35,
-    sliderTilt: 50
+    sliderTilt: 50,
+    sliderBgBlur: 14,
+    sliderBgPosterize: 0,
+    sliderBgContrast: 128,
+    sliderBgDim: 74,
+    posterizeStyle: "off",
+    bgJitter: false
   },
   split: {
     id: "split",
@@ -7744,7 +8711,12 @@ const BUILTIN_PROFILES = {
     sliderParticleOpacity: 80,
     sliderParticleSize: 70,
     sliderMoments: 35,
-    sliderTilt: 50
+    sliderTilt: 50,
+    sliderBgBlur: 14,
+    sliderBgPosterize: 55,
+    sliderBgContrast: 128,
+    sliderBgDim: 74,
+    posterizeStyle: "silk"
   }
 };
 
@@ -7842,6 +8814,7 @@ const ProfileManager = {
 
     this.renderPills();
     this.renderProfilesPanel();
+    this.renderSidebar();
   },
 
   getActiveProfile() {
@@ -7874,7 +8847,13 @@ const ProfileManager = {
       sliderMoments,
       momentLevel,
       sliderTilt,
-      tiltLevel
+      tiltLevel,
+      sliderBgBlur,
+      sliderBgPosterize,
+      sliderBgContrast,
+      sliderBgDim,
+      posterizeStyle,
+      bgJitter
     });
   },
 
@@ -7896,6 +8875,12 @@ const ProfileManager = {
     momentLevel = p.momentLevel ?? 2;
     sliderTilt = p.sliderTilt ?? 50;
     tiltLevel = p.tiltLevel ?? 2;
+    sliderBgBlur = p.sliderBgBlur ?? 14;
+    sliderBgPosterize = p.sliderBgPosterize ?? 0;
+    sliderBgContrast = p.sliderBgContrast ?? 128;
+    sliderBgDim = p.sliderBgDim ?? 74;
+    posterizeStyle = p.posterizeStyle ?? 'off';
+    bgJitter = p.bgJitter ?? false;
 
     Settings.set('sliderBeat', sliderBeat);
     Settings.set('beatLevel', beatLevel);
@@ -7910,6 +8895,12 @@ const ProfileManager = {
     Settings.set('momentLevel', momentLevel);
     Settings.set('sliderTilt', sliderTilt);
     Settings.set('tiltLevel', tiltLevel);
+    Settings.set('sliderBgBlur', sliderBgBlur);
+    Settings.set('sliderBgPosterize', sliderBgPosterize);
+    Settings.set('sliderBgContrast', sliderBgContrast);
+    Settings.set('sliderBgDim', sliderBgDim);
+    Settings.set('posterizeStyle', posterizeStyle);
+    Settings.set('bgJitter', bgJitter ? 'on' : 'off');
 
     if (p.layout && LAYOUTS.includes(p.layout)) {
       layoutMode = p.layout;
@@ -8147,7 +9138,7 @@ const ProfileManager = {
     const tTrans = document.getElementById('sb-toggle-trans');
     if (tTrans) {
       tTrans.classList.toggle('active', !!showSecondary);
-      tTrans.dataset.tooltip = showSecondary ? 'Romaji: On (T)' : 'Romaji: Off (T)';
+      tTrans.dataset.tooltip = showSecondary ? 'Pronunciation / Romaji: On' : 'Pronunciation / Romaji: Off';
     }
 
     const tLayout = document.getElementById('sb-toggle-layout');
@@ -8479,8 +9470,148 @@ const ProfileManager = {
         mappingList.appendChild(row);
       });
     }
+    if (typeof initCustomSelects === 'function') initCustomSelects();
   }
 };
+
+
+// =========================================================
+// Custom Tactile Obsidian Plum Dropdown Implementation
+// Replaces native OS select boxes with custom hardware dropdowns
+// =========================================================
+function initCustomSelects() {
+  const selects = document.querySelectorAll('.sp-select-wrap select.sp-select');
+  selects.forEach((sel) => {
+    const wrap = sel.closest('.sp-select-wrap');
+    if (!wrap) return;
+
+    // Keep native select in DOM for programmatic state & form serialization, but hide from view
+    sel.style.display = 'none';
+
+    let customWrap = wrap.querySelector('.sp-custom-select-wrap');
+    if (!customWrap) {
+      customWrap = document.createElement('div');
+      customWrap.className = 'sp-custom-select-wrap';
+
+      const trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'sp-custom-select-trigger';
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+
+      const label = document.createElement('span');
+      label.className = 'sp-custom-select-label';
+
+      const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevron.setAttribute('class', 'sp-custom-select-chevron');
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('fill', 'none');
+      chevron.setAttribute('stroke', 'currentColor');
+      chevron.setAttribute('stroke-width', '2.2');
+      chevron.setAttribute('stroke-linecap', 'round');
+      chevron.setAttribute('stroke-linejoin', 'round');
+      chevron.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+
+      trigger.appendChild(label);
+      trigger.appendChild(chevron);
+
+      const menu = document.createElement('div');
+      menu.className = 'sp-custom-select-menu';
+      menu.setAttribute('role', 'listbox');
+      menu.hidden = true;
+
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const willOpen = menu.hidden;
+        // Close all other dropdown menus
+        document.querySelectorAll('.sp-custom-select-menu').forEach(m => {
+          if (m !== menu) {
+            m.hidden = true;
+            m.previousElementSibling?.classList.remove('active');
+            m.previousElementSibling?.setAttribute('aria-expanded', 'false');
+          }
+        });
+        menu.hidden = !willOpen;
+        trigger.classList.toggle('active', willOpen);
+        trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+      });
+
+      customWrap.appendChild(trigger);
+      customWrap.appendChild(menu);
+      wrap.appendChild(customWrap);
+    }
+
+    // Synchronize options with native select
+    const trigger = customWrap.querySelector('.sp-custom-select-trigger');
+    const label = customWrap.querySelector('.sp-custom-select-label');
+    const menu = customWrap.querySelector('.sp-custom-select-menu');
+    if (!trigger || !label || !menu) return;
+
+    menu.innerHTML = '';
+    const selectedOpt = sel.options[sel.selectedIndex] || sel.options[0];
+    label.textContent = selectedOpt ? selectedOpt.textContent : '';
+
+    Array.from(sel.options).forEach((opt) => {
+      const item = document.createElement('div');
+      item.className = 'sp-custom-select-option' + (opt.selected ? ' selected' : '');
+      item.setAttribute('role', 'option');
+      item.dataset.value = opt.value;
+
+      const itemText = document.createElement('span');
+      itemText.textContent = opt.textContent;
+      item.appendChild(itemText);
+
+      if (opt.selected) {
+        const check = document.createElement('span');
+        check.className = 'sp-custom-select-check';
+        check.textContent = '✓';
+        item.appendChild(check);
+      }
+
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sel.value = opt.value;
+        label.textContent = opt.textContent;
+        menu.hidden = true;
+        trigger.classList.remove('active');
+        trigger.setAttribute('aria-expanded', 'false');
+
+        // Dispatch change event to trigger underlying handlers
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        if (typeof sel.onchange === 'function') {
+          sel.onchange({ target: sel });
+        }
+        initCustomSelects();
+      });
+
+      menu.appendChild(item);
+    });
+  });
+}
+
+// Global click & Esc listeners to dismiss dropdowns
+if (!window._customSelectsGlobalBound) {
+  window._customSelectsGlobalBound = true;
+  window.addEventListener('click', () => {
+    document.querySelectorAll('.sp-custom-select-menu').forEach(m => {
+      m.hidden = true;
+      m.previousElementSibling?.classList.remove('active');
+      m.previousElementSibling?.setAttribute('aria-expanded', 'false');
+    });
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.sp-custom-select-menu').forEach(m => {
+        m.hidden = true;
+        m.previousElementSibling?.classList.remove('active');
+        m.previousElementSibling?.setAttribute('aria-expanded', 'false');
+      });
+    }
+  });
+}
+
+window.initCustomSelects = initCustomSelects;
 
 window.ProfileManager = ProfileManager;
 ProfileManager.init();
@@ -8492,14 +9623,24 @@ window.toggleQuickProfileMenu = function(e) {
   if (!popup) return;
   const isOpening = popup.hidden;
   if (isOpening) {
-    const target = (e && e.currentTarget) || document.getElementById('source-pill');
+    const target = (e && e.currentTarget) || document.getElementById('sidebar-current-source') || document.getElementById('source-pill');
     if (target) {
       const rect = target.getBoundingClientRect();
       const popupWidth = 270;
       let left = rect.left;
       let top = rect.bottom + 8;
-      if (left + popupWidth > window.innerWidth - 12) {
-        left = Math.max(12, window.innerWidth - popupWidth - 12);
+      if (rect.left > window.innerWidth / 2) {
+        // Target is in the sidebar on the right side of window
+        left = Math.max(12, rect.left - popupWidth - 10);
+        top = Math.max(12, Math.min(rect.top - 12, window.innerHeight - 380));
+      } else {
+        // Target is in header on left/center
+        if (left + popupWidth > window.innerWidth - 12) {
+          left = Math.max(12, window.innerWidth - popupWidth - 12);
+        }
+        if (top + 360 > window.innerHeight) {
+          top = Math.max(12, window.innerHeight - 370);
+        }
       }
       popup.style.left = `${Math.max(12, left)}px`;
       popup.style.top = `${Math.max(12, top)}px`;
@@ -8641,7 +9782,13 @@ window.resetActiveProfileToDefaults = function() {
       sliderParticleOpacity: def.sliderParticleOpacity,
       sliderParticleSize: def.sliderParticleSize,
       sliderMoments: def.sliderMoments,
-      sliderTilt: def.sliderTilt
+      sliderTilt: def.sliderTilt,
+      sliderBgBlur: def.sliderBgBlur ?? 14,
+      sliderBgPosterize: def.sliderBgPosterize ?? 0,
+      sliderBgContrast: def.sliderBgContrast ?? 128,
+      sliderBgDim: def.sliderBgDim ?? 74,
+      posterizeStyle: def.posterizeStyle ?? 'off',
+      bgJitter: def.bgJitter ?? false
     });
     ProfileManager.applyProfile(active.id, true, 'Reset values to defaults');
   }

@@ -86,7 +86,88 @@ def fetch_lrclib(title: str, artist: str, duration_ms: float | None = None,
     return []
 
 
-def fetch_spicy_with_id(track_id: str, lrclib_lines: list[dict] = None) -> tuple[list[dict], str | None]:
+def _clean_user_credit(user_obj):
+    if not isinstance(user_obj, dict):
+        return None
+    uid = str(user_obj.get("id") or "").strip()
+    uname = str(user_obj.get("username") or user_obj.get("name") or "").strip()
+    avatar = str(user_obj.get("avatar") or "").strip()
+    url = str(user_obj.get("url") or "").strip()
+    if not url and uid:
+        url = f"https://spicylyrics.org/uid/{uid}"
+    elif url and not (url.startswith("http://") or url.startswith("https://")):
+        url = f"https://spicylyrics.org{url if url.startswith('/') else '/' + url}"
+    if not uname and not uid:
+        return None
+    return {
+        "id": uid,
+        "username": uname or uid,
+        "avatar": avatar,
+        "url": url,
+        "hasProfileBanner": bool(user_obj.get("hasProfileBanner")),
+    }
+
+
+def _build_fallback_attribution(source: str, ttml: str = "") -> dict:
+    s = (source or "").lower()
+    if "lrclib" in s:
+        return {
+            "provider": "lrclib",
+            "provider_label": "LRCLIB",
+            "raw_source": "LRCLIB",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+            "url": "https://lrclib.net",
+        }
+    if "local" in s or ttml:
+        return {
+            "provider": "local",
+            "provider_label": "Local TTML",
+            "raw_source": "Local TTML",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+            "file": ttml or "",
+        }
+    if "apple" in s:
+        return {
+            "provider": "apple_music",
+            "provider_label": "Apple Music",
+            "raw_source": "Apple Music",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+        }
+    if "spotify" in s:
+        return {
+            "provider": "spotify",
+            "provider_label": "Spotify",
+            "raw_source": "Spotify",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+        }
+    if "spicy" in s:
+        return {
+            "provider": "community",
+            "provider_label": "Community lyrics",
+            "raw_source": "spicy_lyrics",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+        }
+    return {
+        "provider": "none",
+        "provider_label": source or "None",
+        "raw_source": source or "None",
+        "songwriters": [],
+        "maker": None,
+        "uploader": None,
+    }
+
+
+def fetch_spicy_with_id(track_id: str, lrclib_lines: list[dict] = None) -> tuple:
     api_key = get_spicy_api_key()
     if track_id and api_key:
         url = f"{config.BASE_URL}/v1/lyrics/{track_id}"
@@ -124,14 +205,58 @@ def fetch_spicy_with_id(track_id: str, lrclib_lines: list[dict] = None) -> tuple
                 return [], None
             if lines:
                 raw_src = body.get("source") or body.get("Source") or "Apple Music"
-                source_label = f"Spicy ({raw_src})"
-                print(f"   ✨ Loaded {len(lines)} lines with {syl_count} exact syllables! ({raw_src})")
-                return lines, source_label
+                raw_src_clean = str(raw_src).strip()
+                raw_lower = raw_src_clean.lower()
+                if raw_lower in ("spicy_lyrics", "spicylyrics", "community", "community sync"):
+                    provider_id = "community"
+                    provider_label = "Community lyrics"
+                elif "apple" in raw_lower:
+                    provider_id = "apple_music"
+                    provider_label = "Apple Music"
+                elif "spotify" in raw_lower:
+                    provider_id = "spotify"
+                    provider_label = "Spotify"
+                else:
+                    provider_id = raw_lower.replace(" ", "_")
+                    provider_label = raw_src_clean
+
+                source_label = f"Spicy ({raw_src_clean})"
+
+                songwriters_raw = (
+                    body.get("SongWriters") or body.get("songWriters") or
+                    body.get("songwriters") or body.get("Songwriters") or []
+                )
+                songwriters = [
+                    str(w).strip() for w in songwriters_raw
+                    if isinstance(w, (str, int, float)) and str(w).strip()
+                ] if isinstance(songwriters_raw, list) else []
+
+                upload_attrib = (
+                    body.get("UploadAttribution") or body.get("uploadAttribution") or
+                    body.get("upload_attribution") or {}
+                )
+                if not isinstance(upload_attrib, dict):
+                    upload_attrib = {}
+
+                maker = _clean_user_credit(upload_attrib.get("Maker") or upload_attrib.get("maker"))
+                uploader = _clean_user_credit(upload_attrib.get("Uploader") or upload_attrib.get("uploader"))
+
+                attribution = {
+                    "provider": provider_id,
+                    "provider_label": provider_label,
+                    "raw_source": raw_src_clean,
+                    "songwriters": songwriters,
+                    "maker": maker,
+                    "uploader": uploader,
+                }
+
+                print(f"   ✨ Loaded {len(lines)} lines with {syl_count} exact syllables! ({raw_src_clean})")
+                return lines, source_label, attribution
         elif res and res.status_code == 404:
             print(f"   ℹ️ Spicy Lyrics has no synced syllables for Spotify ID {track_id} (HTTP 404).")
         elif res and res.status_code in (401, 403):
             print("   ⚠️ Spicy Lyrics rejected the API key (HTTP %s). Check SPICY_API_KEY." % res.status_code)
-    return [], None
+    return [], None, None
 
 
 # A repeated chorus legitimately reappears many times, but never twice at the same
@@ -181,7 +306,8 @@ def _count_syllables(lines: list[dict]) -> int:
 def _build_diagnostics(source: str, cache: str, lines: list[dict],
                        syllables: int | None = None, track_id: str | None = None,
                        album: str = "", metadata_source: str = "smtc",
-                       ttml: str = "", ttml_match: str = "", resolve: str = "") -> dict:
+                       ttml: str = "", ttml_match: str = "", resolve: str = "",
+                       attribution: dict | None = None) -> dict:
     """
     Small, user-facing report of how this track's lyrics were obtained. Surfaced
     in the UI so a fallback to line-synced lyrics is explainable without stdout.
@@ -217,6 +343,7 @@ def _build_diagnostics(source: str, cache: str, lines: list[dict],
         # Empty whenever Spicy supplied the lyrics, so a healthy report carries
         # no extra row — the UI only renders this one when it is set.
         "resolve": resolve,
+        "attribution": attribution or _build_fallback_attribution(source, ttml=ttml),
     }
 
 
@@ -254,12 +381,22 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
         lines = local["lines"]
         syl = _count_syllables(lines)
         source = f"Local TTML ({local['name']})"
+        local_attr = {
+            "provider": "local",
+            "provider_label": "Local TTML",
+            "raw_source": "Local TTML",
+            "songwriters": local.get("songwriters") or [],
+            "maker": None,
+            "uploader": None,
+            "file": local.get("name"),
+        }
         print(f"📁 [Local TTML] '{c_title}' <- {local['name']} "
               f"({len(lines)} lines, {syl} syllables, {local['kind']})")
         return lines, source, None, _build_diagnostics(
             source, "local", lines, syl, None, album=album or "",
             metadata_source=metadata_source,
-            ttml=local["file"], ttml_match=local["kind"])
+            ttml=local["file"], ttml_match=local["kind"],
+            attribution=local_attr)
 
     cached_payload = CACHE.get_lyrics(lyrics_cache_key, PARSER_VERSION)
     if cached_payload and _lines_look_corrupt(cached_payload.get("lines")):
@@ -282,9 +419,11 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
         cached_lines = cached_payload.get("lines", [])
         cached_source = cached_payload.get("source", "Cached")
         cached_track_id = cached_payload.get("track_id")
+        cached_attribution = cached_payload.get("attribution")
         diag = _build_diagnostics(
             cached_source, "hit", cached_lines,
-            syllables=cached_payload.get("syllables"), track_id=cached_track_id
+            syllables=cached_payload.get("syllables"), track_id=cached_track_id,
+            attribution=cached_attribution
         )
         return cached_lines, cached_source, cached_track_id, diag
 
@@ -317,8 +456,13 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
 
     track_id, spicy = spicy_future.result()
     lines = source = None
+    attribution = None
     if spicy:
-        lines, source = spicy
+        if len(spicy) >= 3:
+            lines, source, attribution = spicy[0], spicy[1], spicy[2]
+        elif len(spicy) == 2:
+            lines, source = spicy[0], spicy[1]
+            attribution = _build_fallback_attribution(source)
 
     # Why syllable-synced lyrics were skipped, named for the resolve report. The
     # three ways this pipeline loses them look identical from the outside — the
@@ -343,26 +487,41 @@ def fetch_lyrics(title: str, artist: str, duration_ms: float | None = None,
                 "source": source,
                 "lines": lines,
                 "track_id": track_id,
-                "syllables": syl_count
+                "syllables": syl_count,
+                "attribution": attribution
             })
             return lines, source, track_id, _build_diagnostics(
                 source, "miss", lines, syl_count, track_id,
-                album=album, metadata_source=metadata_source)
+                album=album, metadata_source=metadata_source,
+                attribution=attribution)
 
     print("⚠️ Falling back to LRCLIB (Line-only timing)...")
     lrclib_lines = lrclib_future.result()
     if lrclib_lines:
+        lrclib_attr = {
+            "provider": "lrclib",
+            "provider_label": "LRCLIB",
+            "raw_source": "LRCLIB",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+            "url": "https://lrclib.net",
+        }
         CACHE.set_lyrics(lyrics_cache_key, {
             "parser_version": PARSER_VERSION,
             "source": "LRCLIB",
             "lines": lrclib_lines,
             "track_id": track_id,
-            "syllables": 0
+            "syllables": 0,
+            "attribution": lrclib_attr
         })
         return lrclib_lines, "LRCLIB", track_id, _build_diagnostics(
             "LRCLIB", "miss", lrclib_lines, 0, track_id,
-            album=album, metadata_source=metadata_source, resolve=resolve_note)
+            album=album, metadata_source=metadata_source, resolve=resolve_note,
+            attribution=lrclib_attr)
 
+    none_attr = _build_fallback_attribution("None")
     return [], "None", track_id, _build_diagnostics(
         "None", "miss", [], 0, track_id,
-        album=album, metadata_source=metadata_source, resolve=resolve_note)
+        album=album, metadata_source=metadata_source, resolve=resolve_note,
+        attribution=none_attr)

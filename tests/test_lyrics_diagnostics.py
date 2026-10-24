@@ -501,5 +501,68 @@ class MetadataSourceDiagnosticsTest(unittest.TestCase):
         self.assertEqual(diag["metadata"], "smtc")
 
 
+class AttributionTest(unittest.TestCase):
+    def test_clean_user_credit_formatting(self):
+        from core.lyrics import _clean_user_credit
+        user = _clean_user_credit({
+            "id": "123456",
+            "username": "kevin",
+            "avatar": "https://cdn.discordapp.com/avatars/123/abc.png",
+            "hasProfileBanner": True
+        })
+        self.assertEqual(user["id"], "123456")
+        self.assertEqual(user["username"], "kevin")
+        self.assertEqual(user["url"], "https://spicylyrics.org/uid/123456")
+        self.assertTrue(user["hasProfileBanner"])
+
+    def test_clean_user_credit_explicit_url(self):
+        from core.lyrics import _clean_user_credit
+        user = _clean_user_credit({
+            "id": "789",
+            "username": "maker_user",
+            "url": "https://spicylyrics.org/uid/custom"
+        })
+        self.assertEqual(user["url"], "https://spicylyrics.org/uid/custom")
+
+    def test_clean_user_credit_invalid(self):
+        from core.lyrics import _clean_user_credit
+        self.assertIsNone(_clean_user_credit(None))
+        self.assertIsNone(_clean_user_credit({}))
+        self.assertIsNone(_clean_user_credit("not a dict"))
+
+    def test_fallback_attributions(self):
+        from core.lyrics import _build_fallback_attribution
+        lrclib_attr = _build_fallback_attribution("LRCLIB")
+        self.assertEqual(lrclib_attr["provider"], "lrclib")
+        self.assertEqual(lrclib_attr["provider_label"], "LRCLIB")
+
+        apple_attr = _build_fallback_attribution("Spicy (Apple Music)")
+        self.assertEqual(apple_attr["provider"], "apple_music")
+        self.assertEqual(apple_attr["provider_label"], "Apple Music")
+
+        spotify_attr = _build_fallback_attribution("Spicy (Spotify)")
+        self.assertEqual(spotify_attr["provider"], "spotify")
+        self.assertEqual(spotify_attr["provider_label"], "Spotify")
+
+        community_attr = _build_fallback_attribution("Spicy (spicy_lyrics)")
+        self.assertEqual(community_attr["provider"], "community")
+        self.assertEqual(community_attr["provider_label"], "Community lyrics")
+
+    def test_diagnostics_carries_attribution(self):
+        custom_attr = {
+            "provider": "community",
+            "provider_label": "Community lyrics",
+            "raw_source": "spicy_lyrics",
+            "songwriters": ["Kevin R. Parker"],
+            "maker": {"id": "1", "username": "maker1", "url": "https://spicylyrics.org/uid/1", "avatar": ""},
+            "uploader": {"id": "2", "username": "up1", "url": "https://spicylyrics.org/uid/2", "avatar": ""}
+        }
+        diag = _build_diagnostics("Spicy (spicy_lyrics)", "miss", [], 0, attribution=custom_attr)
+        self.assertIn("attribution", diag)
+        self.assertEqual(diag["attribution"]["songwriters"], ["Kevin R. Parker"])
+        self.assertEqual(diag["attribution"]["maker"]["username"], "maker1")
+        self.assertEqual(diag["attribution"]["uploader"]["username"], "up1")
+
+
 if __name__ == "__main__":
     unittest.main()

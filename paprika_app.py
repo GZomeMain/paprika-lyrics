@@ -204,6 +204,21 @@ class WindowApi:
         self._hover_probe_stop = threading.Event()
         self._hover_probe_inside = None
 
+    def open_external_url(self, url: str) -> bool:
+        """Opens an external URL in the default web browser."""
+        import webbrowser
+        if not url or not isinstance(url, str):
+            return False
+        clean_url = url.strip()
+        if not clean_url.startswith(("http://", "https://", "mailto:")):
+            return False
+        try:
+            webbrowser.open(clean_url)
+            return True
+        except Exception as exc:
+            print(f"[Paprika Lyrics] Failed to open external URL {clean_url}: {exc}")
+            return False
+
     def close(self):
         self._record_window_geometry()
         SHUTDOWN_SIGNAL.set()

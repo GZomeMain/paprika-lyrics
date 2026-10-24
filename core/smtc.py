@@ -909,6 +909,8 @@ class SmtcBridge:
                             f"coherence {beat_plan['stats']['coherence']}"
                         )
 
+                    attr_dict = diagnostics.get("attribution") or {}
+                    attr_json = json.dumps(attr_dict)
                     window.evaluate_js(
                         f"window.loadLyrics("
                         f"{lines_json}, "
@@ -921,6 +923,7 @@ class SmtcBridge:
                         f"{json.dumps(beat_plan)}, "
                         f"{json.dumps(stored_offset is None)});"
                     )
+                    window.evaluate_js(f"window.setAttribution({attr_json});")
                     # Explains in the UI why these lyrics are syllable- or line-synced.
                     window.evaluate_js(f"window.setDiagnostics({json.dumps(diagnostics)});")
                     # Feeds the split-layout transport (elapsed / total / progress bar).
@@ -1064,6 +1067,8 @@ class SmtcBridge:
                     seed_ms = (reading.position_ms
                                if reading is not None and reading.position_ms is not None
                                else 0)
+                    attr_dict = diagnostics.get("attribution") or {}
+                    attr_json = json.dumps(attr_dict)
                     window.evaluate_js(
                         f"window.loadLyrics({lines_json}, {json.dumps(state.title)}, "
                         f"{json.dumps(state.artist)}, {json.dumps(source)}, "
@@ -1071,6 +1076,7 @@ class SmtcBridge:
                         f"{saved_offset}, null, "
                         f"{json.dumps(stored_offset is None)});"
                     )
+                    window.evaluate_js(f"window.setAttribution({attr_json});")
                     window.evaluate_js(f"window.setDiagnostics({json.dumps(diagnostics)});")
                     # VLC reports its own position and length, so its timeline is
                     # live; the length can still be missing on a stream.
