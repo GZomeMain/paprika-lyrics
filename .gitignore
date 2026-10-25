@@ -46,3 +46,4 @@ spotify_cache.json*
 spotify_cache.tmp
 *.tmp
 .agents/
+dist-onefile/

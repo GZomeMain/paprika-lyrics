@@ -1488,6 +1488,23 @@ function syncSettingsPanel() {
 
   updateLatencyUI();
   renderDiagnostics();
+
+  const cornerAttrOn = Settings.get('cornerAttribution', '1') !== '0';
+  setValueText(document.getElementById('qp-corner-attr-state'), cornerAttrOn ? 'On' : 'Off');
+  const creditsPill = document.getElementById('sp-credits-corner-pill');
+  if (creditsPill) setValueText(creditsPill, cornerAttrOn ? 'On' : 'Off');
+  const creditsCornerState = document.getElementById('qp-credits-corner-attr-state');
+  if (creditsCornerState) setValueText(creditsCornerState, cornerAttrOn ? 'On' : 'Off');
+
+  const trackCardOn = Settings.get('showTrackCard', '1') !== '0';
+  setValueText(document.getElementById('qp-track-card-state'), trackCardOn ? 'On' : 'Off');
+
+  const quickControlsOn = Settings.get('showQuickControls', '1') !== '0';
+  setValueText(document.getElementById('qp-quick-controls-state'), quickControlsOn ? 'On' : 'Off');
+
+  const countdownChipOn = Settings.get('showCountdownChip', '1') !== '0';
+  setValueText(document.getElementById('qp-countdown-chip-state'), countdownChipOn ? 'On' : 'Off');
+
   syncSettingsGroupSummaries();
   if (window.ProfileManager && typeof window.ProfileManager.renderSidebar === 'function') {
     window.ProfileManager.renderSidebar();
@@ -3682,7 +3699,21 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
   const rowEl = document.createElement('div');
   rowEl.className = 'lyrics-credits-attribution';
 
-  if (provider === 'community') {
+  const isCommunityOrHasSyncers = (
+    provider === 'community' ||
+    provider === 'spicy' ||
+    provider === 'spicy_lyrics' ||
+    Boolean(maker || uploader)
+  );
+
+  const isSameUser = Boolean(
+    maker && uploader && (
+      (maker.id && uploader.id && String(maker.id).trim() === String(uploader.id).trim()) ||
+      (maker.username && uploader.username && String(maker.username).trim().toLowerCase() === String(uploader.username).trim().toLowerCase())
+    )
+  );
+
+  if (isCommunityOrHasSyncers) {
     const provSpan = document.createElement('span');
     provSpan.className = 'lyrics-credit-provider';
     provSpan.textContent = providerLabel || 'Community lyrics';
@@ -3697,11 +3728,12 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
       const makerItem = document.createElement('span');
       makerItem.className = 'lyrics-credit-item';
       const uname = formatCreditUsername(maker.username || maker.id);
-      makerItem.innerHTML = `Made by <a class="lyrics-credit-link" href="${escapeHtml(maker.url || ('https://spicylyrics.org/uid/' + maker.id))}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${maker.avatar ? `<img class="lyrics-credit-avatar" src="${escapeHtml(maker.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="lyrics-credit-username">${escapeHtml(uname)}</span></a>`;
+      const mUrl = maker.url || (maker.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(maker.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(maker.username)));
+      makerItem.innerHTML = `Made by <a class="lyrics-credit-link" href="${escapeHtml(mUrl)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;" title="${escapeHtml(uname)}">${maker.avatar ? `<img class="lyrics-credit-avatar" src="${escapeHtml(maker.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="lyrics-credit-username">${escapeHtml(uname)}</span></a>`;
       rowEl.appendChild(makerItem);
     }
 
-    if (uploader && (uploader.username || uploader.id) && (!maker || (uploader.username !== maker.username && uploader.id !== maker.id))) {
+    if (uploader && (uploader.username || uploader.id) && !isSameUser) {
       const dot = document.createElement('span');
       dot.className = 'lyrics-credit-dot';
       dot.textContent = '·';
@@ -3710,7 +3742,8 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
       const uploaderItem = document.createElement('span');
       uploaderItem.className = 'lyrics-credit-item';
       const uname = formatCreditUsername(uploader.username || uploader.id);
-      uploaderItem.innerHTML = `Uploaded by <a class="lyrics-credit-link" href="${escapeHtml(uploader.url || ('https://spicylyrics.org/uid/' + uploader.id))}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${uploader.avatar ? `<img class="lyrics-credit-avatar" src="${escapeHtml(uploader.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="lyrics-credit-username">${escapeHtml(uname)}</span></a>`;
+      const uUrl = uploader.url || (uploader.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(uploader.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(uploader.username)));
+      uploaderItem.innerHTML = `Uploaded by <a class="lyrics-credit-link" href="${escapeHtml(uUrl)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;" title="${escapeHtml(uname)}">${uploader.avatar ? `<img class="lyrics-credit-avatar" src="${escapeHtml(uploader.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="lyrics-credit-username">${escapeHtml(uname)}</span></a>`;
       rowEl.appendChild(uploaderItem);
     }
   } else if (provider === 'apple_music') {
@@ -3786,9 +3819,154 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
   containerEl.appendChild(creditsEl);
 }
 
+function renderCornerAttribution() {
+  const hud = document.getElementById('hud-attribution');
+  if (!hud) return;
+
+  const isEnabled = Settings.get('cornerAttribution', '1') !== '0';
+  const hasLyrics = Array.isArray(lyrics) && lyrics.length > 0;
+
+  if (!isEnabled || !hasLyrics) {
+    hud.style.display = 'none';
+    hud.innerHTML = '';
+    return;
+  }
+
+  const attr = currentAttribution || (diagnostics && diagnostics.attribution) || null;
+  const attrObj = (attr && typeof attr === 'object') ? attr : {};
+  const maker = (attrObj.maker && typeof attrObj.maker === 'object') ? attrObj.maker : null;
+  const uploader = (attrObj.uploader && typeof attrObj.uploader === 'object') ? attrObj.uploader : null;
+
+  let provider = attrObj.provider;
+  if (!provider) {
+    const s = (currentLyricsSource || '').toLowerCase();
+    if (s.includes('apple')) provider = 'apple_music';
+    else if (s.includes('spotify')) provider = 'spotify';
+    else if (s.includes('lrclib')) provider = 'lrclib';
+    else if (s.includes('local')) provider = 'local';
+    else if (s.includes('spicy')) provider = 'community';
+    else provider = 'community';
+  }
+  const providerLabel = attrObj.provider_label || (
+    provider === 'apple_music' ? 'Apple Music' :
+    provider === 'spotify' ? 'Spotify' :
+    provider === 'lrclib' ? 'LRCLIB' :
+    provider === 'local' ? 'Local lyrics' : 'Community lyrics'
+  );
+
+  const isCommunityOrHasSyncers = (
+    provider === 'community' ||
+    provider === 'spicy' ||
+    provider === 'spicy_lyrics' ||
+    Boolean(maker || uploader)
+  );
+
+  const isSameUser = Boolean(
+    maker && uploader && (
+      (maker.id && uploader.id && String(maker.id).trim() === String(uploader.id).trim()) ||
+      (maker.username && uploader.username && String(maker.username).trim().toLowerCase() === String(uploader.username).trim().toLowerCase())
+    )
+  );
+
+  let html = '';
+
+  if (isCommunityOrHasSyncers) {
+    html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Community lyrics')}</span>`;
+    if (maker && (maker.username || maker.id)) {
+      const mUrl = maker.url || (maker.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(maker.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(maker.username)));
+      const mName = formatCreditUsername(maker.username || maker.id);
+      html += `<span class="hud-attr-dot">·</span>`;
+      html += `<span class="hud-attr-role">Made by</span>`;
+      html += `<a class="hud-attr-user" href="${escapeHtml(mUrl)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;" title="${escapeHtml(mName)}">${maker.avatar ? `<img class="hud-attr-avatar" src="${escapeHtml(maker.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="hud-attr-name">${escapeHtml(mName)}</span></a>`;
+    }
+    if (uploader && (uploader.username || uploader.id) && !isSameUser) {
+      const uUrl = uploader.url || (uploader.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(uploader.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(uploader.username)));
+      const uName = formatCreditUsername(uploader.username || uploader.id);
+      html += `<span class="hud-attr-dot">·</span>`;
+      html += `<span class="hud-attr-role">Uploaded by</span>`;
+      html += `<a class="hud-attr-user" href="${escapeHtml(uUrl)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;" title="${escapeHtml(uName)}">${uploader.avatar ? `<img class="hud-attr-avatar" src="${escapeHtml(uploader.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="hud-attr-name">${escapeHtml(uName)}</span></a>`;
+    }
+  } else if (provider === 'apple_music') {
+    html += `<span class="hud-attr-prov">Apple Music</span>`;
+  } else if (provider === 'spotify') {
+    html += `<span class="hud-attr-prov">Spotify</span>`;
+  } else if (provider === 'lrclib') {
+    html += `<a class="hud-attr-link" href="https://lrclib.net" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;"><span class="hud-attr-prov">LRCLIB</span></a>`;
+  } else if (provider === 'local') {
+    html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Local lyrics')}</span>`;
+  } else {
+    html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Spicy Lyrics')}</span>`;
+  }
+
+  hud.innerHTML = html;
+  hud.style.display = 'inline-flex';
+}
+window.renderCornerAttribution = renderCornerAttribution;
+
+function applyCornerAttributionPreference() {
+  const enabled = Settings.get('cornerAttribution', '1') !== '0';
+  document.body.classList.toggle('hide-corner-attribution', !enabled);
+  renderCornerAttribution();
+  syncSettingsPanel();
+}
+
+function toggleCornerAttribution() {
+  const current = Settings.get('cornerAttribution', '1') !== '0';
+  Settings.set('cornerAttribution', current ? '0' : '1');
+  applyCornerAttributionPreference();
+}
+window.toggleCornerAttribution = toggleCornerAttribution;
+
+function applyTrackCardVisibility() {
+  const enabled = Settings.get('showTrackCard', '1') !== '0';
+  document.body.classList.toggle('hide-track-card', !enabled);
+  syncLyricsClearance();
+  syncSettingsPanel();
+}
+
+function toggleTrackCardVisibility() {
+  const current = Settings.get('showTrackCard', '1') !== '0';
+  Settings.set('showTrackCard', current ? '0' : '1');
+  applyTrackCardVisibility();
+}
+window.toggleTrackCardVisibility = toggleTrackCardVisibility;
+
+function applyQuickControlsVisibility() {
+  const enabled = Settings.get('showQuickControls', '1') !== '0';
+  document.body.classList.toggle('hide-quick-controls', !enabled);
+  if (!enabled && typeof window.concealSidebar === 'function') {
+    window.concealSidebar();
+  }
+  syncSettingsPanel();
+}
+
+function toggleQuickControlsVisibility() {
+  const current = Settings.get('showQuickControls', '1') !== '0';
+  Settings.set('showQuickControls', current ? '0' : '1');
+  applyQuickControlsVisibility();
+}
+window.toggleQuickControlsVisibility = toggleQuickControlsVisibility;
+
+function applyCountdownChipVisibility() {
+  const enabled = Settings.get('showCountdownChip', '1') !== '0';
+  document.body.classList.toggle('hide-gap-chip', !enabled);
+  if (!enabled && gapChip) {
+    closeGapChip();
+  }
+  syncSettingsPanel();
+}
+
+function toggleCountdownChipVisibility() {
+  const current = Settings.get('showCountdownChip', '1') !== '0';
+  Settings.set('showCountdownChip', current ? '0' : '1');
+  applyCountdownChipVisibility();
+}
+window.toggleCountdownChipVisibility = toggleCountdownChipVisibility;
+
 window.setAttribution = function(attr) {
   currentAttribution = (attr && typeof attr === 'object') ? attr : null;
   renderCreditsInSettings();
+  renderCornerAttribution();
   if (container && lyrics && lyrics.length > 0) {
     appendLyricsCredits(container, currentAttribution, currentLyricsSource);
   }
@@ -3799,6 +3977,7 @@ window.setDiagnostics = function(diag) {
   if (diagnostics && diagnostics.attribution) {
     currentAttribution = diagnostics.attribution;
     renderCreditsInSettings();
+    renderCornerAttribution();
   }
   renderDiagnostics();
 };
@@ -4366,6 +4545,7 @@ let settingsLastFocus = null;
 // =========================================================
 const SP_GROUP_SUMMARY = {
   window: () => settingsGroupStateText('qp-layout-state'),
+  'interface-elements': () => (Settings.get('cornerAttribution', '1') !== '0' && Settings.get('showTrackCard', '1') !== '0' && Settings.get('showQuickControls', '1') !== '0' && Settings.get('showCountdownChip', '1') !== '0') ? 'All On' : 'Custom',
   sync: () => settingsGroupStateText('qp-latency'),
   lyrics: () => settingsGroupStateText('qp-linesync-state'),
   fonts: () => settingsGroupStateText('qp-font-state'),
@@ -5010,6 +5190,10 @@ applyMotionPreference();
 applyLayoutState();
 applyCardPosition();
 applyAlwaysOnTopWhenReady();
+applyCornerAttributionPreference();
+applyTrackCardVisibility();
+applyQuickControlsVisibility();
+applyCountdownChipVisibility();
 initFloatArt();
 buildDustField();
 applyAmbientMode();
@@ -5435,7 +5619,9 @@ function initLatencyRail() {
   }, { capture: true, passive: true });
 
   const reveal = () => {
+    if (Settings.get('showQuickControls', '1') === '0') return;
     clearTimeout(hideTimer);
+    hideTimer = null;
     clearTimeout(revealTimer);
     revealTimer = null;
     document.body.classList.add('latency-rail-hot');
@@ -5451,29 +5637,55 @@ function initLatencyRail() {
     if (window.sidebarPinned || isDraggingSlider || isHoldingStep) return;
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-      if (isDraggingSlider || isHoldingStep) return;
+      if (window.sidebarPinned || isDraggingSlider || isHoldingStep) return;
       document.body.classList.remove('latency-rail-hot');
-    }, 110);
+      hideTimer = null;
+    }, 280);
   };
 
-  // Trigger if cursor is within 8px of the actual right window border (avoid top window control buttons and resize corners)
+  // Trigger if cursor is within 12px of the actual right window border and vertically near the bar (+/- 20px)
   const pointerAtEdge = (e) => {
-    if (miniMode || document.body.classList.contains('resizing') || document.body.classList.contains('settings-open')) return false;
-    return e.clientX >= window.innerWidth - 8 && e.clientX <= window.innerWidth && e.clientY >= 36 && e.clientY <= window.innerHeight - 22;
+    if (!e || miniMode || document.body.classList.contains('resizing') || document.body.classList.contains('settings-open')) return false;
+    if (Settings.get('showQuickControls', '1') === '0') return false;
+    const atEdgeX = e.clientX >= (window.innerWidth - 12);
+    if (!atEdgeX) return false;
+
+    const rect = rail ? rail.getBoundingClientRect() : null;
+    const pad = 20;
+    const topBound = Math.max(36, (rect && rect.height > 0) ? (rect.top - pad) : (window.innerHeight * 0.5 - 160));
+    const bottomBound = Math.min(window.innerHeight - 22, (rect && rect.height > 0) ? (rect.bottom + pad) : (window.innerHeight * 0.5 + 160));
+    return e.clientY >= topBound && e.clientY <= bottomBound;
+  };
+  window._pointerAtEdge = pointerAtEdge;
+
+  // Active hover region when the bar is popped open: includes the margin gap between rail and window edge
+  const isNearRail = (e) => {
+    if (!e || Settings.get('showQuickControls', '1') === '0') return false;
+    const rect = rail ? rail.getBoundingClientRect() : null;
+    const pad = 20;
+    const topBound = Math.max(36, (rect && rect.height > 0) ? (rect.top - pad) : (window.innerHeight * 0.5 - 160));
+    const bottomBound = Math.min(window.innerHeight - 22, (rect && rect.height > 0) ? (rect.bottom + pad) : (window.innerHeight * 0.5 + 160));
+    
+    // The rail is 52px wide at right: 14px, so its left edge at rest is window.innerWidth - 66.
+    // With pad = 20, anything at or to the right of window.innerWidth - 86 is within the rail's zone.
+    const leftBound = (rect && rect.left > 0) ? Math.min(rect.left - pad, window.innerWidth - 86) : (window.innerWidth - 86);
+    return e.clientX >= leftBound && e.clientY >= topBound && e.clientY <= bottomBound;
   };
 
   window.addEventListener('mousemove', (e) => {
     const isOpen = document.body.classList.contains('latency-rail-hot');
+    const isHoveringRail = rail && typeof rail.matches === 'function' ? rail.matches(':hover') : false;
     if (isOpen) {
-      if (rail.matches(':hover') || pointerAtEdge(e) || isDraggingSlider || isHoldingStep) {
+      if (isHoveringRail || isNearRail(e) || pointerAtEdge(e) || isDraggingSlider || isHoldingStep) {
         clearTimeout(hideTimer);
+        hideTimer = null;
       } else {
         conceal();
       }
     } else {
       if (pointerAtEdge(e)) {
         if (!revealTimer) {
-          revealTimer = setTimeout(reveal, 100);
+          revealTimer = setTimeout(reveal, 60);
         }
       } else {
         if (revealTimer) {
@@ -5485,7 +5697,17 @@ function initLatencyRail() {
   }, { passive: true });
 
   rail.addEventListener('mouseenter', reveal);
-  rail.addEventListener('mouseleave', conceal);
+  rail.addEventListener('mouseleave', (e) => {
+    if (window.sidebarPinned || isDraggingSlider || isHoldingStep) return;
+    if (e && (isNearRail(e) || pointerAtEdge(e))) return;
+    conceal();
+  });
+
+  document.addEventListener('mouseleave', () => {
+    if (!window.sidebarPinned && !isDraggingSlider && !isHoldingStep) {
+      conceal();
+    }
+  });
 
   window.addEventListener('blur', () => {
     if (isDraggingSlider) {
@@ -5514,6 +5736,7 @@ function initLatencyRail() {
     hideTip();
   };
   window.toggleSidebarPin = () => {
+    if (Settings.get('showQuickControls', '1') === '0') return;
     window.sidebarPinned = !window.sidebarPinned;
     rail.classList.toggle('pinned', window.sidebarPinned);
     const btn = document.getElementById('sidebar-btn-pin');
@@ -6499,6 +6722,8 @@ window.showLoading = function(title, artist) {
   currentScrollY = 0;
   targetScrollY = 0;
   hideGapIndicator();
+  currentAttribution = null;
+  renderCornerAttribution();
 
   if (container) {
     container.scrollTop = 0;
@@ -7425,6 +7650,7 @@ function hideGapIndicator() {
 // Inserts the chip into the lyric flow, opening the row it occupies rather than
 // dropping into it, and without disturbing a chip that is already in place.
 function ensureGapChip(nextLineElement) {
+  if (Settings.get('showCountdownChip', '1') === '0') return null;
   // Adopt whatever chip is already in the tree rather than building another one:
   // at most one chip can ever be mounted. A single frame of jitter that flipped
   // the show condition off and back on used to leave two chips stacked in the
@@ -7519,6 +7745,10 @@ function closeGapChip() {
 
 function updateGapIndicator(ms) {
   if (!container) return;
+  if (Settings.get('showCountdownChip', '1') === '0') {
+    if (gapChip) closeGapChip();
+    return;
+  }
 
   // A gliding seek sweeps the playhead across lyrics nobody is hearing, so a
   // break the sweep passes through is not a break anyone is waiting out: keep
@@ -7757,6 +7987,8 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
     currentAttribution = attribution;
   } else if (diagnostics && diagnostics.attribution) {
     currentAttribution = diagnostics.attribution;
+  } else {
+    currentAttribution = null;
   }
   renderCreditsInSettings();
   wakeRenderLoop();
@@ -7853,6 +8085,7 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
       box.appendChild(hint);
       container.appendChild(box);
       fadeInView();
+      renderCornerAttribution();
       return;
     }
 
@@ -8029,6 +8262,7 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
 
     // On-screen contribution & credit attribution at bottom of lyrics container (Section 6)
     appendLyricsCredits(container, currentAttribution, sourceName);
+    renderCornerAttribution();
 
     // Reported in Diagnostics so the pools can be verified per track.
     chorusCount = chorusLineCount;

@@ -270,6 +270,9 @@
 
     <div id="lyrics-container"></div>
 
+    <!-- Persistent Bottom-Right Corner Attribution Badge (Section 6) -->
+    <div class="hud-attribution" id="hud-attribution" data-no-drag aria-label="Lyrics Attribution" style="display: none;"></div>
+
     <!-- Split layout: art fixed on the left with its own transport, fullscreen only -->
     <aside class="track-side-panel" id="track-side-panel" aria-hidden="true">
       <div class="side-art-wrap">
@@ -595,6 +598,27 @@
                 always stays solid. With click-through on, <kbd
                 style="font-family:inherit;opacity:.6">Ctrl+Shift+M</kbd> hands the mouse back for a
                 few seconds so the window can still be moved.</p>
+            </section>
+
+            <section class="sp-group" id="qp-group-ui-visibility" data-group-name="Interface Elements">
+              <h2 class="sp-group-title">Interface Elements</h2>
+              <button class="qp-row qp-action" id="qp-toggle-corner-attr" onclick="toggleCornerAttribution()">
+                <span class="qp-label">Corner attribution</span>
+                <span class="qp-state" id="qp-corner-attr-state">On</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-toggle-track-card" onclick="toggleTrackCardVisibility()">
+                <span class="qp-label">Floating track card</span>
+                <span class="qp-state" id="qp-track-card-state">On</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-toggle-quick-controls" onclick="toggleQuickControlsVisibility()">
+                <span class="qp-label">Quick controls bar</span>
+                <span class="qp-state" id="qp-quick-controls-state">On</span>
+              </button>
+              <button class="qp-row qp-action" id="qp-toggle-countdown-chip" onclick="toggleCountdownChipVisibility()">
+                <span class="qp-label">Instrumental countdown chip</span>
+                <span class="qp-state" id="qp-countdown-chip-state">On</span>
+              </button>
+              <p class="sp-hint">Advanced display controls for a clean or distraction-free view. Disabling corner attribution only hides the bottom-right floating badge; full songwriter and source credits at the bottom of the lyrics scroll remain permanently visible.</p>
             </section>
           </div>
 
@@ -1110,8 +1134,13 @@
               </div>
               <div class="sp-credits-card" id="sp-credits-card">
                 <div class="sp-credits-head">
-                  <span class="sp-credits-tag">CURRENT TRACK</span>
-                  <span class="sp-credits-badge" id="sp-credits-provider-badge">Spicy Lyrics</span>
+                  <div class="sp-credits-head-meta">
+                    <span class="sp-credits-tag">CURRENT TRACK</span>
+                    <span class="sp-credits-badge" id="sp-credits-provider-badge">Spicy Lyrics</span>
+                  </div>
+                  <button type="button" class="sp-credits-pill-btn" id="sp-credits-corner-btn" onclick="toggleCornerAttribution()" title="Toggle bottom-right on-screen watermark">
+                    Corner badge: <strong class="sp-credits-corner-state" id="sp-credits-corner-pill">On</strong>
+                  </button>
                 </div>
                 <div class="qp-row qp-static" id="sp-credits-writers-row">
                   <span class="qp-label">Songwriters</span>
@@ -1125,6 +1154,10 @@
                   <span class="qp-label">Sync Uploader</span>
                   <span class="qp-value sp-credits-val" id="sp-credits-uploader">—</span>
                 </div>
+                <button type="button" class="qp-row qp-action sp-credits-toggle-row" id="qp-credits-corner-attr-toggle" onclick="toggleCornerAttribution()">
+                  <span class="qp-label">Corner watermark badge</span>
+                  <span class="qp-state" id="qp-credits-corner-attr-state">On</span>
+                </button>
                 <div class="sp-hint sp-credits-empty-hint" id="sp-credits-empty-hint" style="display: none;">No individual contributor metadata provided for this track.</div>
                 <div class="sp-credits-footer-links">
                   <p class="sp-hint">Lyrics and synchronized timings provided via <a href="https://developers.spicylyrics.org" class="sp-link" onclick="openExternalUrl(this.href); return false;">Spicy Lyrics API</a>, community contributors, Apple Music, Spotify, and LRCLIB.</p>
