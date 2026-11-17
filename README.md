@@ -81,6 +81,11 @@ Prebuilt binaries for 64-bit Windows are published under [**Releases**](https://
 > [!TIP]
 > **Windows SmartScreen Note:** Because releases are open-source and unsigned, Windows Defender SmartScreen might show a protective prompt on first run (*"Windows protected your PC"*). Click **More info → Run anyway** to launch.
 
+> [!WARNING]
+> **Spicy Lyrics API Notice:**
+> Syllable-level (word-by-word) lyrics from the Spicy Lyrics provider require a valid API key (`SPICY_API_KEY`), configurable in **Settings (<kbd>Ctrl</kbd> + <kbd>,</kbd>) → Lyrics** or via your environment.
+> For obtaining a Spicy Lyrics API key, go to: `---` *(Application is currently still under review. In the meantime, Paprika works completely out-of-the-box using line-synced lyrics via LRCLIB, and fully supports custom syllable-synced `.ttml` files placed in the `ttml/` folder).*
+
 ---
 
 ## 🚀 Quick Start
@@ -202,7 +207,7 @@ PL_ONEFILE=1 python -m PyInstaller PaprikaLyrics.spec --noconfirm --distpath dis
 
 | Issue | Cause & Recommended Resolution |
 | :--- | :--- |
-| **Lyrics show line-by-line rather than word-by-word** | Word-by-word (syllable-level) TTML is not yet community-synchronized for this track. Paprika smoothly falls back to line-synced lyrics from LRCLIB. |
+| **Lyrics show line-by-line rather than word-by-word** | Word-by-word (syllable-level) lyrics require a Spicy Lyrics API key (or a local file in `ttml/`). Because public API applications are currently still under review, Paprika automatically and smoothly falls back to line-synced lyrics from LRCLIB. |
 | **Lyrics are slightly ahead or behind the audio** | Press <kbd>Ctrl</kbd> + <kbd>[</kbd> or <kbd>Ctrl</kbd> + <kbd>]</kbd> to nudge timing in ±50ms steps. Paprika remembers your exact adjustment for that song forever. |
 | **Cannot click, drag, or interact with the window** | The overlay is in Click-Through mode. Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> to restore mouse focus. |
 | **Timeline counter shows `--:--`** | Some web browsers or players do not report duration until playback begins. As soon as you hit play, the total time will appear. |
