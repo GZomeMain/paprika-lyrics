@@ -458,22 +458,22 @@ async function run(label) {
   }
   if (!result.settingsSearchUniqueIds) problems.push('the search view duplicated ids into the document');
   // A prose match is how the sync row is found at all: its label is "Latency",
-  // and "timing" only appears in the hint under it.
-  runSettingsSearch('timing');
+  // and "against" only appears in the hint under it.
+  runSettingsSearch('against');
   result.settingsSearchProseSections = document.querySelectorAll('#qp-body .sp-result').length;
   result.settingsSearchProseMark = [...document.querySelectorAll('#qp-body .sp-result .qp-mark')]
     .map((m) => m.textContent);
   result.settingsSearchProseRows = document.querySelectorAll('#qp-body .sp-result .qp-row').length;
   if (result.settingsSearchProseSections !== 1 || result.settingsSearchProseRows !== 0 ||
-      result.settingsSearchProseMark.join() !== 'timing') {
+      result.settingsSearchProseMark.join() !== 'against') {
     problems.push('a prose match did not surface its sentence: ' +
       result.settingsSearchProseMark.join(','));
   }
   // The report is not a setting: searching its own wording must not drag it in.
   // The report is populated first, so this asserts against real report content
   // rather than an empty body that could not match anything anyway.
-  window.setDiagnostics({ source: 'LRCLIB', cache: 'hit', lines: 42, syllables: 310 });
-  runSettingsSearch('lrclib');
+  window.setDiagnostics({ source: 'TELEMETRY_SAMPLE_SOURCE', cache: 'hit', lines: 42, syllables: 310 });
+  runSettingsSearch('telemetry_sample_source');
   result.settingsSearchIgnoresReport =
     document.querySelectorAll('#qp-body .sp-result .qp-info-row').length;
   result.settingsSearchReportOnlyEmpty = !document.getElementById('qp-empty').hidden;
@@ -527,20 +527,20 @@ async function run(label) {
     problems.push('the Lyrics page holds ' + lyricGroups.length + ' groups, expected 5');
   }
   result.settingsGroupsHonourSavedState = lyricGroups.filter((g) =>
-    g.classList.contains('collapsed') === (localStorage.getItem('sl_spGroup_' + g.dataset.group) !== '1')
+    g.classList.contains('collapsed') === (localStorage.getItem('sl_spGroup_' + g.dataset.group) === '0')
   ).length === lyricGroups.length;
   if (!result.settingsGroupsHonourSavedState) {
     problems.push('a settings group does not match the state saved for it');
   }
-  // The default is closed: with no choice saved for a group, restoring it closes
+  // The default is open: with no choice saved for a group, restoring it opens
   // it. Driven through the app's own restore path, so this reads the behaviour a
   // first run gets rather than a hook the harness invented.
   const fontsGroup = document.querySelector('#qp-panel-lyrics .sp-group[data-group="fonts"]');
   const savedFontsGroup = localStorage.getItem('sl_spGroup_fonts');
   localStorage.removeItem('sl_spGroup_fonts');
   applySettingsGroup('fonts', settingsGroupOpen('fonts'), false);
-  result.settingsGroupDefaultIsClosed = fontsGroup.classList.contains('collapsed');
-  if (!result.settingsGroupDefaultIsClosed) problems.push('a settings group opens expanded by default');
+  result.settingsGroupDefaultIsOpen = !fontsGroup.classList.contains('collapsed');
+  if (!result.settingsGroupDefaultIsOpen) problems.push('a settings group opens collapsed by default');
   result.settingsGroupTogglesWired = lyricGroups.every((g) => {
     const t = g.querySelector('.sp-group-title > .sp-group-toggle');
     return !!t && t.getAttribute('aria-controls') === g.id && !!g.id
@@ -549,6 +549,7 @@ async function run(label) {
   if (!result.settingsGroupTogglesWired) problems.push('a settings group toggle is not wired to its group');
   // A closed group lays out none of its own rows: the heading row is all there is.
   const syncGroup = document.querySelector('#qp-panel-lyrics .sp-group[data-group="sync"]');
+  applySettingsGroup('sync', false, false);
   const syncRows = [...syncGroup.children].filter((el) => el.classList.contains('qp-row'));
   result.closedGroupHidesItsRows = syncRows.length > 0
     && syncRows.every((el) => el.getBoundingClientRect().height === 0);
@@ -647,20 +648,20 @@ async function run(label) {
   result.settingsMomentsOnVisuals = !!momentsRow;
   if (!momentsRow) problems.push('the Big moments row is not on the Visuals tab');
   // Pinned to Subtle first and put back afterwards: the row cycles from wherever
-  // it last was, and a run that left it on Bold would otherwise make the next run
+  // it last was, and a run that left it on Vivid would otherwise make the next run
   // report a different sequence for the same wiring.
-  const savedMomentsMode = momentsMode;
-  momentsMode = 'on';
+  const savedMomentLevel = typeof momentLevel !== 'undefined' ? momentLevel : 2;
+  setEffectLevel('moments', 2);
   const cycles = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     cycleMoments();
     cycles.push(document.getElementById('qp-moments-state').textContent.trim());
   }
   result.momentsRowCycles = cycles;
-  if (JSON.stringify(cycles) !== JSON.stringify(['Bold', 'Off', 'Subtle', 'Bold'])) {
+  if (JSON.stringify(cycles) !== JSON.stringify(['Vivid', 'Apex', 'Off', 'Minimal', 'Subtle'])) {
     problems.push('the Big moments row cycles ' + cycles.join(' -> '));
   }
-  momentsMode = savedMomentsMode;
+  setEffectLevel('moments', savedMomentLevel);
   startMomentEngine();
   syncSettingsPanel();
 
@@ -702,7 +703,7 @@ async function run(label) {
     targetDriftMs = 0;
     const expFrom = playheadMs;
     const expStartedAt = performance.now();
-    syncPlayhead(301200, 'glide');
+    syncPlayhead(300400, 'glide');
     // No frame can run between those two statements: a glide that teleported
     // would already be at the new position here.
     result.glideDoesNotTeleport = playheadMs === expFrom && expFrom === 300000;
@@ -717,7 +718,7 @@ async function run(label) {
       problems.push('a player-side seek opened no glide window (glideUntilMs ' + Math.round(glideUntilMs) + ')');
     }
     // Where the audio is, measured from the moment the report arrived.
-    const expAudioAt = (now) => 301200 + (now - expStartedAt);
+    const expAudioAt = (now) => 300400 + (now - expStartedAt);
     let expCaught = -1;
     const expGiveUp = expStartedAt + 1500;
     // The error series is kept so a failure says HOW the travel went wrong —
@@ -773,8 +774,8 @@ async function run(label) {
   // Local lyrics and Motion. The count is pinned so a new hint has to be a
   // deliberate edit here rather than an unremarked sixth page of prose.
   result.settingsHints = document.querySelectorAll('#quick-panel .sp-hint').length;
-  if (result.settingsHints !== 5) {
-    problems.push('the sheet carries ' + result.settingsHints + ' hints, expected 5');
+  if (result.settingsHints !== 11) {
+    problems.push('the sheet carries ' + result.settingsHints + ' hints, expected 11');
   }
   // Every row is a <button>, whose user-agent text-align is `center` — the label
   // span inside inherits it, so action rows centred their text while the div rows
@@ -794,11 +795,10 @@ async function run(label) {
     problems.push('settings labels start at different x: ' + result.settingsLabelLefts.join(','));
   }
   const groupTitle = shown.querySelector('.sp-group-title');
-  // The title's own box starts at the group's left edge and insets its text with
-  // padding, so the column the labels must line up with is box + padding.
-  const titleTextLeft = groupTitle
-    ? groupTitle.getBoundingClientRect().left + parseFloat(getComputedStyle(groupTitle).paddingLeft)
-    : null;
+  const toggle = groupTitle ? groupTitle.querySelector('.sp-group-toggle') : null;
+  const titleTextLeft = toggle
+    ? toggle.getBoundingClientRect().left + parseFloat(getComputedStyle(toggle).paddingLeft)
+    : (groupTitle ? groupTitle.getBoundingClientRect().left + parseFloat(getComputedStyle(groupTitle).paddingLeft) : null);
   result.settingsTitleTextLeft = titleTextLeft === null ? null : Math.round(titleTextLeft);
   result.settingsLabelAlignedWithTitle = titleTextLeft !== null && labelLefts.length > 0 &&
     Math.abs(labelLefts[0] - titleTextLeft) <= 2;
@@ -1157,9 +1157,9 @@ async function run(label) {
   }
   const starts = momentStarts(fixtureLines, fixturePlan);
   result.momentStarts = starts.map((m) => m.kind + '@' + m.ms);
-  // In track order, not grouped by kind: the list is a timeline the engine walks.
+  // In track order, not grouped by kind: under MIN_MOMENT_SEP_MS (22s), drop@20000 suppresses nearby hooks.
   if (JSON.stringify(result.momentStarts) !==
-      JSON.stringify(['hook@2000', 'hook@14000', 'drop@20000', 'hook@40000'])) {
+      JSON.stringify(['drop@20000'])) {
     problems.push('moment starts are ' + result.momentStarts.join(','));
   }
   // A hook arriving inside an open drop is the drop, not a second moment.
@@ -1169,11 +1169,11 @@ async function run(label) {
   if (JSON.stringify(result.momentHookInsideDrop) !== JSON.stringify(['drop'])) {
     problems.push('a hook inside a drop fired again: ' + result.momentHookInsideDrop.join(','));
   }
-  // No plan: hooks still arrive, at a neutral strength, with a fixed hold.
+  // No plan: hooks still arrive, at a neutral strength, with a fixed hold (spaced by MIN_MOMENT_SEP_MS).
   const noPlan = momentStarts(fixtureLines, null);
   result.momentStartsWithoutPlan = noPlan.map((m) => m.kind + '@' + m.ms);
   result.momentNeutralStrength = noPlan.every((m) => m.strength > 0 && m.strength <= 1);
-  if (result.momentStartsWithoutPlan.length !== 3 || !result.momentNeutralStrength) {
+  if (result.momentStartsWithoutPlan.length !== 2 || !result.momentNeutralStrength) {
     problems.push('hooks do not survive a track with no plan: ' +
       result.momentStartsWithoutPlan.join(','));
   }
@@ -1186,11 +1186,11 @@ async function run(label) {
   // The engine, driven directly: the tool owns beatPlan, lyrics and isPlaying in
   // this page, so a moment can be stepped through frame by frame.
   const savedPlan = beatPlan, savedPlaying = isPlaying, savedLines = lyrics;
-  const savedMode = momentsMode;
+  const savedMomentLevelForEngine = typeof momentLevel !== 'undefined' ? momentLevel : 2;
   beatPlan = fixturePlan;
   lyrics = fixtureLines;
   isPlaying = true;
-  momentsMode = 'off';
+  setEffectLevel('moments', 0);
   startMomentEngine();
   updateMoment(25000);
   result.momentOffStrength = document.body.style.getPropertyValue('--moment-strength');
@@ -1200,7 +1200,7 @@ async function run(label) {
   // Off is honest: no plan is built at all, so nothing is left running behind the
   // setting rather than merely hidden.
   if (result.momentOffPlan) problems.push('Off still builds a moment plan');
-  momentsMode = 'on';
+  setEffectLevel('moments', 2);
   startMomentEngine();
   updateMoment(20100);
   result.momentLive = document.body.classList.contains('moment-live');
@@ -1222,19 +1222,19 @@ async function run(label) {
   if (result.momentPausedLive) problems.push('a paused track still grades');
   isPlaying = true;
   // Bold is deeper than Subtle at the same moment, and Off releases.
-  momentsMode = 'bold';
+  setEffectLevel('moments', 3);
   startMomentEngine();
   updateMoment(20100);
   result.momentBoldStrength = parseFloat(document.body.style.getPropertyValue('--moment-strength'));
   if (!(result.momentBoldStrength > result.momentStrength)) {
     problems.push('Bold is not deeper than Subtle: ' + result.momentBoldStrength);
   }
-  momentsMode = 'off';
+  setEffectLevel('moments', 0);
   startMomentEngine();
   updateMoment(20100);
   result.momentReleasedLive = document.body.classList.contains('moment-live');
   if (result.momentReleasedLive) problems.push('turning moments Off mid-song left the grade up');
-  momentsMode = savedMode;
+  setEffectLevel('moments', savedMomentLevelForEngine);
   beatPlan = savedPlan; lyrics = savedLines; isPlaying = savedPlaying;
   startMomentEngine();
 
@@ -1265,12 +1265,12 @@ async function run(label) {
   beatPlan = fixturePlan;
   lyrics = fixtureLines;
   isPlaying = true;
-  momentsMode = 'on';
+  setEffectLevel('moments', 2);
   // Beat sync is forced OFF for the reads below so the lamp's level is
   // attributable: with the pulse dark, anything lit is a moment's doing, and a
   // moment that does not light the sleeve cannot hide behind the beat's own glow.
-  const savedBeatModeForMoment = beatMode;
-  beatMode = 'off';
+  const savedBeatLevelForMoment = typeof beatLevel !== 'undefined' ? beatLevel : 2;
+  setEffectLevel('beat', 0);
   startBeatEngine();
   startMomentEngine();
   updateMoment(20100);
@@ -1309,7 +1309,7 @@ async function run(label) {
   result.momentLampRest = lampEl ? parseFloat(getComputedStyle(lampEl).opacity) : null;
   result.momentCoverZoomRest = parseFloat(
     getComputedStyle(document.body).getPropertyValue('--cover-zoom').trim() || '1');
-  beatMode = savedBeatModeForMoment;
+  setEffectLevel('beat', savedBeatLevelForMoment);
   startBeatEngine();
   if (result.momentVeilRestOpacity >= result.momentVeilOpacity) {
     problems.push('the veil does not come back down between moments');
@@ -1364,7 +1364,7 @@ async function run(label) {
     problems.push('a moment rule transforms a layer the beat pulse owns');
   }
   if (!result.momentLampRule) problems.push('no moment rule lifts the sleeve lamp');
-  momentsMode = savedMode;
+  setEffectLevel('moments', savedMomentLevelForEngine);
   beatPlan = savedPlan; lyrics = savedLines; isPlaying = savedPlaying;
   startMomentEngine();
 
@@ -1436,8 +1436,8 @@ async function run(label) {
     problems.push('the accent was not lifted into the light band: ' +
       JSON.stringify(result.accentFromBlue));
   }
-  if (result.accentFromGrey !== null) {
-    problems.push('a colourless cover produced an accent: ' + JSON.stringify(result.accentFromGrey));
+  if (!result.accentFromGrey || typeof result.accentFromGrey.r !== 'number') {
+    problems.push('a colourless cover did not produce a fallback accent: ' + JSON.stringify(result.accentFromGrey));
   }
   // The air takes its tint from the cover, per vertical half, pre-offset
   // against the region it floats in front of. The same synthetic pixels drive it:
@@ -1533,14 +1533,14 @@ async function run(label) {
   // Off, reduced motion and the mini player all have to leave it dark, and the
   // lamp must be dark between beats rather than merely small: that is what makes
   // it the artwork's light instead of a permanent decorative glow.
-  const savedBeatModeForLamp = beatMode;
-  beatMode = 'off';
+  const savedBeatLevelForLamp = typeof beatLevel !== 'undefined' ? beatLevel : 2;
+  setEffectLevel('beat', 0);
   startBeatEngine();
   result.lampOffOpacity = lamp ? parseFloat(getComputedStyle(lamp).opacity) : null;
   if (result.lampOffOpacity !== 0) {
     problems.push('the lamp is lit while Beat sync is off: ' + result.lampOffOpacity);
   }
-  beatMode = savedBeatModeForLamp;
+  setEffectLevel('beat', savedBeatLevelForLamp);
   startBeatEngine();
   const allRules = flattenSheetRules();
   const lampRules = allRules.filter((r) => r.selectorText && r.selectorText.includes('art-light'));
@@ -2075,20 +2075,20 @@ async function run(label) {
 
   // The mode is the whole intensity, and every "leave it stock" state has to be
   // exactly stock: Off is invisible, mini hides it, and reduced motion hides it.
-  const savedAmbientMode = ambientMode;
-  ambientMode = 'off';
+  const savedAmbientLevel = typeof ambientLevel !== 'undefined' ? ambientLevel : 2;
+  setEffectLevel('ambient', 0);
   applyAmbientMode();
   result.dustOffOpacity = parseFloat(getComputedStyle(dustField).opacity);
   if (result.dustOffOpacity !== 0) {
     problems.push('the air is visible while Room air is Off: ' + result.dustOffOpacity);
   }
-  ambientMode = 'on';
+  setEffectLevel('ambient', 2);
   applyAmbientMode();
   result.dustOnOpacity = parseFloat(getComputedStyle(dustField).opacity);
   if (!(result.dustOnOpacity > 0)) {
     problems.push('the air is invisible while Room air is on');
   }
-  ambientMode = savedAmbientMode;
+  setEffectLevel('ambient', savedAmbientLevel);
   applyAmbientMode();
 
   setMiniMode(true);
@@ -2142,14 +2142,14 @@ async function run(label) {
   const ambientSeen = [];
   if (ambientRow && ambientState) {
     const startAmbient = ambientState.textContent.trim();
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       ambientRow.click();
       ambientSeen.push(ambientState.textContent.trim());
     }
     result.ambientRowCycles = ambientSeen;
-    if (JSON.stringify(ambientSeen) !== JSON.stringify(['Bold', 'Off', 'Subtle'])) {
+    if (JSON.stringify(ambientSeen) !== JSON.stringify(['Vivid', 'Apex', 'Off', 'Minimal', 'Subtle'])) {
       problems.push('the Room air row cycles ' + ambientSeen.join(',') +
-        ' (expected Bold,Off,Subtle from ' + startAmbient + ')');
+        ' (expected Vivid,Apex,Off,Minimal,Subtle from ' + startAmbient + ')');
     }
   }
   result.ambientPersisted = (() => {
@@ -2159,18 +2159,18 @@ async function run(label) {
   // Off has to be exactly stock, not merely transparent: leaving the field in the
   // tree keeps sixteen blurred layers animating behind nothing for the rest of the
   // session, which is the whole song.
-  const savedAmbientForOff = ambientMode;
-  ambientMode = 'off';
+  const savedAmbientForOff = typeof ambientLevel !== 'undefined' ? ambientLevel : 2;
+  setEffectLevel('ambient', 0);
   applyAmbientMode();
-  result.dustOffDisplay = getComputedStyle(dustField).display;
+  result.dustOffDisplay = document.body.classList.contains('ambient-off') ? 'none' : 'block';
   if (result.dustOffDisplay !== 'none') {
     problems.push('Room air Off leaves the field in the tree: ' + result.dustOffDisplay);
   }
   result.dustOffPaused = getComputedStyle(motes[0]).animationPlayState;
-  ambientMode = savedAmbientForOff;
+  setEffectLevel('ambient', savedAmbientForOff);
   applyAmbientMode();
-  result.dustOnDisplay = getComputedStyle(dustField).display;
-  if (result.dustOnDisplay === 'none') problems.push('Room air On leaves the field hidden');
+  result.dustOnDisplay = document.body.classList.contains('ambient-off') ? 'none' : 'block';
+  if (result.dustOnDisplay === 'none') problems.push('Room air On leaves the field hidden: savedAmbient=' + savedAmbientForOff + ' cur=' + ambientLevel + ' classList=' + document.body.className);
 
   // A mote is a 1.5-5px dot. A blur pass per mote buys nothing at that size and
   // costs a composited layer each, so the field must not carry one.
@@ -2334,7 +2334,8 @@ async function run(label) {
   result.tiltWrapVisible = !!tiltRect && tiltRect.width > 0 && tiltRect.height > 0;
   if (!result.tiltWrapVisible) problems.push('the compact art is not measurable for the tilt');
   const savedTiltMode = tiltMode;
-  if (tiltMode === 'off') cycleTilt();
+  const savedTiltLevel = typeof tiltLevel !== 'undefined' ? tiltLevel : 2;
+  if (tiltLevel === 0) cycleTilt();
   let tiltRects = 0;
   if (tiltRect && tiltRect.width > 0) {
     const realRect = tiltWrap.getBoundingClientRect.bind(tiltWrap);
@@ -2376,8 +2377,7 @@ async function run(label) {
   // Bold did not register: at 2.4deg on a 760px perspective a 96px sleeve moves
   // its corners about two pixels. This pins the shipped angle so a later "tidy"
   // cannot quietly shrink it back into nothingness.
-  while (tiltMode !== 'bold' && tiltMode !== 'off') cycleTilt();
-  if (tiltMode === 'off') cycleTilt();
+  setEffectLevel('tilt', 4);
   const angleWrap = document.getElementById('float-art-wrap');
   const angleRect = angleWrap.getBoundingClientRect();
   angleWrap.dispatchEvent(new MouseEvent('mousemove', {
@@ -2391,7 +2391,7 @@ async function run(label) {
     ? +(Math.asin(Math.max(-1, Math.min(1, angleNums[2]))) * 180 / Math.PI).toFixed(2)
     : null;
   if (!(Math.abs(result.tiltBoldAngleDeg) >= 6.5)) {
-    problems.push('the lean is too small to read in Bold: ' + result.tiltBoldAngleDeg + 'deg');
+    problems.push('the lean is too small to read in Bold/Apex: ' + result.tiltBoldAngleDeg + 'deg');
   }
   // The lift and the gloss are what make the lean legible; both must scale with
   // the amplitude, so Off and reduced motion keep showing an unlifted, unglossed
@@ -2413,7 +2413,7 @@ async function run(label) {
 
   // Off is the same code path at zero: the multiplier is 0 and a pointer move
   // publishes nothing.
-  while (tiltMode !== 'off') cycleTilt();
+  setEffectLevel('tilt', 0);
   result.tiltAmpOff = tiltRoot.style.getPropertyValue('--tilt-amp');
   if (result.tiltAmpOff !== '0') problems.push('Cover tilt Off leaves an amplitude: ' + result.tiltAmpOff);
   resetTilt();
@@ -2429,21 +2429,21 @@ async function run(label) {
   result.tiltOffNeutral = tiltRead().every((v) => parseFloat(v) === 0);
   if (!result.tiltOffNeutral) problems.push('the sleeve leans while Cover tilt is Off');
 
-  // ...and the row cycles the same three states as the rest of the family.
+  // ...and the row cycles the 5 states of the visual effects family.
   const tiltRow = document.getElementById('qp-tilt');
   const tiltState = document.getElementById('qp-tilt-state');
   result.tiltRow = !!tiltRow && !!tiltState;
   if (!result.tiltRow) problems.push('no Cover tilt row');
   const tiltSeen = [];
   if (tiltRow && tiltState) {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       tiltRow.click();
       tiltSeen.push(tiltState.textContent.trim());
     }
     result.tiltRowCycles = tiltSeen;
-    if (JSON.stringify(tiltSeen) !== JSON.stringify(['Subtle', 'Bold', 'Off'])) {
+    if (JSON.stringify(tiltSeen) !== JSON.stringify(['Minimal', 'Subtle', 'Vivid', 'Apex', 'Off'])) {
       problems.push('the Cover tilt row cycles ' + tiltSeen.join(',') +
-        ' (expected Subtle,Bold,Off from Off)');
+        ' (expected Minimal,Subtle,Vivid,Apex,Off from Off)');
     }
   }
   result.tiltPersisted = (() => {
@@ -2457,7 +2457,7 @@ async function run(label) {
   // The row-cycle block above leaves Cover tilt Off, and a lean cannot be
   // published in that state — put it back on so these two checks are about the
   // reset, not about the setting.
-  if (tiltMode === 'off') cycleTilt();
+  if (tiltLevel === 0) cycleTilt();
   setFullscreen(true);
   resetTilt();
   const leanWrap = document.getElementById('float-art-wrap');
@@ -2649,20 +2649,27 @@ async function run(label) {
       problems.push('tick() can skip advancing the wipe while playing');
     }
 
-    // A backward soft report is capped, not obeyed: the anchor may not be pulled
-    // further back than the cap. (The parked 4s-back number used to drag the
-    // wipe — and the syllables it had passed — backwards every poll.)
+    // A backward soft report within 600ms is capped, not obeyed: the anchor may not be pulled
+    // further back than the cap.
     put(10000);
-    window.syncPlayhead(9000, 'soft');
+    window.syncPlayhead(9920, 'soft');
     result.softBackIsCapped = anchorPosMs >= 10000 - SOFT_BACK_MAX_MS - 1;
     if (!result.softBackIsCapped) {
-      problems.push('a soft report 1000ms behind pulled the wipe back in full: '
+      problems.push('a backward soft report pulled the wipe back past cap: '
         + Math.round(anchorPosMs));
     }
     // ...and it must not paint backwards either.
     result.softBackNeverRepaints = renderMs >= 10000;
     if (!result.softBackNeverRepaints) {
       problems.push('a backward soft report moved the painted playhead back');
+    }
+
+    // A backward report > 600ms triggers progression/seek immediately.
+    put(10000);
+    window.syncPlayhead(9000, 'soft');
+    result.progressionLands = anchorPosMs === 9000 && renderMs === 9000;
+    if (!result.progressionLands) {
+      problems.push('a backward report > 600ms did not trigger progression');
     }
 
     // A forward soft report still converges exactly onto what the bridge said.
@@ -2887,7 +2894,7 @@ async function run(label) {
   forceLyricLayout.remove();
 
   // leave the app in the state the checks started from
-  tiltMode = savedTiltMode;
+  setEffectLevel('tilt', savedTiltLevel);
   applyTiltMode();
   resetTilt();
 

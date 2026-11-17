@@ -1261,7 +1261,8 @@ if __name__ == '__main__':
         shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)
 
     def on_app_started(*args, **kwargs):
-        SMTC_BRIDGE.start()
+        win = args[0] if args else window
+        SMTC_BRIDGE.start(win)
         if is_docked_launch:
             do_initial_dock()
 
