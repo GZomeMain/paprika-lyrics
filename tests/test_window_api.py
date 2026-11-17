@@ -939,5 +939,44 @@ class FatalStartupErrorTest(unittest.TestCase):
         self.assertEqual(src.count("_fatal("), 4)
 
 
+class ExposedApiMethodsTest(unittest.TestCase):
+    def setUp(self):
+        self.window = FakeWindow()
+        self.api = paprika_app.WindowApi(self.window)
+
+    def test_open_external_url_validates_scheme(self):
+        self.assertFalse(self.api.open_external_url(""))
+        self.assertFalse(self.api.open_external_url("javascript:alert(1)"))
+        self.assertFalse(self.api.open_external_url(None))
+        with mock.patch("webbrowser.open", return_value=True) as mock_open:
+            self.assertTrue(self.api.open_external_url("https://example.com"))
+            mock_open.assert_called_once_with("https://example.com")
+
+    def test_profiles_and_source_locking(self):
+        with mock.patch("storage.CACHE.get_profiles", return_value={"theme": "dark"}),              mock.patch("storage.CACHE.save_profiles") as mock_save,              mock.patch.object(paprika_app.SMTC_BRIDGE, "lock_source") as mock_lock,              mock.patch.object(paprika_app.SMTC_BRIDGE, "unlock_source") as mock_unlock,              mock.patch.object(paprika_app.SMTC_BRIDGE, "get_available_sources", return_value=[{"id": "spotify"}]):
+            self.assertEqual(self.api.get_profiles(), {"theme": "dark"})
+            self.assertTrue(self.api.save_profiles({"theme": "light"}))
+            mock_save.assert_called_once_with({"theme": "light"})
+            self.assertTrue(self.api.lock_source("spotify"))
+            mock_lock.assert_called_once_with("spotify")
+            self.assertTrue(self.api.unlock_source())
+            mock_unlock.assert_called_once()
+            self.assertEqual(self.api.get_available_sources(), [{"id": "spotify"}])
+
+    def test_expose_block_includes_all_required_methods(self):
+        src = (Path(__file__).resolve().parent.parent / "paprika_app.py").read_text(
+            encoding="utf-8")
+        required_exposed = [
+            "api.open_external_url",
+            "api.get_profiles",
+            "api.save_profiles",
+            "api.lock_source",
+            "api.unlock_source",
+            "api.get_available_sources",
+        ]
+        for method in required_exposed:
+            self.assertIn(method, src)
+
+
 if __name__ == "__main__":
     unittest.main()

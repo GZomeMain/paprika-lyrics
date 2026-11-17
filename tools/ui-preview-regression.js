@@ -390,7 +390,7 @@ async function run(label) {
   panel.classList.add('open');
   const tabs = [...document.querySelectorAll('#quick-panel .sp-tab')];
   result.settingsTabs = tabs.map((t) => t.textContent.trim());
-  const expectedTabs = ['Window', 'Lyrics', 'Visuals', 'Diagnostics'];
+  const expectedTabs = ['Window', 'Lyrics', 'Visuals', 'Profiles', 'Diagnostics & Credits'];
   if (JSON.stringify(result.settingsTabs) !== JSON.stringify(expectedTabs)) {
     problems.push('settings tabs are ' + result.settingsTabs.join(' / ') +
       ' (expected ' + expectedTabs.join(' / ') + ')');
@@ -399,10 +399,11 @@ async function run(label) {
   // sheet is a set of short pages now, and this is what says which page a row
   // lives on.
   const expectedTabGroups = {
-    window: ['Window'],
+    window: ['Window', 'Interface Elements'],
     lyrics: ['Sync', 'Lyrics', 'Fonts', 'Spicy Lyrics API', 'Local lyrics'],
-    visuals: ['Motion'],
-    diag: ['Diagnostics'],
+    visuals: ['Motion', 'Background'],
+    profiles: ['Active Profile', 'Auto-Switch By Player'],
+    diag: ['Diagnostics', 'Contribution & Credits'],
   };
   result.settingsTabGroups = {};
   for (const tab of tabs) {
@@ -2306,7 +2307,10 @@ async function run(label) {
   // frame's value — and the wrap is measured once per hover, because a rect read
   // inside the move handler is what made the lean crawl whenever the lyric engine
   // was busy.
-  const tiltFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  const tiltFrame = () => Promise.race([
+    new Promise((resolve) => requestAnimationFrame(() => resolve())),
+    new Promise((resolve) => setTimeout(resolve, 60)),
+  ]);
   const tiltMove = async (x, y) => {
     tiltWrap.dispatchEvent(new MouseEvent('mousemove', {
       bubbles: true, clientX: x, clientY: y,

@@ -87,12 +87,14 @@ try:
     from core.ttml_library import TTML_LIBRARY
     from core.font_library import FONT_LIBRARY
     from core import native_window
+    from core.simpmusic_bridge import SimpMusicBridge
 except ImportError as exc:
     _fatal(f"Failed to load a core module: {exc}\n" + DEPENDENCY_HINT)
     sys.exit(1)
 
 SHUTDOWN_SIGNAL = threading.Event()
 SMTC_BRIDGE = SmtcBridge(SHUTDOWN_SIGNAL)
+SIMPMUSIC_BRIDGE = SimpMusicBridge(SHUTDOWN_SIGNAL)
 HOTKEY_MANAGER = None
 WINDOW_REF = None
 WINDOW_API_REF = None
@@ -927,15 +929,27 @@ class WindowApi:
         return snapshot
 
     def toggle_playback(self):
+        if SIMPMUSIC_BRIDGE and (SIMPMUSIC_BRIDGE.is_connected or SIMPMUSIC_BRIDGE.is_docked):
+            if SIMPMUSIC_BRIDGE.send_command("toggle_playback"):
+                return
         SMTC_BRIDGE.toggle_playback()
 
     def skip_next(self):
+        if SIMPMUSIC_BRIDGE and (SIMPMUSIC_BRIDGE.is_connected or SIMPMUSIC_BRIDGE.is_docked):
+            if SIMPMUSIC_BRIDGE.send_command("next"):
+                return
         SMTC_BRIDGE.skip_next()
 
     def skip_previous(self):
+        if SIMPMUSIC_BRIDGE and (SIMPMUSIC_BRIDGE.is_connected or SIMPMUSIC_BRIDGE.is_docked):
+            if SIMPMUSIC_BRIDGE.send_command("previous"):
+                return
         SMTC_BRIDGE.skip_previous()
 
     def seek_position(self, target_ms: float):
+        if SIMPMUSIC_BRIDGE and (SIMPMUSIC_BRIDGE.is_connected or SIMPMUSIC_BRIDGE.is_docked):
+            if SIMPMUSIC_BRIDGE.send_command("seek", positionMs=target_ms):
+                return
         SMTC_BRIDGE.seek_position(target_ms)
 
     def get_profiles(self) -> dict:
@@ -1075,6 +1089,7 @@ def shutdown_app(api, hotkey_manager, cache, executor, shutdown_signal):
         ("hotkeys", lambda: hotkey_manager.stop() if hotkey_manager is not None else None),
         ("peek timer", lambda: api._cancel_peek_timer() if api is not None else None),
         ("hover probe", lambda: api._stop_hover_probe() if api is not None else None),
+        ("simpmusic bridge", lambda: SIMPMUSIC_BRIDGE.stop()),
         ("window geometry", lambda: api._record_window_geometry() if api is not None else None),
         ("cache flush", flush_cache),
         ("async executor", lambda: executor.shutdown(wait=False)),
@@ -1110,14 +1125,39 @@ if __name__ == '__main__':
     if purged:
         print(f"[Paprika Lyrics] Purged {purged} outdated cached lyric payload(s).")
 
+    import argparse
+    parser = argparse.ArgumentParser(description="Paprika Lyrics")
+    parser.add_argument("--docked", type=str, default=None, help="Parent Win32 HWND to dock into")
+    parser.add_argument("--width", type=int, default=None, help="Initial docked width")
+    parser.add_argument("--height", type=int, default=None, help="Initial docked height")
+    parser.add_argument("--x", type=int, default=0, help="Initial docked X coordinate")
+    parser.add_argument("--y", type=int, default=0, help="Initial docked Y coordinate")
+    args, _unknown = parser.parse_known_args()
+
+    target_parent_hwnd = None
+    if args.docked:
+        try:
+            target_parent_hwnd = int(args.docked, 0)
+        except (ValueError, TypeError):
+            target_parent_hwnd = None
+
+    is_docked_launch = bool(target_parent_hwnd and target_parent_hwnd > 0)
+
     saved_win = CACHE.get_window_geometry()
-    init_x = saved_win.get("x")
-    init_y = saved_win.get("y")
+    init_x = args.x if is_docked_launch else saved_win.get("x")
+    init_y = args.y if is_docked_launch else saved_win.get("y")
 
-    init_w = max(320, min(1400, int(saved_win.get("width") or DEFAULT_WIDTH)))
-    init_h = max(380, min(1600, int(saved_win.get("height") or DEFAULT_HEIGHT)))
+    if is_docked_launch and args.width and args.width > 0:
+        init_w = args.width
+    else:
+        init_w = max(320, min(1400, int(saved_win.get("width") or DEFAULT_WIDTH)))
 
-    if init_x is not None and init_y is not None:
+    if is_docked_launch and args.height and args.height > 0:
+        init_h = args.height
+    else:
+        init_h = max(380, min(1600, int(saved_win.get("height") or DEFAULT_HEIGHT)))
+
+    if not is_docked_launch and init_x is not None and init_y is not None:
         try:
             u32 = ctypes.windll.user32
             max_x = u32.GetSystemMetrics(78)
@@ -1132,15 +1172,16 @@ if __name__ == '__main__':
         url=INDEX_HTML_PATH.resolve().as_uri(),
         width=init_w,
         height=init_h,
-        x=init_x,
-        y=init_y,
+        x=init_x if not is_docked_launch else 0,
+        y=init_y if not is_docked_launch else 0,
         frameless=True,
         resizable=True,
-        min_size=(320, 380),
+        min_size=(320, 380) if not is_docked_launch else (50, 50),
         easy_drag=False,
         # Not topmost at creation: the saved setting (off by default) is applied
         # by the UI once the bridge is ready.
         on_top=False,
+        hidden=is_docked_launch,
         background_color='#090909'
     )
     WINDOW_REF = window
@@ -1179,18 +1220,57 @@ if __name__ == '__main__':
         api.font_reveal,
         api.font_data,
         api.get_spicy_api_key,
-        api.set_spicy_api_key
+        api.set_spicy_api_key,
+        api.open_external_url,
+        api.get_profiles,
+        api.save_profiles,
+        api.lock_source,
+        api.unlock_source,
+        api.get_available_sources
     )
 
+    docked_applied = threading.Event()
+
+    def do_initial_dock():
+        if is_docked_launch and not docked_applied.is_set():
+            ok = native_window.dock_to_parent(
+                window,
+                target_parent_hwnd,
+                x=args.x,
+                y=args.y,
+                width=init_w,
+                height=init_h,
+            )
+            if ok:
+                docked_applied.set()
+                SIMPMUSIC_BRIDGE.is_docked = True
+                SIMPMUSIC_BRIDGE.parent_hwnd = target_parent_hwnd
+                SIMPMUSIC_BRIDGE.is_connected = True
+                print(f"[Paprika Lyrics] Docked into parent HWND {target_parent_hwnd} on launch.")
+
+    def on_before_show():
+        do_initial_dock()
+
     def on_shown():
-        apply_native_window_frame(window)
+        if is_docked_launch:
+            do_initial_dock()
+        else:
+            apply_native_window_frame(window)
 
     def on_closed():
         shutdown_app(api, HOTKEY_MANAGER, CACHE, ASYNC_EXECUTOR, SHUTDOWN_SIGNAL)
 
+    def on_app_started():
+        SMTC_BRIDGE.start()
+        if is_docked_launch:
+            do_initial_dock()
+
+    window.events.before_show += on_before_show
     window.events.shown += on_shown
     window.events.closed += on_closed
     HOTKEY_MANAGER.start()
+    SIMPMUSIC_BRIDGE.set_window(window, api)
+    SIMPMUSIC_BRIDGE.start()
     try:
         # private_mode=False gives WebView2 a durable profile, and storage_path
         # pins it to this app's own folder. Both are required: private_mode alone
@@ -1200,7 +1280,7 @@ if __name__ == '__main__':
         # file://, so every page on the machine shares one origin — the folder
         # has to be ours or another app's keys could mix with ours.
         webview.start(
-            SMTC_BRIDGE.start,
+            on_app_started,
             window,
             private_mode=False,
             storage_path=str(WEBVIEW_PROFILE_DIR),

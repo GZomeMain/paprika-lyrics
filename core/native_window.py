@@ -53,8 +53,12 @@ import time
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
+SWP_NOREDRAW = 0x0008
 SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
+SWP_SHOWWINDOW = 0x0040
+SWP_HIDEWINDOW = 0x0080
+SWP_NOCOPYBITS = 0x0100
 SWP_NOOWNERZORDER = 0x0200
 HWND_TOPMOST = -1
 HWND_NOTOPMOST = -2
@@ -64,14 +68,26 @@ WS_CAPTION = 0x00C00000
 WS_THICKFRAME = 0x00040000
 WS_MINIMIZEBOX = 0x00020000
 WS_MAXIMIZEBOX = 0x00010000
+WS_SYSMENU = 0x00080000
 WS_POPUP = 0x80000000
+WS_CHILD = 0x40000000
+WS_VISIBLE = 0x10000000
+WS_CLIPSIBLINGS = 0x04000000
+WS_CLIPCHILDREN = 0x02000000
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_LAYERED = 0x00080000
+WS_EX_APPWINDOW = 0x00040000
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_CONTROLPARENT = 0x00010000
 # SetLayeredWindowAttributes flags: apply the alpha byte to the whole window.
 LWA_ALPHA = 0x00000002
 MONITOR_DEFAULTTONEAREST = 2
 # ShowWindow commands. SW_RESTORE is how a window leaves the maximized state.
 SW_RESTORE = 9
+
+# Styles stripped and added when docking into a parent HWND as a seamless child.
+DOCK_STRIP_STYLE = WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU
+DOCK_ADD_STYLE = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
 
 # A window move, handed to Windows rather than driven from the page: DefWindowProc
 # answers WM_NCLBUTTONDOWN with HTCAPTION by taking capture and running its own
@@ -155,7 +171,7 @@ def _real_dlls():
 
 def _hwnd_of(window) -> int | None:
     """
-    The native HWND for a pywebview window, or None when it cannot be found.
+    The native HWND for a pywebview window or raw HWND int, or None when it cannot be found.
 
     `window.native.Handle` is a System.IntPtr (pythonnet), and `int()` on an
     IntPtr is a TypeError on current .NET runtimes — pywebview itself converts
@@ -169,6 +185,8 @@ def _hwnd_of(window) -> int | None:
     the unit tests on the same machine — and mutate the wrong window. Callers
     that genuinely need the fallback keep it on their side of the seam.
     """
+    if isinstance(window, int) and window > 0:
+        return window
     try:
         if window is not None and hasattr(window, "native") and hasattr(window.native, "Handle"):
             handle = window.native.Handle
@@ -698,3 +716,198 @@ def _set_bounds(user32, hwnd: int, bounds: tuple[int, int, int, int],
         flags = SWP_NOZORDER | SWP_NOACTIVATE
     x, y, w, h = bounds
     return bool(user32.SetWindowPos(hwnd, None, x, y, w, h, flags))
+
+
+def hwnd_for(window) -> int | None:
+    """Public helper alias for obtaining native HWND integer."""
+    return _hwnd_of(window)
+
+
+def dock_to_parent(
+    window,
+    parent_hwnd: int,
+    x: int = 0,
+    y: int = 0,
+    width: int = 800,
+    height: int = 600,
+    user32=None,
+    dwmapi=None,
+) -> bool:
+    """
+    Docks the pywebview window as a seamless WS_CHILD into a parent Win32 HWND.
+
+    Strips WS_POPUP, WS_CAPTION, WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX,
+    WS_SYSMENU and WS_EX_APPWINDOW so no borders, titlebars, or separate taskbar
+    entries appear.
+    Adds WS_CHILD, WS_VISIBLE, WS_CLIPSIBLINGS, and WS_CLIPCHILDREN.
+    Calls SetParent(hwnd, parent_hwnd), disables DWM window corners/border, and
+    smoothly repositions/resizes via SetWindowPos.
+    """
+    user32 = user32 or ctypes.windll.user32
+    hwnd = _hwnd_of(window)
+    if not hwnd or not parent_hwnd:
+        return False
+
+    try:
+        # Check if already docked to this parent
+        cur_parent = 0
+        if hasattr(user32, "GetParent"):
+            _declare(user32.GetParent, ctypes.c_void_p, [ctypes.c_void_p])
+            cur_parent = _handle_value(user32.GetParent(ctypes.c_void_p(hwnd)))
+
+        # Query parent client rect if width/height not provided
+        if (width <= 0 or height <= 0) and hasattr(user32, "GetClientRect"):
+            class RECT(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+            rc = RECT()
+            _declare(user32.GetClientRect, ctypes.c_int, [ctypes.c_void_p, ctypes.c_void_p])
+            if user32.GetClientRect(ctypes.c_void_p(parent_hwnd), ctypes.byref(rc)):
+                if width <= 0:
+                    width = max(1, rc.right - rc.left)
+                if height <= 0:
+                    height = max(1, rc.bottom - rc.top)
+
+        if width <= 0:
+            width = 800
+        if height <= 0:
+            height = 600
+
+        # If already parented to parent_hwnd, fast-path smooth resize
+        if cur_parent == parent_hwnd:
+            return resize_docked(hwnd, x, y, width, height, user32=user32)
+
+        # 1. Strip top-level/frame styles and apply child styles
+        style = _get_window_long(user32, hwnd, GWL_STYLE)
+        new_style = (style & ~DOCK_STRIP_STYLE) | DOCK_ADD_STYLE
+        _set_window_long(user32, hwnd, GWL_STYLE, new_style)
+
+        # 2. Strip taskbar window bit (WS_EX_APPWINDOW) and add control parent
+        ex = _get_window_long(user32, hwnd, GWL_EXSTYLE)
+        new_ex = (ex & ~WS_EX_APPWINDOW) | WS_EX_CONTROLPARENT
+        _set_window_long(user32, hwnd, GWL_EXSTYLE, new_ex)
+
+        # 3. Re-parent into parent HWND
+        _declare(user32.SetParent, ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p])
+        user32.SetParent(ctypes.c_void_p(hwnd), ctypes.c_void_p(parent_hwnd))
+
+        # 4. Turn off DWM rounded corners and border
+        _set_dwm_frame(dwmapi, hwnd, True)
+
+        # 5. Position and frame change
+        _declare(user32.SetWindowPos, ctypes.c_int, [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+        ])
+        user32.SetWindowPos(
+            ctypes.c_void_p(hwnd), 0,
+            x, y, width, height,
+            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+
+        # 6. Redraw window to refresh WebView2 surface
+        try:
+            if hasattr(user32, "RedrawWindow"):
+                _declare(user32.RedrawWindow, ctypes.c_int, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint])
+                user32.RedrawWindow(ctypes.c_void_p(hwnd), None, None, 0x0181)  # RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN
+        except Exception:
+            pass
+
+        # 7. Update .native properties if present (e.g. TopMost)
+        try:
+            if hasattr(window, "native") and hasattr(window.native, "TopMost"):
+                window.native.TopMost = False
+        except Exception:
+            pass
+
+        return True
+    except Exception as exc:
+        print(f"[native_window] dock_to_parent error: {exc}")
+        return False
+
+
+def resize_docked(
+    window,
+    x: int = 0,
+    y: int = 0,
+    width: int = 800,
+    height: int = 600,
+    user32=None,
+) -> bool:
+    """
+    Smoothly updates position and bounds of an already-docked WS_CHILD window.
+    Bypasses SetParent and style mutations for zero flicker.
+    """
+    user32 = user32 or ctypes.windll.user32
+    hwnd = _hwnd_of(window)
+    if not hwnd:
+        return False
+    try:
+        _declare(user32.SetWindowPos, ctypes.c_int, [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+        ])
+        return bool(user32.SetWindowPos(
+            ctypes.c_void_p(hwnd), 0,
+            x, y, width, height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        ))
+    except Exception as exc:
+        print(f"[native_window] resize_docked error: {exc}")
+        return False
+
+
+def undock_from_parent(
+    window,
+    x: int = 100,
+    y: int = 100,
+    width: int = 900,
+    height: int = 600,
+    ontop: bool = False,
+    user32=None,
+    dwmapi=None,
+) -> bool:
+    """Undocks the window from any parent, restoring it as a top-level popup overlay."""
+    user32 = user32 or ctypes.windll.user32
+    hwnd = _hwnd_of(window)
+    if not hwnd:
+        return False
+    try:
+        # Reparent to desktop (parent = 0)
+        _declare(user32.SetParent, ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p])
+        user32.SetParent(ctypes.c_void_p(hwnd), 0)
+
+        # Restore top-level style
+        style = _get_window_long(user32, hwnd, GWL_STYLE)
+        style = (style & ~WS_CHILD) | WS_POPUP | WS_VISIBLE
+        _set_window_long(user32, hwnd, GWL_STYLE, style)
+
+        # Clear control parent exstyle
+        ex = _get_window_long(user32, hwnd, GWL_EXSTYLE)
+        _set_window_long(user32, hwnd, GWL_EXSTYLE, ex & ~WS_EX_CONTROLPARENT)
+
+        # Restore window frame (rounded corners, no border)
+        apply_window_frame(window, dwmapi)
+
+        z_order = HWND_TOPMOST if ontop else HWND_NOTOPMOST
+        _declare(user32.SetWindowPos, ctypes.c_int, [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+        ])
+        user32.SetWindowPos(
+            ctypes.c_void_p(hwnd), z_order,
+            x, y, width, height,
+            SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+        )
+
+        try:
+            if hasattr(window, "native") and hasattr(window.native, "TopMost"):
+                window.native.TopMost = ontop
+        except Exception:
+            pass
+
+        return True
+    except Exception as exc:
+        print(f"[native_window] undock_from_parent error: {exc}")
+        return False
+

@@ -497,7 +497,17 @@ class PositionClock:
             # point as of NOW silently throws that poll away, which is the "slight
             # delay" after every unpause.
             if was_playing:
-                keep = implied if fresh else prior
+                # Pausing: freeze at where playback actually was.
+                # A fresh snapshot from the player that is ahead of prior is evidence
+                # that playback reached further than our projection. But a snapshot
+                # that is behind prior is an un-aged pre-pause snapshot, buffer lag,
+                # or clock drift — believing it would drag the playhead backwards upon pausing.
+                if fresh and implied is not None and prior is not None:
+                    keep = max(prior, implied)
+                elif fresh and implied is not None:
+                    keep = implied
+                else:
+                    keep = prior
             elif fresh and self.last_sample_dated:
                 keep = implied
             else:
@@ -511,21 +521,30 @@ class PositionClock:
             # something new. Dragging the lyrics back to a snapshot written
             # before the pause is what made a pause look like a seek.
             if fresh:
-                self._anchor(implied, now)
                 # A paused move is not drift to ease into: the wipe is frozen
                 # and has no sweep to hide a glide in, so the UI must land on
                 # it now. Without this a scrub of the player's own timeline
                 # while paused (or a seek that landed while paused) arrived as
                 # "soft", and the UI only repaints its words on a snap — the
                 # timer moved, the lyric highlight waited for the next
-                # pause/resume edge. Noise under the deadband still returns
-                # plain so jitter cannot repaint the words twice a second.
+                # pause/resume edge.
+                #
+                # Crucially: while paused, playback does not advance. A move
+                # backwards (moved < 0) within DISCONTINUITY_MS is late pause
+                # settlement, delayed pre-pause snapshot arrival, or timeline
+                # jitter — never drag the lyrics backwards. Only a real seek
+                # (moved > DEADBAND_MS or moved < -DISCONTINUITY_MS) is a
+                # discontinuity the UI must land on.
                 moved = implied - (prior if prior is not None else implied)
-                if abs(moved) > DEADBAND_MS:
+                if moved > DEADBAND_MS or moved < -DISCONTINUITY_MS:
+                    self._anchor(implied, now)
                     return Reading(position_ms=self._project(now),
                                    discontinuity=True,
                                    correction_ms=moved,
                                    jump_ms=abs(moved))
+                elif moved >= 0:
+                    # Forward sub-deadband move: track without discontinuity.
+                    self._anchor(implied, now)
             # Paused: the frozen anchor IS the truth, so this is not a hold.
             return Reading(position_ms=self._project(now))
 

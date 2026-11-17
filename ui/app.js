@@ -225,27 +225,27 @@ const LYRIC_FONTS = [
   // The sans stack is the default: readable at every tempo, with real
   // multi-script glyph coverage.
   { id: 'apple', label: 'System', weight: '700',
-    stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" },
+    stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei UI', 'Yu Gothic UI', 'Noto Sans CJK SC', 'Noto Sans CJK JP', system-ui, sans-serif" },
   // A sung line in a serif is a different mood entirely, and the sweep distances
   // are remeasured on every change, so nothing about the motion is hard-coded.
   { id: 'serif', label: 'Serif', weight: '700',
-    stack: "Georgia, Cambria, 'Times New Roman', Times, serif" },
+    stack: "Georgia, Cambria, 'Times New Roman', 'Songti SC', 'Source Han Serif SC', 'Yu Mincho', Times, serif" },
   { id: 'rounded', label: 'Rounded', weight: '700',
-    stack: "'Trebuchet MS', 'Segoe UI', Verdana, system-ui, sans-serif" },
+    stack: "'Trebuchet MS', 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei UI', 'Yu Gothic UI', 'Noto Sans CJK SC', 'Noto Sans CJK JP', Verdana, system-ui, sans-serif" },
   // Barriecito is naturally thick at weight 400, and its CJK/Cyrillic/Arabic
   // fall back to a mismatched system font mid-line — the option, not the default.
   { id: 'barriecito', label: 'Barriecito', weight: '400',
-    stack: "'Barriecito', cursive, sans-serif" },
+    stack: "'Barriecito', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei UI', 'Yu Gothic UI', 'Noto Sans CJK SC', 'Noto Sans CJK JP', cursive, sans-serif" },
 ];
 const UI_FONTS = [
   { id: 'inter', label: 'Inter',
-    stack: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" },
+    stack: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei UI', 'Yu Gothic UI', 'Noto Sans CJK SC', 'Noto Sans CJK JP', system-ui, sans-serif" },
   { id: 'system', label: 'System',
-    stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" },
+    stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei UI', 'Yu Gothic UI', 'Noto Sans CJK SC', 'Noto Sans CJK JP', system-ui, sans-serif" },
   { id: 'serif', label: 'Serif',
-    stack: "Georgia, Cambria, 'Times New Roman', Times, serif" },
+    stack: "Georgia, Cambria, 'Times New Roman', 'Songti SC', 'Source Han Serif SC', 'Yu Mincho', Times, serif" },
   { id: 'mono', label: 'Mono',
-    stack: "'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace" },
+    stack: "'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, 'Microsoft YaHei UI', monospace" },
 ];
 
 function fontById(table, id, fallback) {
@@ -297,7 +297,7 @@ function fontBridge(name, ...args) {
 }
 
 function customStackFor(id) {
-  return `'${String(id).replace(/'/g, "")}', 'Segoe UI', system-ui, sans-serif`;
+  return `'${String(id).replace(/'/g, "")}', 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei UI', 'Yu Gothic UI', 'Noto Sans CJK SC', 'Noto Sans CJK JP', system-ui, sans-serif`;
 }
 
 function fontEntries() {
@@ -2060,9 +2060,11 @@ function setEffectLevel(name, level) {
   const lvlToMotes = [0, 14, 28, 48, 80];
   if (name === 'beat') {
     beatLevel = level;
+    beatMode = getLegacyMode(level);
     sliderBeat = lvlToPct[level];
     Settings.set('sliderBeat', sliderBeat);
     Settings.set('beatLevel', level);
+    Settings.set('beatMode', beatMode);
     startBeatEngine();
   } else if (name === 'chroma') {
     chromaLevel = level;
@@ -2072,21 +2074,27 @@ function setEffectLevel(name, level) {
     if (chromaLevel === 0) setChromaOffset(0);
   } else if (name === 'ambient') {
     ambientLevel = level;
+    ambientMode = getLegacyMode(level);
     sliderParticles = lvlToMotes[level];
     Settings.set('sliderParticles', sliderParticles);
     Settings.set('ambientLevel', level);
+    Settings.set('ambientMode', ambientMode);
     applyAmbientMode();
   } else if (name === 'moments') {
     momentLevel = level;
+    momentsMode = getLegacyMode(level);
     sliderMoments = lvlToPct[level];
     Settings.set('sliderMoments', sliderMoments);
     Settings.set('momentLevel', level);
+    Settings.set('momentsMode', momentsMode);
     startMomentEngine();
   } else if (name === 'tilt') {
     tiltLevel = level;
+    tiltMode = getLegacyMode(level);
     sliderTilt = lvlToPct[level];
     Settings.set('sliderTilt', sliderTilt);
     Settings.set('tiltLevel', level);
+    Settings.set('tiltMode', tiltMode);
     applyTiltMode();
     if (tiltLevel === 0) resetTilt();
   }
@@ -5065,6 +5073,7 @@ window.addEventListener('resize', () => {
   lyricFitTimer = setTimeout(() => {
     lyricFitTimer = 0;
     fitLyricLines();
+    if (activeLineIdx >= 0) scrollToActiveCluster([activeLineIdx]);
   }, 140);
 });
 
@@ -8235,12 +8244,19 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
       });
 
       // Subordinate translation / transliteration layer (hidden when toggled off).
-      const secondaryText = line.translation || line.transliteration || "";
-      if (secondaryText && !line.isBackground) {
-        const sec = document.createElement('div');
-        sec.className = 'line-secondary';
-        sec.textContent = secondaryText;
-        lineDiv.appendChild(sec);
+      if (!line.isBackground) {
+        if (line.transliteration) {
+          const secRomaji = document.createElement('div');
+          secRomaji.className = 'line-secondary line-romaji';
+          secRomaji.textContent = line.transliteration;
+          lineDiv.appendChild(secRomaji);
+        }
+        if (line.translation && line.translation !== line.transliteration) {
+          const secTrans = document.createElement('div');
+          secTrans.className = 'line-secondary line-trans';
+          secTrans.textContent = line.translation;
+          lineDiv.appendChild(secTrans);
+        }
       }
 
       container.appendChild(lineDiv);
@@ -8344,6 +8360,12 @@ window.setPlaybackState = function(playing) {
   if (isPlaying && !wasPlaying && lyrics.length > 0) {
     renderProgress(playheadMs + latencyOffsetMs);
   }
+  if (!isPlaying && wasPlaying) {
+    updateTimer(playheadMs);
+    if (lyrics.length > 0) {
+      renderProgress(playheadMs + latencyOffsetMs);
+    }
+  }
   // A paused transport stops the render loop, and the countdown chip is only ever
   // taken down from inside it — so pausing mid-break used to leave a chip sitting
   // there with its count frozen. Close it on the pause transition instead; the
@@ -8422,6 +8444,13 @@ window.syncPlayhead = function(ms, mode) {
 
   const predicted = isPlaying ? predictedPlayhead() : playheadMs;
   const diff = ms - predicted;
+
+  // While paused, playback does not advance. A report stepping backwards by less than
+  // SYNC_SNAP_MS is timeline settle, bridge poll latency, or clock skew from the pause edge —
+  // never drag the frozen playhead or progress bar backwards on a pause snapshot.
+  if (!isPlaying && diff < 0 && Math.abs(diff) < SYNC_SNAP_MS) {
+    return;
+  }
 
   // Progression or seek in player: if diff is significant (> 600ms) or mode is snap,
   // immediately land on the new playhead without stalling or waiting for pause/unpause!

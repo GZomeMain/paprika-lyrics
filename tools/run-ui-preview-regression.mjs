@@ -153,7 +153,7 @@ async function main() {
   const debugPort = 9222 + (process.pid % 500);
 
   const child = spawn(browserPath, [
-    '--headless=new',
+    '--headless',
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${profile}`,
     '--no-first-run',

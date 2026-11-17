@@ -281,6 +281,16 @@ class PositionClockTest(unittest.TestCase):
         paused = clock.observe(6100.0, 11.0, playing=False)
         self.assertEqual(paused.position_ms, 6100.0)
 
+    def test_a_pause_that_publishes_stale_or_lagging_position_does_not_step_backwards(self):
+        # A player that published a position before pause (e.g. 5000ms) or lagging
+        # behind prior (6000ms) must not drag the frozen playhead backwards.
+        clock = PositionClock()
+        clock.observe(4000.0, 9.0, playing=True)
+        clock.observe(4000.0, 9.5, playing=True)
+        # At 10.5s, prior is 5500.0. Player reports 5000.0.
+        paused = clock.observe(5000.0, 10.5, playing=False)
+        self.assertEqual(paused.position_ms, 5500.0)
+
     def test_a_paused_move_is_a_discontinuity_the_ui_lands_on(self):
         # Reported: "when moving around the timeline in the audio player the
         # lyrics don't automatically change with it, and only update once
@@ -294,6 +304,26 @@ class PositionClockTest(unittest.TestCase):
         moved = clock.observe(120_000.0, 12.0, playing=False)
         self.assertEqual(moved.position_ms, 120_000.0)
         self.assertTrue(moved.discontinuity)
+
+    def test_paused_lagging_snapshot_settle_does_not_rewind(self):
+        # Right after pausing, a player's delayed snapshot arriving within
+        # DISCONTINUITY_MS must not rewind the playhead or trigger a discontinuity.
+        clock = PositionClock()
+        clock.observe(5000.0, 10.0, playing=True)
+        clock.observe(5000.0, 11.0, playing=False)          # frozen at 6000
+        settle = clock.observe(5800.0, 11.25, playing=False)
+        self.assertEqual(settle.position_ms, 6000.0)
+        self.assertFalse(settle.discontinuity)
+
+    def test_paused_real_backward_seek_is_honored(self):
+        # A genuine backward scrub while paused (> DISCONTINUITY_MS) must still
+        # be recognized as a discontinuity to land on.
+        clock = PositionClock()
+        clock.observe(60_000.0, 10.0, playing=True)
+        clock.observe(60_000.0, 11.0, playing=False)        # frozen at 61000
+        scrub = clock.observe(20_000.0, 12.0, playing=False)
+        self.assertEqual(scrub.position_ms, 20_000.0)
+        self.assertTrue(scrub.discontinuity)
 
     def test_paused_jitter_is_not_a_discontinuity(self):
         # The guard above must not repaint the words twice a second: noise

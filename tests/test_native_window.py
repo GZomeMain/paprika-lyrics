@@ -42,8 +42,32 @@ class FakeUser32:
         self.cursor_path = []
         self.button_polls = 0
         self.capture = 0
+        self.parent = 0
 
     # --- Win32 surface used by core.native_window -------------------------
+    def SetParent(self, hwnd, parent):
+        h = getattr(hwnd, "value", hwnd)
+        p = getattr(parent, "value", parent)
+        self.calls.append(("SetParent", h, p))
+        old = self.parent
+        self.parent = p
+        return old
+
+    def GetParent(self, hwnd):
+        h = getattr(hwnd, "value", hwnd)
+        self.calls.append(("GetParent", h))
+        return self.parent
+
+    def GetClientRect(self, hwnd, ptr):
+        self.calls.append(("GetClientRect", hwnd))
+        r = ctypes.cast(ptr, ctypes.POINTER(RECT)).contents
+        r.left, r.top = 0, 0
+        r.right, r.bottom = 800, 600
+        return 1
+
+    def RedrawWindow(self, hwnd, rect, hrgn, flags):
+        self.calls.append(("RedrawWindow", hwnd, flags))
+        return 1
     def MonitorFromWindow(self, hwnd, flags):
         self.calls.append(("MonitorFromWindow", hwnd, flags))
         return 0x90000  # fake HMONITOR
@@ -544,6 +568,113 @@ class FailurePathsTest(unittest.TestCase):
             native = object()
         u = FakeUser32()
         self.assertIsNone(nw.apply_fullscreen(Weird(), user32=u))
+
+
+class DockingTest(unittest.TestCase):
+    """Win32 HWND docking into parent canvas without borders, caption, or taskbar icon."""
+
+    def test_dock_to_parent_strips_frame_styles_and_sets_child(self):
+        u, d = FakeUser32(), FakeDwmapi()
+        u.styles["style"] = nw.WS_POPUP | nw.WS_CAPTION | nw.WS_THICKFRAME | nw.WS_MINIMIZEBOX | nw.WS_MAXIMIZEBOX
+        u.styles["ex"] = nw.WS_EX_APPWINDOW
+        parent_hwnd = 0x200000
+
+        ok = nw.dock_to_parent(FakeWindow(), parent_hwnd, x=10, y=20, width=640, height=480, user32=u, dwmapi=d)
+        self.assertTrue(ok)
+
+        # Style has frame bits cleared and child bits set
+        style = u.styles["style"]
+        self.assertEqual(style & nw.DOCK_STRIP_STYLE, 0)
+        self.assertTrue(style & nw.WS_CHILD)
+        self.assertTrue(style & nw.WS_VISIBLE)
+        self.assertTrue(style & nw.WS_CLIPCHILDREN)
+
+        # ExStyle has WS_EX_APPWINDOW cleared and WS_EX_CONTROLPARENT set
+        ex = u.styles["ex"]
+        self.assertEqual(ex & nw.WS_EX_APPWINDOW, 0)
+        self.assertTrue(ex & nw.WS_EX_CONTROLPARENT)
+
+        # SetParent was called with parent_hwnd
+        self.assertEqual(u.parent, parent_hwnd)
+        self.assertIn(("SetParent", FakeWindow.native.Handle, parent_hwnd), u.calls)
+
+        # DWM rounded corners disabled (square for docked child)
+        self.assertIn((nw.DWMWA_WINDOW_CORNER_PREFERENCE, nw.DWMWCP_DONOTROUND), d.calls)
+
+        # SetWindowPos was called with bounds and SWP_SHOWWINDOW
+        last_swp = u.last("SetWindowPos")
+        self.assertIsNotNone(last_swp)
+        self.assertEqual(last_swp[3], 10)
+        self.assertEqual(last_swp[4], 20)
+        self.assertEqual(last_swp[5], 640)
+        self.assertEqual(last_swp[6], 480)
+        self.assertTrue(last_swp[7] & nw.SWP_SHOWWINDOW)
+        self.assertTrue(last_swp[7] & nw.SWP_FRAMECHANGED)
+
+    def test_dock_to_parent_already_docked_fast_paths_smooth_resize(self):
+        u, d = FakeUser32(), FakeDwmapi()
+        parent_hwnd = 0x200000
+        u.parent = parent_hwnd  # Already docked
+        calls_before = len(u.calls)
+
+        ok = nw.dock_to_parent(FakeWindow(), parent_hwnd, x=0, y=0, width=1024, height=768, user32=u, dwmapi=d)
+        self.assertTrue(ok)
+
+        # SetParent should NOT be called again when already docked to same parent
+        parent_calls = [c for c in u.calls[calls_before:] if c[0] == "SetParent"]
+        self.assertEqual(len(parent_calls), 0)
+
+        # Position should be updated
+        last_swp = u.last("SetWindowPos")
+        self.assertEqual(last_swp[5], 1024)
+        self.assertEqual(last_swp[6], 768)
+        self.assertTrue(last_swp[7] & nw.SWP_SHOWWINDOW)
+
+    def test_resize_docked_moves_and_resizes_without_parent_mutation(self):
+        u = FakeUser32()
+        ok = nw.resize_docked(FakeWindow(), x=5, y=10, width=500, height=400, user32=u)
+        self.assertTrue(ok)
+        last_swp = u.last("SetWindowPos")
+        self.assertEqual(last_swp[3], 5)
+        self.assertEqual(last_swp[4], 10)
+        self.assertEqual(last_swp[5], 500)
+        self.assertEqual(last_swp[6], 400)
+        self.assertTrue(last_swp[7] & nw.SWP_NOACTIVATE)
+        self.assertTrue(last_swp[7] & nw.SWP_SHOWWINDOW)
+
+    def test_undock_from_parent_restores_popup_and_desktop_parent(self):
+        u, d = FakeUser32(), FakeDwmapi()
+        u.parent = 0x200000
+        u.styles["style"] = nw.WS_CHILD | nw.WS_VISIBLE
+        u.styles["ex"] = nw.WS_EX_CONTROLPARENT
+
+        ok = nw.undock_from_parent(FakeWindow(), x=100, y=100, width=800, height=600, ontop=True, user32=u, dwmapi=d)
+        self.assertTrue(ok)
+
+        # Parent is now 0 (desktop)
+        self.assertEqual(u.parent, 0)
+        self.assertIn(("SetParent", FakeWindow.native.Handle, 0), u.calls)
+
+        # Style has WS_CHILD cleared and WS_POPUP set
+        style = u.styles["style"]
+        self.assertEqual(style & nw.WS_CHILD, 0)
+        self.assertTrue(style & nw.WS_POPUP)
+
+        # DWM rounded corners restored
+        self.assertIn((nw.DWMWA_WINDOW_CORNER_PREFERENCE, nw.DWMWCP_ROUND), d.calls)
+
+        # Position and topmost restored
+        self.assertTrue(u.topmost)
+        last_swp = u.last("SetWindowPos")
+        self.assertEqual(last_swp[2], nw.HWND_TOPMOST)
+        self.assertTrue(last_swp[7] & nw.SWP_FRAMECHANGED)
+
+    def test_docking_accepts_raw_int_hwnd(self):
+        u, d = FakeUser32(), FakeDwmapi()
+        raw_hwnd = 0x140000
+        ok = nw.dock_to_parent(raw_hwnd, 0x200000, user32=u, dwmapi=d)
+        self.assertTrue(ok)
+        self.assertEqual(u.parent, 0x200000)
 
 
 if __name__ == "__main__":
