@@ -280,25 +280,36 @@ def report():
 
 def main():
     BUILD.mkdir(exist_ok=True)
-    master = build_tile(MASTER)
-    # The favicon and the README asset are the same mark, as they were before.
-    master.resize((512, 512), Image.LANCZOS).save(ROOT / "assets" / "icon.png")
-    master.resize((512, 512), Image.LANCZOS).save(ROOT / "ui" / "icon.png")
+    logo_master_path = ROOT / "assets" / "logo.png"
+    if logo_master_path.exists():
+        master = Image.open(logo_master_path).convert("RGBA")
+        master.resize((512, 512), Image.LANCZOS).save(ROOT / "assets" / "icon.png")
+        master.resize((512, 512), Image.LANCZOS).save(ROOT / "ui" / "icon.png")
 
-    built = frames()
-    built[0].save(ROOT / "assets" / "icon.ico", format="ICO",
-                  sizes=[(f.size[0], f.size[1]) for f in built], append_images=built[1:])
-    master.save(BUILD / "logo-1024.png")
-    for size in (16, 24, 32, 48, 64, 256):
-        build_tile(size, simplified=size < 48).save(BUILD / f"logo-{size}.png")
-    build_mark(768).save(BUILD / "logo-mark.png")
-    review_sheet()
+        ico_frames = [master.resize((s, s), Image.LANCZOS) for s in ICO_SIZES]
+        ico_frames[0].save(ROOT / "assets" / "icon.ico", format="ICO",
+                           sizes=[(f.size[0], f.size[1]) for f in ico_frames], append_images=ico_frames[1:])
+        master.save(BUILD / "logo-1024.png")
+        for size in (16, 24, 32, 48, 64, 256):
+            master.resize((size, size), Image.LANCZOS).save(BUILD / f"logo-{size}.png")
+    else:
+        master = build_tile(MASTER)
+        master.resize((512, 512), Image.LANCZOS).save(ROOT / "assets" / "icon.png")
+        master.resize((512, 512), Image.LANCZOS).save(ROOT / "ui" / "icon.png")
+
+        built = frames()
+        built[0].save(ROOT / "assets" / "icon.ico", format="ICO",
+                      sizes=[(f.size[0], f.size[1]) for f in built], append_images=built[1:])
+        master.save(BUILD / "logo-1024.png")
+        for size in (16, 24, 32, 48, 64, 256):
+            build_tile(size, simplified=size < 48).save(BUILD / f"logo-{size}.png")
+        build_mark(768).save(BUILD / "logo-mark.png")
+        review_sheet()
 
     with Image.open(ROOT / "assets" / "icon.ico") as ico:
         got = sorted(ico.info.get("sizes", []))
     print("wrote assets/icon.png (512), ui/icon.png (512), assets/icon.ico "
           f"frames={got}")
-    report()
 
 
 if __name__ == "__main__":
