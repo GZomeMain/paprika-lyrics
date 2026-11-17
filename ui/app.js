@@ -850,11 +850,11 @@ function initWindowDrag() {
 
 function applyLayoutState() {
   document.body.classList.toggle('is-fullscreen', isFullscreen);
-  document.body.classList.toggle('layout-compact', layoutMode === 'compact');
   // Split needs the room of fullscreen: windowed it stays selected but renders
-  // as normal, so the float/header only change when it is actually active.
+  // as normal (compact), so the float/header only change when it is actually active.
   const splitActive = layoutMode === 'split' && isFullscreen;
   document.body.classList.toggle('layout-split', splitActive);
+  document.body.classList.toggle('layout-compact', !splitActive);
   document.body.classList.remove('layout-split-suppressed');
   // Fullscreen multiplies the lyric size (1.7x) and the layouts move the column, so what
   // fitted a moment ago may not fit now — and a line that was shrunk may not need to be.
@@ -929,12 +929,12 @@ function initFloatArt() {
 // mini buttons are windowed-only), so the compact row and the split panel's row
 // cannot drift apart.
 function syncArtControls() {
-  // Compact is 'off', split 'on' — a second read of which layout is active.
-  const splitActive = document.body.classList.contains('layout-split');
+  // Reflects the user's selected layout mode (compact vs split)
+  const isSplit = layoutMode === 'split';
   const layoutBtn = document.getElementById('art-btn-layout');
-  if (layoutBtn) layoutBtn.classList.toggle('is-on', splitActive);
+  if (layoutBtn) layoutBtn.classList.toggle('is-on', isSplit);
   const sideLayoutBtn = document.getElementById('side-btn-layout');
-  if (sideLayoutBtn) sideLayoutBtn.classList.toggle('is-on', splitActive);
+  if (sideLayoutBtn) sideLayoutBtn.classList.toggle('is-on', isSplit);
 
   document.querySelectorAll('.art-controls .art-btn[data-when]').forEach((btn) => {
     const wantsFullscreen = btn.dataset.when === 'fullscreen';

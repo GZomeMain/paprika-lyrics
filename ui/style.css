@@ -5093,7 +5093,7 @@ body.layout-compact #lyrics-container {
   width: var(--card-w);
   max-width: calc(100% - 56px);
   z-index: 25;
-  display: none;
+  display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
@@ -5114,6 +5114,7 @@ body.layout-compact .track-float {
 }
 
 /* Split mode: the left panel owns art + title + artist; the compact float retires. */
+body.layout-split.is-fullscreen .track-float,
 body.layout-split .track-float {
   display: none;
 }
