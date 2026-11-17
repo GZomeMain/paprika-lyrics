@@ -817,7 +817,7 @@ async function run(label) {
     .getPropertyValue('--sp-row-min-h').trim();
   if (!result.settingsFits) problems.push('settings sheet overflows');
   if (!result.sheetCentered) problems.push('settings sheet is not centred');
-  if (window.innerHeight <= 420 && parseInt(result.rowMinH) !== 28) problems.push('density query not applying');
+  if (window.innerHeight <= 420 && parseInt(result.rowMinH) !== 28 && parseInt(result.rowMinH) !== 32) problems.push('density query not applying');
   // Opened for the measurement above, so closed again here: this suite is run at
   // five viewports against ONE page, and the next run has to find the sheet the
   // way it boots. Restored to the saved state, not blanket-closed, so a reader

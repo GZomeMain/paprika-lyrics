@@ -3982,6 +3982,12 @@ body.is-fullscreen .art-player .transport-play .icon { width: 30px; height: 30px
   }
 }
 
+@media (max-height: 420px) {
+  .sp-sheet {
+    --sp-row-min-h: 28px;
+  }
+}
+
 .reduce-motion .value-flash {
   animation: none;
 }
