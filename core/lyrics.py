@@ -108,8 +108,28 @@ def _clean_user_credit(user_obj):
     }
 
 
-def _build_fallback_attribution(source: str, ttml: str = "") -> dict:
-    s = (source or "").lower()
+def _build_fallback_attribution(source: str | None = None, ttml: str = "") -> dict:
+    s = (source or "").lower().strip()
+    if not s or s in ("none", "unknown"):
+        return {
+            "provider": "unknown",
+            "provider_label": "Unknown",
+            "raw_source": "Unknown",
+            "songwriters": [],
+            "maker": None,
+            "uploader": None,
+        }
+    if s.startswith("spicy (") and s.endswith(")"):
+        inner = s[7:-1].strip()
+        if not inner or inner in ("none", "unknown"):
+            return {
+                "provider": "unknown",
+                "provider_label": "Unknown",
+                "raw_source": "Unknown",
+                "songwriters": [],
+                "maker": None,
+                "uploader": None,
+            }
     if "lrclib" in s:
         return {
             "provider": "lrclib",
@@ -148,19 +168,20 @@ def _build_fallback_attribution(source: str, ttml: str = "") -> dict:
             "maker": None,
             "uploader": None,
         }
-    if "spicy" in s:
+    if "spicy" in s or "community" in s:
         return {
             "provider": "community",
-            "provider_label": "Community lyrics",
+            "provider_label": "Spicy Lyrics",
             "raw_source": "spicy_lyrics",
             "songwriters": [],
             "maker": None,
             "uploader": None,
         }
+    clean_src = str(source).strip() if source is not None else "Unknown"
     return {
-        "provider": "none",
-        "provider_label": source or "None",
-        "raw_source": source or "None",
+        "provider": s.replace(" ", "_"),
+        "provider_label": clean_src or "Unknown",
+        "raw_source": clean_src or "Unknown",
         "songwriters": [],
         "maker": None,
         "uploader": None,
@@ -204,12 +225,18 @@ def fetch_spicy_with_id(track_id: str, lrclib_lines: list[dict] = None) -> tuple
                 debug_log("Spicy payload failed to parse:", exc)
                 return [], None
             if lines:
-                raw_src = body.get("source") or body.get("Source") or "Apple Music"
-                raw_src_clean = str(raw_src).strip()
+                raw_src = body.get("source")
+                if raw_src is None:
+                    raw_src = body.get("Source")
+                raw_src_clean = str(raw_src).strip() if raw_src is not None else ""
                 raw_lower = raw_src_clean.lower()
-                if raw_lower in ("spicy_lyrics", "spicylyrics", "community", "community sync"):
+                if not raw_src_clean or raw_lower in ("none", "unknown", "null"):
+                    raw_src_clean = "Unknown"
+                    provider_id = "unknown"
+                    provider_label = "Unknown"
+                elif raw_lower in ("spicy_lyrics", "spicylyrics", "community", "community sync", "spicy", "spicy lyrics"):
                     provider_id = "community"
-                    provider_label = "Community lyrics"
+                    provider_label = "Spicy Lyrics"
                 elif "apple" in raw_lower:
                     provider_id = "apple_music"
                     provider_label = "Apple Music"

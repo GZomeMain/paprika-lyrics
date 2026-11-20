@@ -382,5 +382,225 @@ class WindowGeometryTest(unittest.TestCase):
         self.assertEqual(self.store.get_mini_size(), {"width": 400, "height": 520})
 
 
+
+
+class CacheTtlSection7Test(unittest.TestCase):
+    """
+    Tests for SpicyLyrics Developer Terms Section 7 Caching requirements:
+    - Default TTL is 3 days (259,200s).
+    - Hard cap of 30 days (2,592,000s) strictly enforced.
+    - No caching can be unbounded or set to 0 (never expire).
+    - Any cached lyric older than min(CACHE_TTL_SECONDS, 30*86400) is strictly evicted.
+    """
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.path = Path(self.tmp_dir) / "cache.json"
+        self.store = storage.CacheManager(filepath=self.path)
+
+    def tearDown(self):
+        try:
+            self.store.flush()
+        except Exception:
+            pass
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_default_cache_ttl_constants(self):
+        self.assertEqual(config.DEFAULT_CACHE_TTL_SECONDS, 259200)
+        self.assertEqual(config.MAX_CACHE_TTL_SECONDS, 2592000)
+        self.assertEqual(storage.DEFAULT_CACHE_TTL_SECONDS, 259200)
+        self.assertEqual(storage.MAX_CACHE_TTL_SECONDS, 2592000)
+
+    def test_clamp_cache_ttl_rules(self):
+        # None or empty defaults to 3 days
+        self.assertEqual(config.clamp_cache_ttl(None), 259200)
+        self.assertEqual(config.clamp_cache_ttl(""), 259200)
+        self.assertEqual(storage.clamp_cache_ttl(None), 259200)
+
+        # Zero or negative values clamp to 3 days (never unbounded)
+        self.assertEqual(config.clamp_cache_ttl(0), 259200)
+        self.assertEqual(config.clamp_cache_ttl("0"), 259200)
+        self.assertEqual(config.clamp_cache_ttl(-1), 259200)
+        self.assertEqual(config.clamp_cache_ttl(-86400), 259200)
+        self.assertEqual(storage.clamp_cache_ttl(0), 259200)
+        self.assertEqual(storage.clamp_cache_ttl(-500), 259200)
+
+        # Invalid strings clamp to 3 days
+        self.assertEqual(config.clamp_cache_ttl("not-a-number"), 259200)
+        self.assertEqual(storage.clamp_cache_ttl("invalid"), 259200)
+
+        # Valid values within range (1s .. 2,592,000s) are preserved
+        self.assertEqual(config.clamp_cache_ttl(86400), 86400)
+        self.assertEqual(config.clamp_cache_ttl(259200), 259200)
+        self.assertEqual(config.clamp_cache_ttl(2592000), 2592000)
+        self.assertEqual(storage.clamp_cache_ttl(86400), 86400)
+
+        # Values exceeding 30 days are clamped to 30 days maximum
+        self.assertEqual(config.clamp_cache_ttl(2592001), 2592000)
+        self.assertEqual(config.clamp_cache_ttl(5000000), 2592000)
+        self.assertEqual(config.clamp_cache_ttl("99999999"), 2592000)
+        self.assertEqual(storage.clamp_cache_ttl(5000000), 2592000)
+
+    def test_cached_lyric_strictly_evicted_at_30_day_hard_cap(self):
+        now = 10_000_000.0
+        # Save a lyric at `now`
+        with mock.patch("storage.time.time", return_value=now):
+            self.store.set_lyrics("track_30d", {"parser_version": 7, "lines": ["spicy lyrics"]})
+
+        # Check at 29 days (29 * 86400 = 2,505,600s): should still be fresh when TTL is 30 days
+        with mock.patch.object(storage, "CACHE_TTL_SECONDS", 2592000):
+            with mock.patch("storage.time.time", return_value=now + (29 * 86400)):
+                payload = self.store.get_lyrics("track_30d", 7)
+                self.assertIsNotNone(payload)
+
+        # Check at 30 days + 1 second: MUST strictly be expired and evicted
+        with mock.patch.object(storage, "CACHE_TTL_SECONDS", 2592000):
+            with mock.patch("storage.time.time", return_value=now + (30 * 86400) + 1):
+                self.assertIsNone(self.store.get_lyrics("track_30d", 7))
+                self.assertNotIn("track_30d", self.store._data["lyrics"])
+
+    def test_cached_lyric_evicted_even_if_ttl_set_higher_than_30_days(self):
+        now = 10_000_000.0
+        with mock.patch("storage.time.time", return_value=now):
+            self.store.set_lyrics("track_unbounded", {"parser_version": 7, "lines": []})
+
+        # Even if someone attempts to configure 100 days TTL
+        with mock.patch.object(storage, "CACHE_TTL_SECONDS", 100 * 86400):
+            with mock.patch("storage.time.time", return_value=now + (30 * 86400) + 10):
+                self.assertIsNone(self.store.get_lyrics("track_unbounded", 7))
+                self.assertNotIn("track_unbounded", self.store._data["lyrics"])
+
+    def test_max_age_s_zero_or_negative_does_not_disable_expiration(self):
+        now = 10_000_000.0
+        with mock.patch("storage.time.time", return_value=now):
+            self.store.set_lyrics("song_zero_ttl", {"parser_version": 7, "lines": []})
+
+        # 4 days later (> default 3 days)
+        with mock.patch("storage.time.time", return_value=now + (4 * 86400)):
+            # Passing max_age_s=0 must NOT allow unbounded caching; it clamps to default 3 days
+            self.assertIsNone(self.store.get_lyrics("song_zero_ttl", 7, max_age_s=0))
+            self.assertNotIn("song_zero_ttl", self.store._data["lyrics"])
+
+    def test_max_age_s_clamped_to_30_days(self):
+        now = 10_000_000.0
+        with mock.patch("storage.time.time", return_value=now):
+            self.store.set_lyrics("song_big_ttl", {"parser_version": 7, "lines": []})
+
+        # 31 days later
+        with mock.patch("storage.time.time", return_value=now + (31 * 86400)):
+            # Passing max_age_s=99999999 must clamp to 30 days and evict at 31 days
+            self.assertIsNone(self.store.get_lyrics("song_big_ttl", 7, max_age_s=99999999))
+            self.assertNotIn("song_big_ttl", self.store._data["lyrics"])
+
+    def test_scrub_strictly_evicts_lyrics_exceeding_30_days(self):
+        now = 10_000_000.0
+        with mock.patch("storage.time.time", return_value=now - (31 * 86400)):
+            self.store.set_lyrics("stale_month_old", {"parser_version": 11, "lines": []})
+        with mock.patch("storage.time.time", return_value=now - (2 * 86400)):
+            self.store.set_lyrics("fresh_two_days", {"parser_version": 11, "lines": []})
+
+        with mock.patch("storage.time.time", return_value=now):
+            removed = self.store.scrub_lyrics(11)
+            self.assertEqual(removed, 1)
+            self.assertNotIn("stale_month_old", self.store._data["lyrics"])
+            self.assertIn("fresh_two_days", self.store._data["lyrics"])
+
+
+class ApiKeyRejectionTest(unittest.TestCase):
+    """
+    Tests for publishable key enforcement and secret key rejection:
+    - Desktop client only accepts publishable keys starting with 'sl_pk_'.
+    - Secret keys starting with 'sl_sk_' are strictly rejected with a clear error message.
+    - Non-publishable keys are rejected with an error message.
+    - Clearing keys (empty string) is supported.
+    """
+
+    def setUp(self):
+        self._orig_env = os.environ.get("SPICY_API_KEY")
+        self._orig_cfg_key = config.SPICY_API_KEY
+        if "SPICY_API_KEY" in os.environ:
+            del os.environ["SPICY_API_KEY"]
+        config.SPICY_API_KEY = ""
+
+    def tearDown(self):
+        if self._orig_env is not None:
+            os.environ["SPICY_API_KEY"] = self._orig_env
+        else:
+            os.environ.pop("SPICY_API_KEY", None)
+        config.SPICY_API_KEY = self._orig_cfg_key
+
+    def test_set_spicy_api_key_rejects_secret_key(self):
+        with self.assertRaises(ValueError) as ctx:
+            config.set_spicy_api_key("sl_sk_test_secret_key_1234567890")
+        self.assertIn("Secret keys", str(ctx.exception))
+        self.assertIn("sl_sk_", str(ctx.exception))
+        self.assertIn("sl_pk_", str(ctx.exception))
+        # Verify key was not set
+        self.assertEqual(config.SPICY_API_KEY, "")
+        self.assertNotIn("SPICY_API_KEY", os.environ)
+
+    def test_set_spicy_api_key_rejects_non_publishable_keys(self):
+        invalid_keys = ["sk_live_12345", "random_key_string", "api_key_123"]
+        for bad_key in invalid_keys:
+            with self.subTest(key=bad_key):
+                with self.assertRaises(ValueError) as ctx:
+                    config.set_spicy_api_key(bad_key)
+                self.assertIn("sl_pk_", str(ctx.exception))
+
+    def test_set_spicy_api_key_accepts_publishable_key(self):
+        pub_key = "sl_pk_live_abcdef1234567890"
+        res = config.set_spicy_api_key(pub_key)
+        self.assertTrue(res["ok"])
+        self.assertTrue(res["key_set"])
+        self.assertEqual(res["masked"], "sl_pk_••••••••7890")
+        self.assertEqual(config.get_spicy_api_key(), pub_key)
+        self.assertEqual(os.environ.get("SPICY_API_KEY"), pub_key)
+
+    def test_set_spicy_api_key_clears_key(self):
+        config.set_spicy_api_key("sl_pk_sample_key_123456")
+        self.assertEqual(config.get_spicy_api_key(), "sl_pk_sample_key_123456")
+
+        res = config.set_spicy_api_key("")
+        self.assertTrue(res["ok"])
+        self.assertFalse(res["key_set"])
+        self.assertEqual(res["masked"], "")
+        self.assertEqual(config.get_spicy_api_key(), "")
+        self.assertNotIn("SPICY_API_KEY", os.environ)
+
+    def test_get_spicy_api_key_rejects_secret_key_in_env(self):
+        with mock.patch.dict(os.environ, {"SPICY_API_KEY": "sl_sk_live_unauthorized_key"}):
+            self.assertEqual(config.get_spicy_api_key(), "")
+            with self.assertRaises(ValueError) as ctx:
+                config.get_spicy_api_key(raise_on_invalid=True)
+            self.assertIn("Secret keys", str(ctx.exception))
+
+    def test_get_spicy_api_key_rejects_non_publishable_key_in_env(self):
+        with mock.patch.dict(os.environ, {"SPICY_API_KEY": "invalid_bearer_token"}):
+            self.assertEqual(config.get_spicy_api_key(), "")
+            with self.assertRaises(ValueError) as ctx:
+                config.get_spicy_api_key(raise_on_invalid=True)
+            self.assertIn("sl_pk_", str(ctx.exception))
+
+    def test_get_spicy_api_key_returns_publishable_key(self):
+        pub_key = "sl_pk_prod_1122334455667788"
+        with mock.patch.dict(os.environ, {"SPICY_API_KEY": pub_key}):
+            self.assertEqual(config.get_spicy_api_key(), pub_key)
+
+    def test_get_spicy_api_key_rejects_secret_key_in_cache(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config.SPICY_API_KEY = ""
+            with mock.patch("storage.CACHE.get_setting", return_value="sl_sk_cached_secret_123"):
+                with mock.patch("storage.CACHE.set_setting") as mock_set:
+                    self.assertEqual(config.get_spicy_api_key(), "")
+                    # Purges secret key from persistent storage
+                    mock_set.assert_called_with("spicy_api_key", None)
+
+    def test_get_spicy_api_key_empty_when_unset(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config.SPICY_API_KEY = ""
+            with mock.patch("storage.CACHE.get_setting", return_value=None):
+                self.assertEqual(config.get_spicy_api_key(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

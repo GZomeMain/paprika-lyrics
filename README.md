@@ -148,6 +148,10 @@ The built-in settings console (<kbd>Ctrl</kbd> + <kbd>,</kbd>) offers rich custo
 - **👥 Profiles:** Configure player-specific settings (e.g., custom latency profiles for Spotify vs. YouTube vs. VLC).
 - **🔍 Diagnostics:** Inspect live GSMTC media session tokens, track signature hashes, resolver logs, and cache efficiency metrics.
 
+> [!WARNING]
+> **Pre-Alpha Notice: Modular Customization System**
+> The newly added advanced customization engine (`core/customization.py`, `ui/customization.js`, presets and dynamic module system) is currently an **experimental pre-alpha preview** and not yet finalized for production. Configuration schemas, preset definitions, and runtime bridges are actively in development and subject to change.
+
 </details>
 
 ---

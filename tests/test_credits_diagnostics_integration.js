@@ -117,4 +117,174 @@ assert(js.includes("el.classList.contains('sp-credits-card')"), 'sp-credits-card
 assert(js.includes("row.classList.contains('sp-credits-card')"), 'sp-credits-card must have comprehensive text marking');
 console.log('[PASS] Settings search indexing and text-marking verified');
 
+// 8. Section 6 Attribution Verification in Diagnostics & Credits
+console.log('\n--- 8. Section 6 Attribution Requirements Verification ---');
+
+// Mock DOM elements for renderCreditsInSettings and appendLyricsCredits
+const mockElements = {
+  'sp-credits-provider-badge': { textContent: '' },
+  'sp-credits-writers-row': { style: { display: 'none' } },
+  'sp-credits-writers': { textContent: '' },
+  'sp-credits-maker-row': { style: { display: 'none' } },
+  'sp-credits-maker': { innerHTML: '', textContent: '' },
+  'sp-credits-uploader-row': { style: { display: 'none' } },
+  'sp-credits-uploader': { innerHTML: '', textContent: '' },
+  'sp-credits-empty-hint': { style: { display: '' } }
+};
+
+const domContext = {
+  console,
+  document: {
+    getElementById(id) { return mockElements[id] || null; },
+    createElement(tag) {
+      return {
+        tagName: tag.toUpperCase(),
+        className: '',
+        id: '',
+        innerHTML: '',
+        textContent: '',
+        children: [],
+        style: {},
+        appendChild(child) { this.children.push(child); },
+        remove() {}
+      };
+    }
+  },
+  window: {}
+};
+
+vm.createContext(domContext);
+vm.runInContext(`
+  function escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function formatCreditUsername(nameOrId) {
+    if (!nameOrId) return '';
+    const s = String(nameOrId).trim();
+    return s.startsWith('@') ? s : '@' + s;
+  }
+
+  let lyrics = [];
+  let currentAttribution = null;
+  let currentLyricsSource = "";
+  let diagnostics = null;
+
+  ${js.slice(js.indexOf('function resolveAttributionProvider('), js.indexOf('function renderCornerAttribution()'))}
+
+  window.resolveAttributionProvider = resolveAttributionProvider;
+  window.renderCreditsInSettings = renderCreditsInSettings;
+  window.appendLyricsCredits = appendLyricsCredits;
+  window.setAttr = (a) => { currentAttribution = a; };
+  window.setSource = (s) => { currentLyricsSource = s; };
+  window.setLyrics = (l) => { lyrics = l; };
+  window.setDiag = (d) => { diagnostics = d; };
+`, domContext);
+
+const { resolveAttributionProvider, renderCreditsInSettings, appendLyricsCredits } = domContext.window;
+
+// 8.1 resolveAttributionProvider checks
+const spicyRes1 = resolveAttributionProvider({ provider: 'spicy_lyrics' });
+assert.strictEqual(spicyRes1.provider, 'spicy_lyrics');
+assert.strictEqual(spicyRes1.providerLabel, 'Spicy Lyrics');
+
+const spicyRes2 = resolveAttributionProvider({ provider: 'community' });
+assert.strictEqual(spicyRes2.provider, 'spicy_lyrics');
+assert.strictEqual(spicyRes2.providerLabel, 'Spicy Lyrics');
+
+const spicyRes3 = resolveAttributionProvider({ provider: 'spicy' });
+assert.strictEqual(spicyRes3.provider, 'spicy_lyrics');
+assert.strictEqual(spicyRes3.providerLabel, 'Spicy Lyrics');
+
+const spicyRes4 = resolveAttributionProvider({ provider_label: 'Community lyrics' });
+assert.strictEqual(spicyRes4.providerLabel, 'Spicy Lyrics');
+
+// Missing / None / unknown checks -> must be "Unknown"
+const unkRes1 = resolveAttributionProvider(null, '');
+assert.strictEqual(unkRes1.provider, 'unknown');
+assert.strictEqual(unkRes1.providerLabel, 'Unknown');
+
+const unkRes2 = resolveAttributionProvider({ provider: 'none', provider_label: 'None' }, 'None');
+assert.strictEqual(unkRes2.provider, 'unknown');
+assert.strictEqual(unkRes2.providerLabel, 'Unknown');
+
+const unkRes3 = resolveAttributionProvider({}, 'unknown');
+assert.strictEqual(unkRes3.provider, 'unknown');
+assert.strictEqual(unkRes3.providerLabel, 'Unknown');
+
+console.log('[PASS] resolveAttributionProvider correctly normalizes Spicy Lyrics and handles Unknown');
+
+// 8.2 renderCreditsInSettings checks
+domContext.window.setLyrics([{ text: 'Song line' }]);
+domContext.window.setAttr({
+  provider: 'community',
+  maker: { username: 'testmaker', id: '456' },
+  uploader: { username: 'testuploader', id: '789' }
+});
+renderCreditsInSettings();
+assert.strictEqual(mockElements['sp-credits-provider-badge'].textContent, 'Spicy Lyrics',
+  'Provider badge must display "Spicy Lyrics" for community provider');
+assert.strictEqual(mockElements['sp-credits-maker-row'].style.display, '');
+assert(mockElements['sp-credits-maker'].innerHTML.includes('https://spicylyrics.org/uid/456'));
+assert(mockElements['sp-credits-maker'].innerHTML.includes('@testmaker'));
+assert.strictEqual(mockElements['sp-credits-uploader-row'].style.display, '');
+assert(mockElements['sp-credits-uploader'].innerHTML.includes('https://spicylyrics.org/uid/789'));
+assert(mockElements['sp-credits-uploader'].innerHTML.includes('@testuploader'));
+
+// Missing / unknown attribution in settings
+domContext.window.setAttr(null);
+domContext.window.setSource('None');
+renderCreditsInSettings();
+assert.strictEqual(mockElements['sp-credits-provider-badge'].textContent, 'Unknown',
+  'Provider badge must display "Unknown" when source is "None"');
+
+domContext.window.setAttr({ provider: 'unknown' });
+domContext.window.setSource('');
+renderCreditsInSettings();
+assert.strictEqual(mockElements['sp-credits-provider-badge'].textContent, 'Unknown',
+  'Provider badge must display "Unknown" when provider is "unknown"');
+
+console.log('[PASS] renderCreditsInSettings badge and contributor links verified for Section 6');
+
+// 8.3 appendLyricsCredits container test
+const mockContainer = {
+  children: [],
+  appendChild(child) { this.children.push(child); }
+};
+
+appendLyricsCredits(mockContainer, {
+  provider: 'community',
+  songwriters: ['John Lennon', 'Paul McCartney'],
+  maker: { username: 'lyric_maker', id: '999' }
+}, 'spicy_lyrics');
+
+assert(mockContainer.children.length > 0, 'Credits element must be appended');
+const creditsBlock = mockContainer.children[0];
+assert.strictEqual(creditsBlock.id, 'lyrics-credits');
+
+// Check songwriters row
+const writersBlock = creditsBlock.children.find(c => c.className === 'lyrics-credits-writers');
+assert(writersBlock, 'Songwriters block must exist');
+assert(writersBlock.innerHTML.includes('John Lennon, Paul McCartney'));
+
+// Check attribution row
+const attrBlock = creditsBlock.children.find(c => c.className === 'lyrics-credits-attribution');
+assert(attrBlock, 'Attribution row must exist');
+const provEl = attrBlock.children.find(c => c.className === 'lyrics-credit-provider');
+assert(provEl, 'Provider span must exist');
+assert.strictEqual(provEl.textContent, 'Spicy Lyrics', 'Provider in song credits must be "Spicy Lyrics"');
+
+// Unknown in appendLyricsCredits
+const mockContainerUnk = {
+  children: [],
+  appendChild(child) { this.children.push(child); }
+};
+appendLyricsCredits(mockContainerUnk, { provider: 'unknown' }, '');
+const unkBlock = mockContainerUnk.children[0];
+const unkAttrBlock = unkBlock.children.find(c => c.className === 'lyrics-credits-attribution');
+const unkProvEl = unkAttrBlock.children.find(c => c.className === 'lyrics-credit-provider');
+assert.strictEqual(unkProvEl.textContent, 'Unknown', 'Unknown provider must display "Unknown" in song credits');
+
+console.log('[PASS] appendLyricsCredits properly renders "Spicy Lyrics", songwriters, maker, and "Unknown"');
+
 console.log('\n>>> ALL DIAGNOSTICS & CREDITS INTEGRATION CHECKS PASSED! <<<');

@@ -3,7 +3,16 @@ import os
 import threading
 import time
 from pathlib import Path
-from config import CACHE_FILE, CACHE_TTL_SECONDS
+from config import (
+    CACHE_FILE,
+    CACHE_TTL_SECONDS,
+    DEFAULT_CACHE_TTL_SECONDS,
+    MAX_CACHE_TTL_SECONDS,
+    clamp_cache_ttl,
+)
+
+# Re-clamp CACHE_TTL_SECONDS at storage module level to ensure Section 7 compliance
+CACHE_TTL_SECONDS = clamp_cache_ttl(CACHE_TTL_SECONDS)
 
 class CacheManager:
     """
@@ -32,6 +41,7 @@ class CacheManager:
             # file is authoritative and re-read from disk, never cached.
             "ttml": {"files": {}, "bindings": {}},
             "settings": {},
+            "customization": {"state": {}, "presets": {}, "active_preset_id": "default"},
         }
         if not self.filepath.exists():
             return default_structure
@@ -127,15 +137,20 @@ class CacheManager:
     # Synced Lyrics Cache (Bounded LRU + TTL)
     # =========================================================================
     def _is_expired(self, payload: dict, max_age_s: int | None = None) -> bool:
-        """A lyric payload is stale when it predates the configured TTL."""
-        max_age = CACHE_TTL_SECONDS if max_age_s is None else max_age_s
-        if max_age <= 0:
-            return False
+        """
+        A lyric payload is stale when it predates the configured TTL or the 30-day hard cap.
+        Enforces Section 7: any lyric older than min(CACHE_TTL_SECONDS, 30*86400)
+        is strictly treated as expired and evicted. No caching can be unbounded or set to 0.
+        """
+        raw_ttl = CACHE_TTL_SECONDS if max_age_s is None else max_age_s
+        effective_ttl = clamp_cache_ttl(raw_ttl)
+        effective_ttl = min(effective_ttl, MAX_CACHE_TTL_SECONDS)
+
         saved_at = payload.get("saved_at")
         if not isinstance(saved_at, (int, float)):
             # Legacy entries (pre-TTL) are treated as expired so they get refreshed once.
             return True
-        return (time.time() - saved_at) > max_age
+        return (time.time() - saved_at) > effective_ttl
 
     def _prune_expired_lyrics(self, data: dict) -> bool:
         """Drops every expired lyric entry. Returns True if anything was removed."""
@@ -386,5 +401,84 @@ class CacheManager:
             else:
                 settings[key] = value
             self._schedule_save(delay=0.4)
+
+    # =========================================================================
+    # Advanced Customization Persistence
+    # =========================================================================
+    def _customization(self) -> dict:
+        """Internal helper returning the customization root dict under lock."""
+        cust = self._data.setdefault("customization", {})
+        if not isinstance(cust, dict):
+            cust = self._data["customization"] = {}
+        cust.setdefault("state", {})
+        cust.setdefault("presets", {})
+        cust.setdefault("active_preset_id", "default")
+        return cust
+
+    def get_customization_state(self) -> dict:
+        """Returns deep copy of persistent customization state."""
+        import copy
+        with self._lock:
+            cust = self._customization()
+            return copy.deepcopy(cust.get("state") or {})
+
+    def save_customization_state(self, state: dict, active_preset_id: str | None = None):
+        """Persists customization state dictionary and optional active preset ID."""
+        import copy
+        with self._lock:
+            cust = self._customization()
+            cust["state"] = copy.deepcopy(state) if isinstance(state, dict) else {}
+            if active_preset_id is not None:
+                cust["active_preset_id"] = str(active_preset_id)
+            self._schedule_save(delay=0.4)
+
+    def get_customization_active_preset(self) -> str:
+        """Returns the ID of the currently active preset."""
+        with self._lock:
+            cust = self._customization()
+            return str(cust.get("active_preset_id", "default"))
+
+    def set_customization_active_preset(self, preset_id: str):
+        """Updates the currently active preset ID."""
+        with self._lock:
+            cust = self._customization()
+            cust["active_preset_id"] = str(preset_id)
+            self._schedule_save(delay=0.4)
+
+    def get_custom_presets(self) -> dict:
+        """Returns all user-defined custom presets."""
+        import copy
+        with self._lock:
+            cust = self._customization()
+            return copy.deepcopy(cust.get("presets") or {})
+
+    def get_custom_preset(self, preset_id: str) -> dict | None:
+        """Returns a single user-defined custom preset or None."""
+        import copy
+        with self._lock:
+            cust = self._customization()
+            presets = cust.get("presets") or {}
+            preset = presets.get(preset_id)
+            return copy.deepcopy(preset) if isinstance(preset, dict) else None
+
+    def save_custom_preset(self, preset_id: str, preset_data: dict):
+        """Saves or updates a user-defined custom preset."""
+        import copy
+        with self._lock:
+            cust = self._customization()
+            presets = cust.setdefault("presets", {})
+            presets[str(preset_id)] = copy.deepcopy(preset_data) if isinstance(preset_data, dict) else {}
+            self._schedule_save(delay=0.4)
+
+    def delete_custom_preset(self, preset_id: str) -> bool:
+        """Deletes a user-defined custom preset by ID. Returns True if deleted."""
+        with self._lock:
+            cust = self._customization()
+            presets = cust.setdefault("presets", {})
+            if preset_id in presets:
+                del presets[preset_id]
+                self._schedule_save(delay=0.4)
+                return True
+            return False
 
 CACHE = CacheManager()

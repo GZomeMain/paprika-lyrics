@@ -589,7 +589,7 @@ body.moment-live {
 .fx-canvas {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 2 !important;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -1055,7 +1055,7 @@ body.mini .fx-canvas,
   overflow-x: clip;
   padding: 180px max(32px, 3%) 240px 28px;
   scrollbar-width: none;
-  z-index: 10;
+  z-index: 10 !important;
   position: relative;
   /* Song changes cross-fade instead of hard-replacing the tree behind a spinner. */
   transition: opacity var(--dur-3) var(--ease-fluid),
@@ -1146,6 +1146,30 @@ body.mini .fx-canvas,
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow), var(--glass-edge);
   animation: gap-enter var(--dur-4) var(--ease-fluid) both;
+}
+
+[data-lyrics-dock="center"] #lyrics-container > .gap-indicator,
+#lyrics-container[data-lyrics-dock="center"] > .gap-indicator {
+  align-self: center;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+[data-lyrics-dock="right"] #lyrics-container > .gap-indicator,
+#lyrics-container[data-lyrics-dock="right"] > .gap-indicator {
+  align-self: flex-end;
+  margin-left: auto;
+  margin-right: 2px;
+  text-align: right;
+}
+
+[data-lyrics-dock="left"] #lyrics-container > .gap-indicator,
+#lyrics-container[data-lyrics-dock="left"] > .gap-indicator {
+  align-self: flex-start;
+  margin-left: 2px;
+  margin-right: auto;
+  text-align: left;
 }
 
 /* Left in place for the reduced-motion path, where the animations are dropped
@@ -1294,6 +1318,8 @@ body.mini .fx-canvas,
    ========================================================= */
 
 .line {
+  position: relative;
+  z-index: 5;
   font-family: var(--lyric-font-family, 'Barriecito', cursive, sans-serif);
   font-weight: var(--lyric-font-weight, 400); /* 400 avoids synthetic blurring for Barriecito */
   /* `--line-fit` is the line's own shrink factor (1 unless the line holds a run

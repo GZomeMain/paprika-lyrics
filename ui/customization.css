@@ -1,0 +1,1033 @@
+/**
+ * Paprika Advanced Customization Stylesheet
+ * ui/customization.css
+ *
+ * Base CSS custom properties and token structures for advanced customizations:
+ * - Lyric typography tokens (--cust-lyrics-*)
+ * - Visual & backdrop parameters (--cust-particle-*, --cust-bg-*)
+ * - Audio-reactive pulse & dynamic glow tokens (--cust-beat-*, --cust-pulse-*, --cust-spring-*)
+ * - Layout overrides & geometric metrics (--cust-container-padding, --cust-lyrics-align)
+ * - Themes, accents, and surface materials (--cust-accent-color, --cust-bg-tint)
+ */
+
+:root {
+  /* =========================================================================
+     1. Lyrics Typography & Visual Styling Tokens (Canonical Schema)
+     ========================================================================= */
+  --cust-lyrics-font-family: var(--lyric-font-family, 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  --cust-lyrics-font-size-scale: 1.0;
+  --cust-lyrics-font-weight: 700;
+  --cust-lyrics-letter-spacing: 0px;
+  --cust-lyrics-active-scale: 1.045;
+  --cust-lyrics-active-glow: 10px;
+  --cust-lyrics-active-glow-color: rgba(255, 255, 255, 0.6);
+  --cust-lyrics-line-gap: 18px;
+  --cust-lyrics-inactive-opacity: 0.35;
+  --cust-lyrics-secondary-opacity: 0.5;
+  --cust-lyrics-adlib-style: italic;
+  --cust-lyrics-bevel: 0;
+  --cust-lyrics-text-shadow: none;
+
+  /* Aliases & bridge to existing engine */
+  --cust-lyric-font-size: calc(30px * var(--cust-lyrics-font-size-scale, 1.0));
+  --cust-lyric-font-family: var(--cust-lyrics-font-family);
+  --cust-lyric-font-weight: var(--cust-lyrics-font-weight);
+  --cust-lyric-active-scale: var(--cust-lyrics-active-scale, 1.045);
+  --cust-lyric-active-color: #ffffff;
+  --cust-lyric-inactive-color: rgba(255, 255, 255, var(--cust-lyrics-inactive-opacity, 0.35));
+  --cust-lyric-glow-strength: calc(var(--cust-lyrics-active-glow, 10px) / 25.0);
+  --cust-lyric-glow-color: var(--cust-lyrics-active-glow-color);
+
+  --lyric-font-size: var(--cust-lyric-font-size);
+  --lyric-font-family: var(--cust-lyric-font-family);
+  --lyric-font-weight: var(--cust-lyric-font-weight);
+
+  /* =========================================================================
+     2. Visual Dynamics & Particle Tokens (Canonical Schema)
+     ========================================================================= */
+  --cust-particle-type: motes;
+  --cust-particle-count: 60;
+  --cust-particle-speed: 1.0;
+  --cust-particle-size: 4px;
+  --cust-particle-color: rgba(255, 255, 255, 0.4);
+  --cust-particle-opacity: 0.6;
+  --cust-bg-blur: 20px;
+  --cust-bg-dim: 0.4;
+  --cust-chroma-shift: 0px;
+
+  /* =========================================================================
+     3. Audio Reactive Pulse & Response Tokens (Canonical Schema)
+     ========================================================================= */
+  --cust-beat-sync-enabled: 1;
+  --cust-pulse-strength: 1.0;
+  --cust-reactive-target-art: 1;
+  --cust-reactive-target-lyrics: 1;
+  --cust-reactive-target-controls: 0;
+  --cust-reactive-target-bloom: 1;
+  --cust-reactive-target-particles: 1;
+  --cust-reactive-action: scale;
+  --cust-spring-damping: 0.7;
+  --cust-sync-motion-mode: synchronized;
+
+  /* =========================================================================
+     4. Layout & Geometry Overrides (Canonical Schema)
+     ========================================================================= */
+  --cust-lyrics-align: left;
+  --cust-container-padding: 24px;
+  --cust-sidebar-auto-hide: 0;
+  --cust-show-album-art: 1;
+  --cust-show-progress-bar: 1;
+  --cust-compact-mode: 0;
+
+  /* =========================================================================
+     5. Theme Palette & Materials Overrides (Canonical Schema)
+     ========================================================================= */
+  --cust-accent-color: #ff3366;
+  --cust-bg-tint: #0a0a0c;
+  --cust-glow-tint: #ff3366;
+  --cust-color-mode: artwork_adaptive;
+}
+
+/* ===========================================================================
+   Lyric Lines & Active Highlight Integration
+   =========================================================================== */
+
+#lyrics-container .line,
+.line {
+  box-sizing: border-box;
+  max-width: 100%;
+  word-break: normal;
+  overflow-wrap: break-word;
+  font-family: var(--cust-lyrics-font-family);
+  font-size: calc(var(--lyric-zoom, 30px) * var(--cust-lyrics-font-size-scale, 1.0) * var(--line-fit, 1));
+  font-weight: var(--cust-lyrics-font-weight);
+  letter-spacing: var(--cust-lyrics-letter-spacing);
+  margin-bottom: var(--cust-lyrics-line-gap);
+  text-align: var(--cust-lyrics-align);
+  transform-origin: left center;
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.25s ease-out;
+}
+
+/* Center alignment override */
+:root[style*="--cust-lyrics-align: center"] #lyrics-container .line,
+body.align-center #lyrics-container .line {
+  text-align: center;
+  transform-origin: center center;
+}
+
+/* Right alignment override */
+:root[style*="--cust-lyrics-align: right"] #lyrics-container .line,
+body.align-right #lyrics-container .line {
+  text-align: right;
+  transform-origin: right center;
+}
+
+/* Active Line Styling with Dynamic Glow and Scale */
+#lyrics-container .line.is-active {
+  color: var(--cust-lyric-active-color, #ffffff);
+  transform: scale(var(--cust-lyrics-active-scale, 1.045));
+  text-shadow:
+    0 0 var(--cust-lyrics-active-glow, 10px) var(--cust-lyrics-active-glow-color, rgba(255, 255, 255, 0.6)),
+    0 1px 3px rgba(0, 0, 0, 0.8),
+    0 2px 10px rgba(0, 0, 0, 0.5);
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* Bevel effect on active line */
+:root[style*="--cust-lyrics-bevel: 1"] #lyrics-container .line.is-active,
+:root[style*="--cust-lyrics-bevel: true"] #lyrics-container .line.is-active {
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.4);
+  text-shadow:
+    0 0 var(--cust-lyrics-active-glow, 10px) var(--cust-lyrics-active-glow-color, rgba(255, 255, 255, 0.6)),
+    0 2px 2px rgba(0, 0, 0, 0.9),
+    0 -1px 1px rgba(255, 255, 255, 0.5);
+}
+
+/* Inactive Line Styling with Configurable Attenuation */
+#lyrics-container .line:not(.is-active) {
+  opacity: var(--cust-lyrics-inactive-opacity, 0.35);
+}
+
+/* Secondary Vocals / Backing Vocals / Ad-libs */
+#lyrics-container .line.backing-vocal,
+#lyrics-container .line.secondary-vocal,
+.line.backing-vocal,
+.line.secondary-vocal {
+  font-size: calc(var(--lyric-font-size, var(--lyric-zoom, 30px)) * var(--cust-lyrics-secondary-scale, 0.75) * var(--line-fit, 1)) !important;
+  opacity: var(--cust-lyrics-secondary-opacity, 0.5);
+  font-family: var(--cust-lyrics-font-family-secondary, inherit);
+}
+
+#lyrics-container .line.ad-lib,
+#lyrics-container .line.is-adlib,
+#lyrics-container .ad-lib,
+#lyrics-container .is-adlib,
+.line.is-adlib,
+.line.ad-lib {
+  font-size: calc(var(--lyric-font-size, var(--lyric-zoom, 30px)) * var(--cust-lyrics-adlib-scale, 0.70) * var(--line-fit, 1)) !important;
+  font-style: var(--cust-lyrics-adlib-style, italic);
+  font-family: var(--cust-lyrics-font-family-adlib, inherit);
+}
+
+/* Ensure ad-libs and backing vocals stay subordinate in size even when active */
+#lyrics-container .line.is-active.backing-vocal,
+#lyrics-container .line.is-active.secondary-vocal,
+.line.is-active.backing-vocal,
+.line.is-active.secondary-vocal {
+  font-size: calc(var(--lyric-font-size, var(--lyric-zoom, 30px)) * var(--cust-lyrics-secondary-scale, 0.75) * var(--line-fit, 1)) !important;
+  transform: scale(calc(var(--cust-lyrics-active-scale, 1.08) * 0.95));
+}
+
+#lyrics-container .line.is-active.is-adlib,
+#lyrics-container .line.is-active.ad-lib,
+.line.is-active.is-adlib,
+.line.is-active.ad-lib {
+  font-size: calc(var(--lyric-font-size, var(--lyric-zoom, 30px)) * var(--cust-lyrics-adlib-scale, 0.70) * var(--line-fit, 1)) !important;
+  transform: scale(calc(var(--cust-lyrics-active-scale, 1.08) * 0.92));
+}
+
+/* ===========================================================================
+   Visuals & Dynamic Backdrops
+   =========================================================================== */
+
+.ambient-backdrop {
+  filter: blur(var(--cust-bg-blur, 20px));
+  transition: opacity 0.4s ease-out, filter 0.4s ease-out;
+}
+
+.ambient-backdrop::after {
+  background: rgba(0, 0, 0, var(--cust-bg-dim, 0.4));
+}
+
+/* Particle Canvas Viewport */
+.custom-particle-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+  opacity: var(--cust-particle-opacity, 0.6);
+}
+
+/* ===========================================================================
+   Audio-Reactive Beat & Dynamic Motion
+   =========================================================================== */
+
+body.beat-live .ambient-backdrop {
+  animation-duration: calc(var(--beat-ms, 520ms) / max(0.1, var(--cust-pulse-strength, 1.0)));
+}
+
+/* Cover Art Glow with dynamic strength */
+body.beat-live .cover-art-wrap {
+  box-shadow: 0 8px calc(24px * var(--cust-pulse-strength, 1.0))
+              color-mix(in srgb, var(--cust-glow-tint, var(--art-accent, #ff3366)) 60%, transparent);
+}
+
+/* ===========================================================================
+   Layout & Geometry Overrides
+   =========================================================================== */
+
+#lyrics-container {
+  padding-left: var(--cust-container-padding, 24px);
+  padding-right: var(--cust-container-padding, 24px);
+}
+
+/* Show/Hide Album Art */
+:root[style*="--cust-show-album-art: 0"] .cover-art-wrap,
+:root[style*="--cust-show-album-art: false"] .cover-art-wrap {
+  display: none !important;
+}
+
+/* Show/Hide Progress Bar */
+:root[style*="--cust-show-progress-bar: 0"] #track-progress,
+:root[style*="--cust-show-progress-bar: false"] #track-progress {
+  display: none !important;
+}
+
+/* ===========================================================================
+   Settings Console: Advanced Customization Slate Styles
+   =========================================================================== */
+
+/* Preset Hub Bar & Controls */
+.cust-preset-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 6px;
+  border-radius: var(--r-md, 12px);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(87, 56, 120, 0.28);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+.cust-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cust-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, rgba(255, 255, 255, 0.45));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cust-select-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Glassmorphic Dropdown Select */
+.cust-select {
+  flex: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  background: #14101a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(209, 188, 255, 0.7)' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 12px center;
+  border: 1px solid rgba(87, 56, 120, 0.45);
+  border-radius: 8px;
+  padding: 7px 32px 7px 12px;
+  color: #ffffff;
+  font-family: var(--ui-font);
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.18s ease;
+}
+
+.cust-select:hover {
+  border-color: #c084fc;
+  background-color: #1a1423;
+  box-shadow: 0 0 0 1px rgba(192, 132, 252, 0.25), 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.cust-select:focus-visible {
+  border-color: #c084fc;
+  box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.4);
+}
+
+.cust-select-sm {
+  flex: 0 0 auto;
+  min-width: 140px;
+  max-width: 200px;
+  padding: 5px 28px 5px 10px;
+  font-size: 12px;
+}
+
+/* Active Preset Badge */
+.cust-preset-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 12px;
+  color: #d1bcff;
+  background: rgba(192, 132, 252, 0.15);
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  white-space: nowrap;
+}
+
+.cust-preset-badge.is-custom {
+  color: #67e8f9;
+  background: rgba(6, 182, 212, 0.15);
+  border-color: rgba(6, 182, 212, 0.35);
+}
+
+/* Export / Import Button Group */
+.cust-io-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Inline Preset Save Row */
+.cust-inline-save-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #0f0c16;
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  animation: modal-sheet-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cust-inline-save-row[hidden] {
+  display: none !important;
+}
+
+/* Glow Color Preview Swatch & Tabular Badge */
+.cust-glow-ctrls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cust-color-picker {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  background: transparent;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 0.14s ease, border-color 0.14s ease;
+}
+
+.cust-color-picker:hover {
+  transform: scale(1.15);
+  border-color: #c084fc;
+}
+
+.cust-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.cust-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+/* Beat Reactive Targets Grid */
+.cust-target-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(87, 56, 120, 0.2);
+}
+
+.cust-target-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cust-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(87, 56, 120, 0.35);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s cubic-bezier(0.2, 0.9, 0.35, 1);
+}
+
+.cust-target-chip input[type="checkbox"] {
+  accent-color: #c084fc;
+  cursor: pointer;
+  margin: 0;
+  width: 13px;
+  height: 13px;
+}
+
+.cust-target-chip .cust-chip-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.cust-target-chip:hover {
+  background: rgba(209, 188, 255, 0.08);
+  border-color: rgba(192, 132, 252, 0.45);
+}
+
+.cust-target-chip:has(input:checked) {
+  background: rgba(192, 132, 252, 0.18);
+  border-color: #c084fc;
+  box-shadow: 0 0 8px rgba(192, 132, 252, 0.25);
+}
+
+.cust-target-chip:has(input:checked) .cust-chip-label {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* ===========================================================================
+   Phase 3: Spatial Orientation & Layout Transforms
+   =========================================================================== */
+
+/* Vertical Right: 90° Clockwise Rotation */
+[data-orientation="vertical-right"] .app-root {
+  transform: rotate(90deg);
+  transform-origin: center center;
+  transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.35, 1);
+}
+
+/* Vertical Left: 270° Counter-Clockwise Rotation */
+[data-orientation="vertical-left"] .app-root {
+  transform: rotate(270deg);
+  transform-origin: center center;
+  transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.35, 1);
+}
+
+/* Vertical Column: East-Asian Top-to-Bottom Vertical Writing Mode */
+[data-orientation="vertical-column"] #lyrics-container {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 32px 48px;
+}
+
+[data-orientation="vertical-column"] #lyrics-container .line {
+  display: inline-block;
+  margin-right: var(--cust-lyrics-line-gap, 24px);
+  margin-bottom: 0;
+  letter-spacing: 0.12em;
+  transform-origin: center top;
+}
+
+/* Lyrics Container Dock Positioning (Pure Block Alignment) */
+[data-lyrics-dock="center"] #lyrics-container .line,
+#lyrics-container[data-lyrics-dock="center"] .line {
+  text-align: center;
+}
+
+[data-lyrics-dock="center"] #lyrics-container .word-group,
+#lyrics-container[data-lyrics-dock="center"] .word-group {
+  justify-content: center;
+}
+
+[data-lyrics-dock="right"] #lyrics-container .line,
+#lyrics-container[data-lyrics-dock="right"] .line {
+  text-align: right;
+}
+
+[data-lyrics-dock="right"] #lyrics-container .word-group,
+#lyrics-container[data-lyrics-dock="right"] .word-group {
+  justify-content: flex-end;
+}
+
+[data-lyrics-dock="left"] #lyrics-container .line,
+#lyrics-container[data-lyrics-dock="left"] .line {
+  text-align: left;
+}
+
+[data-lyrics-dock="left"] #lyrics-container .word-group,
+#lyrics-container[data-lyrics-dock="left"] .word-group {
+  justify-content: flex-start;
+}
+
+[data-lyrics-dock="top"] #lyrics-container,
+#lyrics-container[data-lyrics-dock="top"] {
+  padding-top: 36px;
+}
+
+[data-lyrics-dock="bottom"] #lyrics-container,
+#lyrics-container[data-lyrics-dock="bottom"] {
+  padding-bottom: 36px;
+}
+
+/* Phase 4: Gap Indicator & Intro Dots Dynamic Alignment following Lyrics Dock */
+[data-lyrics-dock="center"] #lyrics-container > .gap-indicator,
+#lyrics-container[data-lyrics-dock="center"] > .gap-indicator,
+[data-lyrics-dock="center"] .intro-dots,
+#lyrics-container[data-lyrics-dock="center"] .intro-dots {
+  align-self: center !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
+  justify-content: center !important;
+}
+
+[data-lyrics-dock="right"] #lyrics-container > .gap-indicator,
+#lyrics-container[data-lyrics-dock="right"] > .gap-indicator,
+[data-lyrics-dock="right"] .intro-dots,
+#lyrics-container[data-lyrics-dock="right"] .intro-dots {
+  align-self: flex-end !important;
+  margin-left: auto !important;
+  margin-right: 2px !important;
+  text-align: right !important;
+  justify-content: flex-end !important;
+}
+
+[data-lyrics-dock="left"] #lyrics-container > .gap-indicator,
+#lyrics-container[data-lyrics-dock="left"] > .gap-indicator,
+[data-lyrics-dock="left"] .intro-dots,
+#lyrics-container[data-lyrics-dock="left"] .intro-dots {
+  align-self: flex-start !important;
+  margin-left: 2px !important;
+  margin-right: auto !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
+/* Dynamic Coordinate Offsets */
+#lyrics-container > .gap-indicator,
+#lyrics-container .intro-dots {
+  transform: translate(var(--cust-lyrics-offset-x, 0px), var(--cust-lyrics-offset-y, 0px));
+}
+
+/* ===========================================================================
+   Phase 3 & 4: Artwork Geometric Silhouettes & Inertial Spin
+   Seamless Scrim & Hover Overlay Shape Clipping
+   =========================================================================== */
+
+/* 1. Rounded Rectangle */
+.art-shape-rounded,
+[data-artwork-shape="rounded"] .cover-art-wrap,
+[data-artwork-shape="rounded"] .cover-art,
+[data-artwork-shape="rounded"] .float-art-wrap,
+[data-artwork-shape="rounded"] .float-art-wrap::after,
+[data-artwork-shape="rounded"] .side-art-wrap,
+[data-artwork-shape="rounded"] .side-art-wrap::after,
+[data-artwork-shape="rounded"] .tilt-stage,
+[data-artwork-shape="rounded"] .track-art,
+[data-artwork-shape="rounded"] .side-art,
+[data-artwork-shape="rounded"] .art-controls,
+.art-shape-rounded.float-art-wrap,
+.art-shape-rounded.side-art-wrap,
+.art-shape-rounded .float-art-wrap,
+.art-shape-rounded .float-art-wrap::after,
+.art-shape-rounded .side-art-wrap,
+.art-shape-rounded .side-art-wrap::after,
+.art-shape-rounded .tilt-stage,
+.art-shape-rounded .track-art,
+.art-shape-rounded .side-art,
+.art-shape-rounded .art-controls {
+  border-radius: 14px !important;
+  clip-path: none !important;
+}
+
+[data-artwork-shape="rounded"] .float-art-wrap,
+[data-artwork-shape="rounded"] .side-art-wrap,
+[data-artwork-shape="rounded"] .cover-art-wrap,
+.art-shape-rounded.float-art-wrap,
+.art-shape-rounded.side-art-wrap,
+.art-shape-rounded.cover-art-wrap {
+  overflow: hidden !important;
+}
+
+/* 2. Circle */
+.art-shape-circle,
+[data-artwork-shape="circle"] .cover-art-wrap,
+[data-artwork-shape="circle"] .cover-art,
+[data-artwork-shape="circle"] .float-art-wrap,
+[data-artwork-shape="circle"] .float-art-wrap::after,
+[data-artwork-shape="circle"] .side-art-wrap,
+[data-artwork-shape="circle"] .side-art-wrap::after,
+[data-artwork-shape="circle"] .tilt-stage,
+[data-artwork-shape="circle"] .track-art,
+[data-artwork-shape="circle"] .side-art,
+[data-artwork-shape="circle"] .art-controls,
+.art-shape-circle.float-art-wrap,
+.art-shape-circle.side-art-wrap,
+.art-shape-circle .float-art-wrap,
+.art-shape-circle .float-art-wrap::after,
+.art-shape-circle .side-art-wrap,
+.art-shape-circle .side-art-wrap::after,
+.art-shape-circle .tilt-stage,
+.art-shape-circle .track-art,
+.art-shape-circle .side-art,
+.art-shape-circle .art-controls {
+  border-radius: 50% !important;
+  clip-path: circle(50% at 50% 50%) !important;
+}
+
+[data-artwork-shape="circle"] .float-art-wrap,
+[data-artwork-shape="circle"] .side-art-wrap,
+[data-artwork-shape="circle"] .cover-art-wrap,
+.art-shape-circle.float-art-wrap,
+.art-shape-circle.side-art-wrap,
+.art-shape-circle.cover-art-wrap {
+  overflow: hidden !important;
+}
+
+/* 3. Squircle (Continuous Curvature Superellipse) */
+.art-shape-squircle,
+[data-artwork-shape="squircle"] .cover-art-wrap,
+[data-artwork-shape="squircle"] .cover-art,
+[data-artwork-shape="squircle"] .float-art-wrap,
+[data-artwork-shape="squircle"] .float-art-wrap::after,
+[data-artwork-shape="squircle"] .side-art-wrap,
+[data-artwork-shape="squircle"] .side-art-wrap::after,
+[data-artwork-shape="squircle"] .tilt-stage,
+[data-artwork-shape="squircle"] .track-art,
+[data-artwork-shape="squircle"] .side-art,
+[data-artwork-shape="squircle"] .art-controls,
+.art-shape-squircle.float-art-wrap,
+.art-shape-squircle.side-art-wrap,
+.art-shape-squircle .float-art-wrap,
+.art-shape-squircle .float-art-wrap::after,
+.art-shape-squircle .side-art-wrap,
+.art-shape-squircle .side-art-wrap::after,
+.art-shape-squircle .tilt-stage,
+.art-shape-squircle .track-art,
+.art-shape-squircle .side-art,
+.art-shape-squircle .art-controls {
+  border-radius: 26% !important;
+  clip-path: none !important;
+}
+
+[data-artwork-shape="squircle"] .float-art-wrap,
+[data-artwork-shape="squircle"] .side-art-wrap,
+[data-artwork-shape="squircle"] .cover-art-wrap,
+.art-shape-squircle.float-art-wrap,
+.art-shape-squircle.side-art-wrap,
+.art-shape-squircle.cover-art-wrap {
+  overflow: hidden !important;
+}
+
+/* 4. Diamond / Chamfer */
+.art-shape-diamond,
+[data-artwork-shape="diamond"] .cover-art-wrap,
+[data-artwork-shape="diamond"] .cover-art,
+[data-artwork-shape="diamond"] .float-art-wrap,
+[data-artwork-shape="diamond"] .float-art-wrap::after,
+[data-artwork-shape="diamond"] .side-art-wrap,
+[data-artwork-shape="diamond"] .side-art-wrap::after,
+[data-artwork-shape="diamond"] .tilt-stage,
+[data-artwork-shape="diamond"] .track-art,
+[data-artwork-shape="diamond"] .side-art,
+[data-artwork-shape="diamond"] .art-controls,
+.art-shape-diamond.float-art-wrap,
+.art-shape-diamond.side-art-wrap,
+.art-shape-diamond .float-art-wrap,
+.art-shape-diamond .float-art-wrap::after,
+.art-shape-diamond .side-art-wrap,
+.art-shape-diamond .side-art-wrap::after,
+.art-shape-diamond .tilt-stage,
+.art-shape-diamond .track-art,
+.art-shape-diamond .side-art,
+.art-shape-diamond .art-controls {
+  border-radius: 0 !important;
+  clip-path: polygon(15% 0%, 85% 0%, 100% 15%, 100% 85%, 85% 100%, 15% 100%, 0% 85%, 0% 15%) !important;
+}
+
+[data-artwork-shape="diamond"] .float-art-wrap,
+[data-artwork-shape="diamond"] .side-art-wrap,
+[data-artwork-shape="diamond"] .cover-art-wrap,
+.art-shape-diamond.float-art-wrap,
+.art-shape-diamond.side-art-wrap,
+.art-shape-diamond.cover-art-wrap {
+  overflow: hidden !important;
+}
+
+/* 5. Pill */
+.art-shape-pill,
+[data-artwork-shape="pill"] .cover-art-wrap,
+[data-artwork-shape="pill"] .cover-art,
+[data-artwork-shape="pill"] .float-art-wrap,
+[data-artwork-shape="pill"] .float-art-wrap::after,
+[data-artwork-shape="pill"] .side-art-wrap,
+[data-artwork-shape="pill"] .side-art-wrap::after,
+[data-artwork-shape="pill"] .tilt-stage,
+[data-artwork-shape="pill"] .track-art,
+[data-artwork-shape="pill"] .side-art,
+[data-artwork-shape="pill"] .art-controls,
+.art-shape-pill.float-art-wrap,
+.art-shape-pill.side-art-wrap,
+.art-shape-pill .float-art-wrap,
+.art-shape-pill .float-art-wrap::after,
+.art-shape-pill .side-art-wrap,
+.art-shape-pill .side-art-wrap::after,
+.art-shape-pill .tilt-stage,
+.art-shape-pill .track-art,
+.art-shape-pill .side-art,
+.art-shape-pill .art-controls {
+  border-radius: 999px !important;
+  clip-path: none !important;
+}
+
+[data-artwork-shape="pill"] .float-art-wrap,
+[data-artwork-shape="pill"] .side-art-wrap,
+[data-artwork-shape="pill"] .cover-art-wrap,
+.art-shape-pill.float-art-wrap,
+.art-shape-pill.side-art-wrap,
+.art-shape-pill.cover-art-wrap {
+  overflow: hidden !important;
+}
+
+/* 6. Vinyl Disc */
+.art-shape-vinyl,
+[data-artwork-shape="vinyl"] .cover-art-wrap,
+[data-artwork-shape="vinyl"] .cover-art,
+[data-artwork-shape="vinyl"] .float-art-wrap,
+[data-artwork-shape="vinyl"] .float-art-wrap::after,
+[data-artwork-shape="vinyl"] .side-art-wrap,
+[data-artwork-shape="vinyl"] .side-art-wrap::after,
+[data-artwork-shape="vinyl"] .tilt-stage,
+[data-artwork-shape="vinyl"] .track-art,
+[data-artwork-shape="vinyl"] .side-art,
+[data-artwork-shape="vinyl"] .art-controls,
+.art-shape-vinyl.float-art-wrap,
+.art-shape-vinyl.side-art-wrap,
+.art-shape-vinyl .float-art-wrap,
+.art-shape-vinyl .float-art-wrap::after,
+.art-shape-vinyl .side-art-wrap,
+.art-shape-vinyl .side-art-wrap::after,
+.art-shape-vinyl .tilt-stage,
+.art-shape-vinyl .track-art,
+.art-shape-vinyl .side-art,
+.art-shape-vinyl .art-controls {
+  border-radius: 50% !important;
+  clip-path: circle(50% at 50% 50%) !important;
+}
+
+[data-artwork-shape="vinyl"] .float-art-wrap,
+[data-artwork-shape="vinyl"] .side-art-wrap,
+[data-artwork-shape="vinyl"] .cover-art-wrap,
+.art-shape-vinyl.float-art-wrap,
+.art-shape-vinyl.side-art-wrap,
+.art-shape-vinyl.cover-art-wrap {
+  overflow: hidden !important;
+}
+
+[data-artwork-shape="vinyl"] .float-art-wrap,
+[data-artwork-shape="vinyl"] .side-art-wrap,
+.art-shape-vinyl {
+  box-shadow:
+    0 0 0 6px #121216,
+    0 0 0 10px #1e1e24,
+    0 0 0 14px #121216,
+    0 10px 30px rgba(0, 0, 0, 0.85) !important;
+  position: relative;
+}
+
+[data-artwork-shape="vinyl"] .tilt-stage::after,
+.art-shape-vinyl .tilt-stage::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  margin-top: -11px;
+  margin-left: -11px;
+  border-radius: 50%;
+  background: #09090b;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* ===========================================================================
+   Phase 4: Theme Atmospheric Background Hue & Ambient Tint Overlay
+   =========================================================================== */
+
+.theme-ambient-tint,
+.ambient-backdrop > .theme-ambient-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--cust-theme-bg-tint, var(--art-accent, rgba(140, 100, 255, 0.20)));
+  mix-blend-mode: screen;
+  transition: background var(--dur-5, 600ms) var(--ease-fluid, ease), opacity var(--dur-5, 600ms) var(--ease-fluid, ease);
+}
+
+/* Artwork Spin Keyframes & Rotation */
+@keyframes spin-artwork-rot {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+[data-artwork-spin="true"] .cover-art,
+body.artwork-spin .cover-art {
+  animation: spin-artwork-rot 18s linear infinite;
+}
+
+/* ===========================================================================
+   Phase 3: Kinetic Syllable Dynamics & Variable Font Axes
+   =========================================================================== */
+
+/* Syllable Scale Pop Impulse (Subtle, Graceful Optical Swell) */
+.syllable-pop {
+  display: inline-block;
+  animation: syllable-pop-transient 0.36s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transform-origin: left bottom;
+}
+
+@keyframes syllable-pop-transient {
+  0%   { transform: scale(1.0); }
+  40%  { transform: scale(1.035); filter: brightness(1.10); }
+  100% { transform: scale(1.0); filter: brightness(1.0); }
+}
+
+/* Multi-Syllable Left-to-Right Continuous Wave Flow */
+.word-syllable-flow {
+  display: inline-block;
+  transform-origin: left center;
+  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), filter 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.word-syllable-flow.is-active-syl {
+  transform: scale(1.035);
+  filter: brightness(1.12);
+}
+
+/* Syllable Variable Font Stretch */
+.syllable-stretch {
+  font-stretch: var(--syllable-stretch, 115%);
+  font-variation-settings:
+    'wdth' var(--cust-lyrics-vf-width-active, 115),
+    'wght' var(--cust-lyrics-vf-weight-active, 780);
+  transition: font-stretch 0.2s ease-out;
+}
+
+/* Dual-Font Hierarchy */
+#lyrics-container .line.backing-vocal,
+#lyrics-container .line.secondary-vocal {
+  font-family: var(--cust-lyrics-font-family-secondary, inherit);
+}
+
+#lyrics-container .line.ad-lib,
+#lyrics-container .ad-lib,
+#lyrics-container .is-adlib {
+  font-family: var(--cust-lyrics-font-family-adlib, inherit);
+}
+
+/* Dynamic Gradient Sweep Overlay */
+.line.is-active.has-gradient-wipe {
+  background: linear-gradient(
+    90deg,
+    var(--cust-lyric-active-color, #ffffff) 0%,
+    var(--cust-lyric-active-color, #ffffff) var(--wipe-progress, 0%),
+    var(--cust-lyric-inactive-color, rgba(255, 255, 255, 0.35)) var(--wipe-progress, 0%),
+    var(--cust-lyric-inactive-color, rgba(255, 255, 255, 0.35)) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ===========================================================================
+   Phase 3: Breakdown Stasis & Ambient Dimming
+   =========================================================================== */
+
+.ambient-backdrop {
+  transition: filter 2.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 2.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body.in-breakdown-stasis .ambient-backdrop {
+  filter: blur(calc(var(--cust-bg-blur, 20px) * 1.6)) brightness(0.65) saturate(0.85);
+  transition: filter 2.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.moment-veil {
+  transition: opacity 2.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body.in-breakdown-stasis .moment-veil {
+  opacity: 0.75;
+  transition: opacity 2.4s ease;
+}
+
+.cover-art-wrap {
+  transition: transform 2.4s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 2.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body.in-breakdown-stasis .cover-art-wrap {
+  transform: scale(0.97);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  transition: transform 2.4s ease, box-shadow 2.4s ease;
+}
+
+/* ===========================================================================
+   Phase 3: Mini Ticker Mode
+   =========================================================================== */
+
+body.mini-ticker-mode .app-root {
+  padding: 6px 14px;
+}
+
+body.mini-ticker-mode #lyrics-container {
+  height: 44px;
+  min-height: 44px;
+  overflow: hidden;
+  padding: 0;
+  line-height: 44px;
+}
+
+body.mini-ticker-mode #lyrics-container .line:not(.is-active) {
+  display: none !important;
+}
+
+body.mini-ticker-mode .cover-art-wrap {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+}
+
+/* ===========================================================================
+   Phase 5: Fancy Spring Scroll Animation with Cascading Inertia
+   =========================================================================== */
+
+@keyframes line-spring-entry {
+  0% {
+    transform: translate3d(0, 6px, 0);
+  }
+  65% {
+    transform: translate3d(0, -1.5px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes line-spring-near-entry {
+  0% {
+    transform: translate3d(0, 2.7px, 0);
+  }
+  65% {
+    transform: translate3d(0, -0.65px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.line.scroll-spring-active {
+  animation: line-spring-entry 0.42s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  will-change: transform;
+}
+
+.line.scroll-spring-near {
+  animation: line-spring-near-entry 0.38s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  will-change: transform;
+}
+
+/* ===========================================================================
+   Phase 6: Strict Z-Index Layering (Particles Strictly Behind Lyrics)
+   =========================================================================== */
+
+.fx-canvas {
+  z-index: 2 !important;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#lyrics-container {
+  z-index: 10 !important;
+  position: relative;
+}
+
+.line {
+  position: relative;
+  z-index: 5;
+}

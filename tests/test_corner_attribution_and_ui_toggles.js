@@ -100,6 +100,8 @@ assert(js.includes('function toggleCountdownChipVisibility()'), 'toggleCountdown
 assert(js.includes('function applyCountdownChipVisibility()'), 'applyCountdownChipVisibility must exist');
 
 // Check that loadLyrics invokes renderCornerAttribution
+assert(js.includes('function resolveAttributionProvider('), 'resolveAttributionProvider must exist');
+assert(js.includes('window.resolveAttributionProvider = resolveAttributionProvider'), 'resolveAttributionProvider exposed on window');
 assert(js.includes('renderCornerAttribution();'), 'renderCornerAttribution must be called in loadLyrics and setAttribution');
 
 pass('JavaScript runtime functions exist and are properly bound to window and lifecycle hooks');
@@ -193,7 +195,7 @@ vm.runInContext(`
 
   function syncSettingsPanel() {}
 
-  ${js.slice(js.indexOf('function renderCornerAttribution()'), js.indexOf('window.setAttribution = function'))}
+  ${js.slice(js.indexOf('function resolveAttributionProvider('), js.indexOf('window.setAttribution = function'))}
 
   window.renderCornerAttribution = renderCornerAttribution;
   window.toggleCornerAttribution = toggleCornerAttribution;
@@ -201,6 +203,7 @@ vm.runInContext(`
   window.setLyrics = (l) => { lyrics = l; };
   window.setAttr = (a) => { currentAttribution = a; };
   window.setSource = (s) => { currentLyricsSource = s; };
+  window.resolveAttributionProvider = resolveAttributionProvider;
 `, context);
 
 // Test A: No lyrics loaded -> HUD hidden
@@ -211,7 +214,7 @@ const hudEl = mockElements['hud-attribution'];
 assert.strictEqual(hudEl.style.display, 'none', 'HUD must be hidden when lyrics array is empty');
 pass('HUD remains hidden when lyrics are not active');
 
-// Test B: Active lyrics with community sync maker & uploader
+// Test B: Active lyrics with community sync maker & uploader (must show Spicy Lyrics, not Community lyrics)
 context.window.setLyrics([{ startTimeMs: 0, endTimeMs: 1000, text: 'Hello world' }]);
 context.window.setAttr({
   provider: 'community',
@@ -220,13 +223,14 @@ context.window.setAttr({
 });
 context.window.renderCornerAttribution();
 assert.strictEqual(hudEl.style.display, 'inline-flex', 'HUD must be shown when lyrics are active');
-assert(hudEl.innerHTML.includes('Community lyrics'), 'HUD must show provider "Community lyrics"');
+assert(hudEl.innerHTML.includes('Spicy Lyrics'), 'HUD must show provider "Spicy Lyrics"');
+assert(!hudEl.innerHTML.includes('Community lyrics'), 'HUD must not show "Community lyrics" per Section 6');
 assert(hudEl.innerHTML.includes('@kevin'), 'HUD must show @kevin');
 assert(hudEl.innerHTML.includes('https://spicylyrics.org/uid/101'), 'HUD must link to maker Spicy Lyrics profile');
 assert(hudEl.innerHTML.includes('openExternalUrl'), 'Maker link must call openExternalUrl');
 assert(hudEl.innerHTML.includes('@sync_pro'), 'HUD must show @sync_pro');
 assert(hudEl.innerHTML.includes('https://spicylyrics.org/uid/202'), 'HUD must link to uploader Spicy Lyrics profile');
-pass('HUD correctly formats community sync with maker & uploader profiles, avatars, and links');
+pass('HUD correctly formats community sync with "Spicy Lyrics" provider, maker & uploader profiles, avatars, and links');
 
 // Test C: Deduplication when maker == uploader (including case insensitivity & string/number ID)
 context.window.setAttr({
@@ -246,6 +250,7 @@ context.window.setAttr({
 });
 context.window.renderCornerAttribution();
 assert(hudEl.innerHTML.includes('Made by'), 'Maker line must be present for spicy provider');
+assert(hudEl.innerHTML.includes('Spicy Lyrics'), 'HUD must show "Spicy Lyrics" for spicy provider');
 assert(hudEl.innerHTML.includes('@bob'), 'Maker @bob must be present');
 pass('HUD correctly formats maker for spicy provider');
 
@@ -272,6 +277,37 @@ context.window.setAttr({ provider: 'lrclib' });
 context.window.renderCornerAttribution();
 assert(hudEl.innerHTML.includes('https://lrclib.net'), 'HUD shows LRCLIB with link');
 pass('HUD correctly formats Apple Music, Spotify, and LRCLIB attributions');
+
+// Test D2: Spicy Lyrics provider variants (spicy_lyrics, spicylyrics, community)
+context.window.setAttr({ provider: 'spicy_lyrics' });
+context.window.renderCornerAttribution();
+assert(hudEl.innerHTML.includes('Spicy Lyrics'), 'HUD shows "Spicy Lyrics" for provider spicy_lyrics');
+assert(!hudEl.innerHTML.includes('Community lyrics'), 'HUD never shows "Community lyrics" for provider spicy_lyrics');
+
+context.window.setAttr({ provider: 'community', provider_label: 'Community lyrics' });
+context.window.renderCornerAttribution();
+assert(hudEl.innerHTML.includes('Spicy Lyrics'), 'HUD normalizes provider_label "Community lyrics" to "Spicy Lyrics"');
+assert(!hudEl.innerHTML.includes('Community lyrics'), 'HUD does not leak "Community lyrics"');
+pass('HUD displays "Spicy Lyrics" across all spicy/community provider variants');
+
+// Test D3: Missing, None, or unknown source/provider must show "Unknown" (never Apple Music or Community lyrics)
+context.window.setAttr({ provider: 'unknown' });
+context.window.setSource('');
+context.window.renderCornerAttribution();
+assert(hudEl.innerHTML.includes('Unknown'), 'HUD shows "Unknown" when provider is unknown');
+assert(!hudEl.innerHTML.includes('Apple Music'), 'HUD never defaults to "Apple Music"');
+assert(!hudEl.innerHTML.includes('Community lyrics'), 'HUD never defaults to "Community lyrics"');
+
+context.window.setAttr(null);
+context.window.setSource('None');
+context.window.renderCornerAttribution();
+assert(hudEl.innerHTML.includes('Unknown'), 'HUD shows "Unknown" when source is "None"');
+
+context.window.setAttr({});
+context.window.setSource('');
+context.window.renderCornerAttribution();
+assert(hudEl.innerHTML.includes('Unknown'), 'HUD shows "Unknown" when attribution and source are empty');
+pass('HUD displays "Unknown" for missing/None/unknown sources without defaulting to Apple Music or Community lyrics');
 
 // Test E: Toggling corner attribution setting
 assert.strictEqual(context.window.Settings.get('cornerAttribution', '1'), '1');

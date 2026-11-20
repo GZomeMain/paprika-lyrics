@@ -546,12 +546,84 @@ class AttributionTest(unittest.TestCase):
 
         community_attr = _build_fallback_attribution("Spicy (spicy_lyrics)")
         self.assertEqual(community_attr["provider"], "community")
-        self.assertEqual(community_attr["provider_label"], "Community lyrics")
+        self.assertEqual(community_attr["provider_label"], "Spicy Lyrics")
+
+        # Section 6: provider is SpicyLyrics
+        spicy_attr = _build_fallback_attribution("spicy_lyrics")
+        self.assertEqual(spicy_attr["provider"], "community")
+        self.assertEqual(spicy_attr["provider_label"], "Spicy Lyrics")
+
+        # Section 6: missing, None, or empty source must be "Unknown" (never "Apple Music")
+        empty_attr = _build_fallback_attribution("")
+        self.assertEqual(empty_attr["provider_label"], "Unknown")
+        self.assertEqual(empty_attr["raw_source"], "Unknown")
+
+        none_attr = _build_fallback_attribution(None)
+        self.assertEqual(none_attr["provider_label"], "Unknown")
+        self.assertEqual(none_attr["raw_source"], "Unknown")
+
+        spicy_unknown_attr = _build_fallback_attribution("Spicy (Unknown)")
+        self.assertEqual(spicy_unknown_attr["provider_label"], "Unknown")
+        self.assertEqual(spicy_unknown_attr["raw_source"], "Unknown")
+
+        spicy_empty_attr = _build_fallback_attribution("Spicy ()")
+        self.assertEqual(spicy_empty_attr["provider_label"], "Unknown")
+        self.assertEqual(spicy_empty_attr["raw_source"], "Unknown")
+
+    def test_fetch_spicy_raw_payload_attribution(self):
+        import core.lyrics as L
+        from types import SimpleNamespace
+
+        orig_key = L.get_spicy_api_key
+        orig_get = L.http_get
+        L.get_spicy_api_key = lambda: "test_key"
+
+        sample_body = {
+            "Content": [{
+                "StartTime": 1000, "EndTime": 3000,
+                "Syllables": [{"Text": "word", "StartTime": 1000, "EndTime": 2000}]
+            }]
+        }
+
+        try:
+            # 1. Missing source (None or omitted) -> Unknown (never Apple Music)
+            L.http_get = lambda *a, **k: SimpleNamespace(status_code=200, json=lambda: {"Body": sample_body})
+            lines, source_label, attr = L.fetch_spicy_with_id("test_id")
+            self.assertEqual(attr["provider_label"], "Unknown")
+            self.assertEqual(attr["raw_source"], "Unknown")
+            self.assertEqual(attr["provider"], "unknown")
+            self.assertNotEqual(attr["provider_label"], "Apple Music")
+
+            # 2. Empty source -> Unknown
+            empty_body = dict(sample_body, source="")
+            L.http_get = lambda *a, **k: SimpleNamespace(status_code=200, json=lambda: {"Body": empty_body})
+            lines, source_label, attr = L.fetch_spicy_with_id("test_id")
+            self.assertEqual(attr["provider_label"], "Unknown")
+            self.assertEqual(attr["raw_source"], "Unknown")
+
+            # 3. spicy_lyrics -> Spicy Lyrics with maker/uploader intact
+            spicy_body = dict(sample_body, source="spicy_lyrics", UploadAttribution={
+                "Maker": {"id": "m1", "username": "maker_one"},
+                "Uploader": {"id": "u1", "username": "uploader_one"}
+            })
+            L.http_get = lambda *a, **k: SimpleNamespace(status_code=200, json=lambda: {"Body": spicy_body})
+            lines, source_label, attr = L.fetch_spicy_with_id("test_id")
+            self.assertEqual(attr["provider_label"], "Spicy Lyrics")
+            self.assertEqual(attr["raw_source"], "spicy_lyrics")
+            self.assertIsNotNone(attr["maker"])
+            self.assertEqual(attr["maker"]["username"], "maker_one")
+            self.assertEqual(attr["maker"]["url"], "https://spicylyrics.org/uid/m1")
+            self.assertIsNotNone(attr["uploader"])
+            self.assertEqual(attr["uploader"]["username"], "uploader_one")
+            self.assertEqual(attr["uploader"]["url"], "https://spicylyrics.org/uid/u1")
+        finally:
+            L.get_spicy_api_key = orig_key
+            L.http_get = orig_get
 
     def test_diagnostics_carries_attribution(self):
         custom_attr = {
             "provider": "community",
-            "provider_label": "Community lyrics",
+            "provider_label": "Spicy Lyrics",
             "raw_source": "spicy_lyrics",
             "songwriters": ["Kevin R. Parker"],
             "maker": {"id": "1", "username": "maker1", "url": "https://spicylyrics.org/uid/1", "avatar": ""},
@@ -559,6 +631,7 @@ class AttributionTest(unittest.TestCase):
         }
         diag = _build_diagnostics("Spicy (spicy_lyrics)", "miss", [], 0, attribution=custom_attr)
         self.assertIn("attribution", diag)
+        self.assertEqual(diag["attribution"]["provider_label"], "Spicy Lyrics")
         self.assertEqual(diag["attribution"]["songwriters"], ["Kevin R. Parker"])
         self.assertEqual(diag["attribution"]["maker"]["username"], "maker1")
         self.assertEqual(diag["attribution"]["uploader"]["username"], "up1")

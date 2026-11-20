@@ -188,29 +188,72 @@ WEBVIEW_PROFILE_DIR = Path(os.getenv("SPICY_WEBVIEW_DIR") or (DATA_DIR / ".webvi
 SPICY_API_KEY = ""
 
 
-def get_spicy_api_key() -> str:
+def validate_spicy_api_key(key: str | None) -> str:
+    """
+    Validates a Spicy Lyrics API key for the desktop client:
+    - Empty or None is accepted (returns "") when no key is configured.
+    - Secret keys starting with 'sl_sk_' are strictly rejected per Developer Terms.
+    - Only publishable keys starting with 'sl_pk_' are accepted by the desktop client.
+    """
+    if not key:
+        return ""
+    clean = key.strip()
+    if not clean:
+        return ""
+    if clean.startswith("sl_sk_"):
+        raise ValueError(
+            "Secret keys ('sl_sk_...') cannot be used in the desktop client. "
+            "Only publishable keys ('sl_pk_...') are allowed per SpicyLyrics Developer Terms."
+        )
+    if not clean.startswith("sl_pk_"):
+        raise ValueError(
+            f"Invalid API key '{clean[:10]}...'. The desktop client only accepts "
+            "publishable keys starting with 'sl_pk_'."
+        )
+    return clean
+
+
+def get_spicy_api_key(raise_on_invalid: bool = False) -> str:
     """
     Returns the current Spicy Lyrics API key.
     Reads from os.environ first, then the SPICY_API_KEY module variable,
     and falls back to persistent storage (CACHE.get_setting).
+    Desktop client only accepts publishable keys ('sl_pk_...').
+    Secret keys ('sl_sk_...') and non-publishable keys are strictly rejected.
     """
-    key = os.getenv("SPICY_API_KEY", "").strip()
-    if key:
-        return key
     global SPICY_API_KEY
-    if SPICY_API_KEY:
-        return SPICY_API_KEY
+    candidates = [
+        ("environment", os.getenv("SPICY_API_KEY", "").strip()),
+        ("variable", SPICY_API_KEY.strip() if SPICY_API_KEY else ""),
+    ]
     try:
         from storage import CACHE
         cached = CACHE.get_setting("spicy_api_key")
         if cached and isinstance(cached, str):
-            k = cached.strip()
-            if k:
-                os.environ["SPICY_API_KEY"] = k
-                SPICY_API_KEY = k
-                return k
+            candidates.append(("cache", cached.strip()))
     except Exception:
         pass
+
+    for source, k in candidates:
+        if not k:
+            continue
+        try:
+            return validate_spicy_api_key(k)
+        except ValueError as exc:
+            debug_log(f"Rejected API key from {source}: {exc}")
+            if source == "cache":
+                try:
+                    from storage import CACHE
+                    CACHE.set_setting("spicy_api_key", None)
+                except Exception:
+                    pass
+            elif source == "variable":
+                SPICY_API_KEY = ""
+            print(f"⚠️ [Config] {exc}")
+            if raise_on_invalid:
+                raise
+            return ""
+
     return ""
 
 
@@ -219,14 +262,19 @@ def set_spicy_api_key(key: str) -> dict:
     Sets and persists the Spicy Lyrics API key.
     Updates in-memory state, environment variable, the .env file in DATA_DIR,
     and the persistent settings cache in CACHE.
+    Desktop client only accepts publishable keys ('sl_pk_...').
+    Secret keys ('sl_sk_...') and non-publishable keys are strictly rejected.
     """
     global SPICY_API_KEY
     import re
     clean_key = re.sub(r'[\r\n"]', '', (key or "").strip())
-    SPICY_API_KEY = clean_key
     if clean_key:
+        validate_spicy_api_key(clean_key)
+        SPICY_API_KEY = clean_key
         os.environ["SPICY_API_KEY"] = clean_key
     else:
+        clean_key = ""
+        SPICY_API_KEY = ""
         os.environ.pop("SPICY_API_KEY", None)
 
     # Persist in storage cache
@@ -273,7 +321,7 @@ def set_spicy_api_key(key: str) -> dict:
     masked = ""
     if clean_key:
         if len(clean_key) > 8:
-            prefix = clean_key[:6] if clean_key.startswith("sl_sk_") else clean_key[:3]
+            prefix = clean_key[:6] if (clean_key.startswith("sl_pk_") or clean_key.startswith("sl_sk_")) else clean_key[:3]
             suffix = clean_key[-4:]
             masked = f"{prefix}••••••••{suffix}"
         else:
@@ -286,7 +334,11 @@ def set_spicy_api_key(key: str) -> dict:
     }
 
 
-SPICY_API_KEY = get_spicy_api_key()
+try:
+    SPICY_API_KEY = get_spicy_api_key()
+except ValueError as exc:
+    SPICY_API_KEY = ""
+    print(f"⚠️ [Config] Rejected API key from environment: {exc}")
 BASE_URL = os.getenv("SPICY_BASE_URL", "https://api.spicylyrics.org")
 
 # A real, long-lived public Spotify track id, used by Settings to prove a saved
@@ -334,8 +386,30 @@ def default_latency_for(cache_state: str | None) -> int:
     return DEFAULT_LATENCY_MS if cache_state in ("hit", "local") else UNCACHED_LATENCY_MS
 
 
-# Lyric cache freshness. README promises ~3 days; this is now actually enforced.
-CACHE_TTL_SECONDS = int(os.getenv("SPICY_CACHE_TTL_SECONDS", str(3 * 24 * 60 * 60)))
+DEFAULT_CACHE_TTL_SECONDS = 3 * 24 * 60 * 60   # 259,200s (3 days)
+MAX_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60      # 2,592,000s (30 days hard cap per Terms Section 7)
+
+
+def clamp_cache_ttl(val: int | float | str | None) -> int:
+    """
+    Clamps cache TTL per SpicyLyrics Developer Terms Section 7:
+    - If <= 0, None, or invalid: defaults to 3 days (259,200s).
+    - If > 30 days (2,592,000s): clamped to 30 days maximum (2,592,000s).
+    - No caching can be unbounded or set to 0 (never expire).
+    """
+    if val is None:
+        return DEFAULT_CACHE_TTL_SECONDS
+    try:
+        parsed = int(val)
+        if parsed <= 0:
+            return DEFAULT_CACHE_TTL_SECONDS
+        return min(parsed, MAX_CACHE_TTL_SECONDS)
+    except (ValueError, TypeError):
+        return DEFAULT_CACHE_TTL_SECONDS
+
+
+# Lyric cache freshness. Hard cap at 30 days per Developer Terms Section 7.
+CACHE_TTL_SECONDS = clamp_cache_ttl(os.getenv("SPICY_CACHE_TTL_SECONDS"))
 
 
 def _as_bool(value: str | None) -> bool:
@@ -385,7 +459,11 @@ def debug_log(*args):
 
 def warn_missing_api_key():
     """Human-readable warning when the Spicy API key is absent."""
-    if not get_spicy_api_key():
+    try:
+        has_key = bool(get_spicy_api_key())
+    except ValueError:
+        has_key = False
+    if not has_key:
         print(
             "[Config] SPICY_API_KEY is not set. Syllable-level lyrics from the Spicy "
             "Lyrics API will be unavailable and the app will fall back to LRCLIB.\n"

@@ -169,6 +169,7 @@ const SPRING_D = 23;  // Damping
 const SPRING_M = 1.0; // Mass
 
 let activeLineIdx = -1;
+let activeScrollLineIdx = -1;
 let lastActiveSig = "";
 let lastPartingLine = -1; // line currently carrying has-growing (so it clears when active moves on)
 let userScrolledRecently = false;
@@ -2330,26 +2331,45 @@ function updateBeatSprings(dt) {
 function triggerBeatTransient(strength, isDrop) {
   if (sliderBeat === 0 || beatLevel === 0 || reducedMotion) return;
   const dropMult = isDrop ? 1.35 : 1.0;
-  beatSpringVel = Math.min(1.8, beatSpringVel + (1.15 * strength * dropMult));
+  let stasisMult = 1.0;
+  if (window.customizationModules && window.customizationModules.stasis) {
+    stasisMult = window.customizationModules.stasis.getImpulseMultiplier();
+  }
+  const effStrength = strength * stasisMult;
+  beatSpringVel = Math.min(1.8, beatSpringVel + (1.15 * effStrength * dropMult));
 
   if (sliderChroma > 0) {
     const chromaScale = (sliderChroma / 100);
     // Subtle, optical transient lens refraction on the cover art (capped at 1.2px)
-    chromaAmount = Math.min(1.2, 0.85 * strength * dropMult * chromaScale);
+    chromaAmount = Math.min(1.2, 0.85 * effStrength * dropMult * chromaScale);
     setChromaOffset(chromaAmount);
   }
 
+  if (window.customizationModules && window.customizationModules.reactive) {
+    window.customizationModules.reactive.triggerBeat(effStrength, isDrop);
+  }
+
   if (window.airPipeline && sliderParticles > 0) {
-    const surge = (isDrop ? 2.2 : 0.9) * strength;
+    const surge = (isDrop ? 2.2 : 0.9) * effStrength;
     window.airPipeline.onBeatImpulse(surge);
   }
 }
 
 function triggerSubBeatTransient(strength) {
   if (sliderBeat === 0 || beatLevel === 0 || reducedMotion) return;
-  subSpringVel = Math.min(0.9, subSpringVel + (0.55 * strength));
+  let stasisMult = 1.0;
+  if (window.customizationModules && window.customizationModules.stasis) {
+    stasisMult = window.customizationModules.stasis.getImpulseMultiplier();
+  }
+  const effStrength = strength * stasisMult;
+  subSpringVel = Math.min(0.9, subSpringVel + (0.55 * effStrength));
+
+  if (window.customizationModules && window.customizationModules.reactive) {
+    window.customizationModules.reactive.triggerSubBeat(effStrength);
+  }
+
   if (window.airPipeline && sliderParticles > 0 && sliderBeat >= 35) {
-    window.airPipeline.onSubBeatImpulse(strength * 0.4);
+    window.airPipeline.onSubBeatImpulse(effStrength * 0.4);
   }
 }
 
@@ -2890,6 +2910,9 @@ class AirParticlePipeline {
 
     this.updateColors();
     this.seedParticles();
+    if (window.customizationModules && window.customizationModules.visuals) {
+      window.customizationModules.visuals.attachToAirPipeline(this);
+    }
     this.setupDone = true;
   }
 
@@ -3171,6 +3194,9 @@ class AirParticlePipeline {
   }
 
   onBeatImpulse(surge) {
+    if (window.customizationModules && window.customizationModules.visuals) {
+      window.customizationModules.visuals.onBeatImpulse(surge);
+    }
     if (sliderParticles === 0 || ambientLevel === 0 || reducedMotion) return;
     const p = this.pool;
     const mult = surge * (sliderParticles >= 40 ? 1.1 : 0.85);
@@ -3257,6 +3283,11 @@ class AirParticlePipeline {
     const targetCount = sliderParticles;
     const clampedDt = Math.min(50, dt || 16.6);
 
+    let stasisSpeedMult = 1.0;
+    if (window.customizationModules && window.customizationModules.stasis) {
+      stasisSpeedMult = window.customizationModules.stasis.getSpeedMultiplier();
+    }
+
     // Smoothly spawn towards targetCount across the whole view
     if (p.count < targetCount && (now - this.lastSpawn > 80)) {
       this.lastSpawn = now;
@@ -3269,6 +3300,24 @@ class AirParticlePipeline {
     ctx.scale(this.dpr, this.dpr);
     ctx.clearRect(0, 0, this.width, this.height);
     ctx.globalCompositeOperation = 'lighter';
+
+    // Interfacing with PluggableParticleEngine:
+    if (window.customizationModules && window.customizationModules.visuals) {
+      const custVisuals = window.customizationModules.visuals;
+      const custType = custVisuals.options ? custVisuals.options.particleType : 'motes';
+
+      if (custType === 'none') {
+        ctx.restore();
+        return;
+      }
+
+      if (custType !== 'motes') {
+        // Pluggable type selected (stars, bokeh, ripples, fireflies, vinyl)
+        custVisuals.render(ctx, this.width, this.height, clampedDt * stasisSpeedMult);
+        ctx.restore();
+        return;
+      }
+    }
 
     // Exponential acoustic air drag (~280ms relaxation) for silky smooth beat transition
     const acousticDrag = Math.exp(-clampedDt / 280);
@@ -3314,8 +3363,8 @@ class AirParticlePipeline {
       p.vy[i] = p.vy[i] * 0.95 + curlY * 0.05;
 
       // Effective velocity combines base atmospheric curl and smooth beat impulse
-      const effVx = p.vx[i] + p.beatVx[i];
-      const effVy = p.vy[i] + p.beatVy[i];
+      const effVx = (p.vx[i] + p.beatVx[i]) * stasisSpeedMult;
+      const effVy = (p.vy[i] + p.beatVy[i]) * stasisSpeedMult;
 
       p.x[i] += effVx * clampedDt * 0.06;
       p.y[i] += effVy * clampedDt * 0.06;
@@ -3417,6 +3466,10 @@ class AirParticlePipeline {
       } else {
         drawAirDiamondStar(ctx, p.x[i], p.y[i], size, p.rot[i], r, g, b, alpha, bloom, param);
       }
+    }
+
+    if (window.customizationModules && window.customizationModules.visuals) {
+      window.customizationModules.visuals.render(ctx, this.width, this.height, clampedDt * stasisSpeedMult);
     }
 
     ctx.restore();
@@ -3605,6 +3658,77 @@ function formatCreditUsername(nameOrId) {
   return s.startsWith('@') ? s : '@' + s;
 }
 
+function resolveAttributionProvider(attr, srcLabel) {
+  const attrObj = (attr && typeof attr === 'object') ? attr : {};
+  let rawProvider = (attrObj.provider != null ? String(attrObj.provider) : '').trim().toLowerCase();
+  let rawSource = (srcLabel != null ? String(srcLabel) : '').trim();
+  let s = rawSource.toLowerCase();
+
+  // Determine canonical provider
+  let provider = '';
+  if (
+    rawProvider === 'spicy_lyrics' ||
+    rawProvider === 'spicy' ||
+    rawProvider === 'community' ||
+    rawProvider === 'spicylyrics'
+  ) {
+    provider = 'spicy_lyrics';
+  } else if (rawProvider === 'apple_music' || rawProvider === 'apple') {
+    provider = 'apple_music';
+  } else if (rawProvider === 'spotify') {
+    provider = 'spotify';
+  } else if (rawProvider === 'lrclib') {
+    provider = 'lrclib';
+  } else if (rawProvider === 'local') {
+    provider = 'local';
+  } else if (rawProvider === 'none' || rawProvider === 'unknown') {
+    provider = 'unknown';
+  } else if (!rawProvider) {
+    if (s.includes('apple')) provider = 'apple_music';
+    else if (s.includes('spotify')) provider = 'spotify';
+    else if (s.includes('lrclib')) provider = 'lrclib';
+    else if (s.includes('local')) provider = 'local';
+    else if (s.includes('spicy') || s.includes('community')) provider = 'spicy_lyrics';
+    else if (attrObj.maker || attrObj.uploader) provider = 'spicy_lyrics';
+    else provider = 'unknown';
+  } else {
+    provider = rawProvider;
+  }
+
+  // Determine provider label
+  let label = (attrObj.provider_label != null ? String(attrObj.provider_label) : '').trim();
+  const labelLower = label.toLowerCase();
+  if (
+    provider === 'spicy_lyrics' ||
+    labelLower === 'community lyrics' ||
+    labelLower === 'community' ||
+    labelLower === 'spicy lyrics' ||
+    labelLower === 'spicylyrics' ||
+    labelLower === 'spicy'
+  ) {
+    label = 'Spicy Lyrics';
+  } else if (labelLower === 'apple music' || provider === 'apple_music') {
+    label = 'Apple Music';
+  } else if (labelLower === 'spotify' || provider === 'spotify') {
+    label = 'Spotify';
+  } else if (labelLower === 'lrclib' || provider === 'lrclib') {
+    label = 'LRCLIB';
+  } else if (provider === 'local') {
+    label = label || 'Local lyrics';
+  } else if (
+    !label ||
+    labelLower === 'none' ||
+    labelLower === 'unknown' ||
+    labelLower === 'null' ||
+    provider === 'unknown'
+  ) {
+    label = 'Unknown';
+  }
+
+  return { provider, providerLabel: label };
+}
+window.resolveAttributionProvider = resolveAttributionProvider;
+
 function renderCreditsInSettings() {
   const badgeEl = document.getElementById('sp-credits-provider-badge');
   const writersRow = document.getElementById('sp-credits-writers-row');
@@ -3617,8 +3741,16 @@ function renderCreditsInSettings() {
   if (!badgeEl) return;
 
   const attr = currentAttribution || (diagnostics && diagnostics.attribution) || null;
-  const provLabel = (attr && attr.provider_label) || (diagnostics && diagnostics.source) || currentLyricsSource || 'Not loaded';
-  badgeEl.textContent = provLabel;
+  const rawSource = (diagnostics && diagnostics.source) || currentLyricsSource || '';
+  const { providerLabel } = resolveAttributionProvider(attr, rawSource);
+
+  let displayLabel = providerLabel;
+  if (!attr && !rawSource && (!lyrics || lyrics.length === 0)) {
+    displayLabel = 'Not loaded';
+  } else if (!displayLabel || displayLabel.toLowerCase() === 'none' || displayLabel.toLowerCase() === 'not loaded') {
+    displayLabel = 'Unknown';
+  }
+  badgeEl.textContent = displayLabel;
 
   if (attr && Array.isArray(attr.songwriters) && attr.songwriters.length > 0) {
     if (writersRow) writersRow.style.display = '';
@@ -3632,9 +3764,9 @@ function renderCreditsInSettings() {
     if (makerRow) makerRow.style.display = '';
     if (makerEl) {
       const u = attr.maker;
-      const url = u.url || ('https://spicylyrics.org/uid/' + u.id);
+      const url = u.url || (u.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(u.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(u.username)));
       const uname = formatCreditUsername(u.username || u.id);
-      makerEl.innerHTML = `<a class="sp-credit-user-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${u.avatar ? `<img class="sp-credit-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="sp-credit-username">${escapeHtml(uname)}</span></a>`;
+      makerEl.innerHTML = `<a class="sp-credit-user-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;" title="${escapeHtml(uname)}">${u.avatar ? `<img class="sp-credit-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="sp-credit-username">${escapeHtml(uname)}</span></a>`;
     }
   } else {
     if (makerRow) makerRow.style.display = 'none';
@@ -3645,9 +3777,9 @@ function renderCreditsInSettings() {
     if (uploaderRow) uploaderRow.style.display = '';
     if (uploaderEl) {
       const u = attr.uploader;
-      const url = u.url || ('https://spicylyrics.org/uid/' + u.id);
+      const url = u.url || (u.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(u.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(u.username)));
       const uname = formatCreditUsername(u.username || u.id);
-      uploaderEl.innerHTML = `<a class="sp-credit-user-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;">${u.avatar ? `<img class="sp-credit-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="sp-credit-username">${escapeHtml(uname)}</span></a>`;
+      uploaderEl.innerHTML = `<a class="sp-credit-user-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;" title="${escapeHtml(uname)}">${u.avatar ? `<img class="sp-credit-avatar" src="${escapeHtml(u.avatar)}" alt="" onerror="this.style.display='none'">` : ''}<span class="sp-credit-username">${escapeHtml(uname)}</span></a>`;
     }
   } else {
     if (uploaderRow) uploaderRow.style.display = 'none';
@@ -3674,22 +3806,7 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
   const maker = (attrObj.maker && typeof attrObj.maker === 'object') ? attrObj.maker : null;
   const uploader = (attrObj.uploader && typeof attrObj.uploader === 'object') ? attrObj.uploader : null;
 
-  let provider = attrObj.provider;
-  if (!provider) {
-    const s = (srcLabel || '').toLowerCase();
-    if (s.includes('apple')) provider = 'apple_music';
-    else if (s.includes('spotify')) provider = 'spotify';
-    else if (s.includes('lrclib')) provider = 'lrclib';
-    else if (s.includes('local')) provider = 'local';
-    else if (s.includes('spicy')) provider = 'community';
-    else provider = 'community';
-  }
-  const providerLabel = attrObj.provider_label || (
-    provider === 'apple_music' ? 'Apple Music' :
-    provider === 'spotify' ? 'Spotify' :
-    provider === 'lrclib' ? 'LRCLIB' :
-    provider === 'local' ? 'Local lyrics' : 'Community lyrics'
-  );
+  const { provider, providerLabel } = resolveAttributionProvider(attrObj, srcLabel);
 
   const creditsEl = document.createElement('div');
   creditsEl.className = 'lyrics-credits';
@@ -3707,10 +3824,10 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
   const rowEl = document.createElement('div');
   rowEl.className = 'lyrics-credits-attribution';
 
-  const isCommunityOrHasSyncers = (
-    provider === 'community' ||
-    provider === 'spicy' ||
+  const isSpicyLyrics = (
     provider === 'spicy_lyrics' ||
+    provider === 'spicy' ||
+    provider === 'community' ||
     Boolean(maker || uploader)
   );
 
@@ -3721,10 +3838,10 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
     )
   );
 
-  if (isCommunityOrHasSyncers) {
+  if (isSpicyLyrics) {
     const provSpan = document.createElement('span');
     provSpan.className = 'lyrics-credit-provider';
-    provSpan.textContent = providerLabel || 'Community lyrics';
+    provSpan.textContent = 'Spicy Lyrics';
     rowEl.appendChild(provSpan);
 
     if (maker && (maker.username || maker.id)) {
@@ -3802,7 +3919,7 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
   } else if (provider === 'local') {
     const provSpan = document.createElement('span');
     provSpan.className = 'lyrics-credit-provider';
-    provSpan.textContent = 'Local lyrics';
+    provSpan.textContent = providerLabel || 'Local lyrics';
     rowEl.appendChild(provSpan);
 
     if (attrObj.file) {
@@ -3816,10 +3933,15 @@ function appendLyricsCredits(containerEl, attr, srcLabel) {
       fileSpan.textContent = attrObj.file;
       rowEl.appendChild(fileSpan);
     }
+  } else if (provider === 'unknown' || provider === 'none') {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'lyrics-credit-provider';
+    provSpan.textContent = 'Unknown';
+    rowEl.appendChild(provSpan);
   } else {
     const provSpan = document.createElement('span');
     provSpan.className = 'lyrics-credit-provider';
-    provSpan.textContent = providerLabel || 'Spicy Lyrics';
+    provSpan.textContent = providerLabel || 'Unknown';
     rowEl.appendChild(provSpan);
   }
 
@@ -3845,27 +3967,12 @@ function renderCornerAttribution() {
   const maker = (attrObj.maker && typeof attrObj.maker === 'object') ? attrObj.maker : null;
   const uploader = (attrObj.uploader && typeof attrObj.uploader === 'object') ? attrObj.uploader : null;
 
-  let provider = attrObj.provider;
-  if (!provider) {
-    const s = (currentLyricsSource || '').toLowerCase();
-    if (s.includes('apple')) provider = 'apple_music';
-    else if (s.includes('spotify')) provider = 'spotify';
-    else if (s.includes('lrclib')) provider = 'lrclib';
-    else if (s.includes('local')) provider = 'local';
-    else if (s.includes('spicy')) provider = 'community';
-    else provider = 'community';
-  }
-  const providerLabel = attrObj.provider_label || (
-    provider === 'apple_music' ? 'Apple Music' :
-    provider === 'spotify' ? 'Spotify' :
-    provider === 'lrclib' ? 'LRCLIB' :
-    provider === 'local' ? 'Local lyrics' : 'Community lyrics'
-  );
+  const { provider, providerLabel } = resolveAttributionProvider(attrObj, currentLyricsSource);
 
-  const isCommunityOrHasSyncers = (
-    provider === 'community' ||
-    provider === 'spicy' ||
+  const isSpicyLyrics = (
     provider === 'spicy_lyrics' ||
+    provider === 'spicy' ||
+    provider === 'community' ||
     Boolean(maker || uploader)
   );
 
@@ -3878,8 +3985,8 @@ function renderCornerAttribution() {
 
   let html = '';
 
-  if (isCommunityOrHasSyncers) {
-    html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Community lyrics')}</span>`;
+  if (isSpicyLyrics) {
+    html += `<span class="hud-attr-prov">Spicy Lyrics</span>`;
     if (maker && (maker.username || maker.id)) {
       const mUrl = maker.url || (maker.id ? ('https://spicylyrics.org/uid/' + encodeURIComponent(maker.id)) : ('https://spicylyrics.org/u/' + encodeURIComponent(maker.username)));
       const mName = formatCreditUsername(maker.username || maker.id);
@@ -3902,8 +4009,10 @@ function renderCornerAttribution() {
     html += `<a class="hud-attr-link" href="https://lrclib.net" target="_blank" rel="noopener noreferrer" onclick="openExternalUrl(this.href); return false;"><span class="hud-attr-prov">LRCLIB</span></a>`;
   } else if (provider === 'local') {
     html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Local lyrics')}</span>`;
+  } else if (provider === 'unknown' || provider === 'none') {
+    html += `<span class="hud-attr-prov">Unknown</span>`;
   } else {
-    html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Spicy Lyrics')}</span>`;
+    html += `<span class="hud-attr-prov">${escapeHtml(providerLabel || 'Unknown')}</span>`;
   }
 
   hud.innerHTML = html;
@@ -4006,9 +4115,25 @@ function renderDiagnostics() {
   if (!box) return;
 
   const d = diagnostics || {};
+  let sourceText = d.source || '\u2014';
+  if (d.source) {
+    const sLower = d.source.trim().toLowerCase();
+    if (sLower === 'none' || sLower === 'unknown') {
+      sourceText = 'Unknown';
+    } else if (sLower.includes('community') || sLower === 'spicy' || sLower === 'spicy_lyrics' || sLower === 'spicy (spicy_lyrics)' || sLower === 'spicy (community)') {
+      sourceText = 'Spicy Lyrics';
+    }
+  }
+
+  let provLabel = '';
+  if (d.attribution) {
+    const provInfo = resolveAttributionProvider(d.attribution, d.source);
+    provLabel = provInfo.providerLabel;
+  }
+
   const syncTxt = `${latencyOffsetMs > 0 ? '+' : ''}${latencyOffsetMs}ms`;
   const rows = [
-    ['Source', d.source || '\u2014'],
+    ['Source', sourceText],
     ['Cache', d.cache ? (d.cache === 'hit' ? 'Hit' : (d.cache === 'local' ? 'Local file' : 'Miss')) : '\u2014'],
     ['Local TTML', d.ttml ? (d.ttml + (d.ttml_match ? ' \u00b7 ' + d.ttml_match : '')) : '\u2014'],
     ['Timing', d.timing || '\u2014'],
@@ -4045,7 +4170,7 @@ function renderDiagnostics() {
       : (momentsFired.total
         ? `${momentsFired.total} fired \u00b7 ${momentsFired.drop} drop(s) \u00b7 ${momentsFired.hook} hook(s)`
         : 'none yet')],
-    ...(d.attribution && d.attribution.provider_label ? [['Provider', d.attribution.provider_label]] : []),
+    ...(provLabel ? [['Provider', provLabel]] : []),
     ...(d.attribution && Array.isArray(d.attribution.songwriters) && d.attribution.songwriters.length ? [['Songwriters', d.attribution.songwriters.join(', ')]] : []),
     ...(d.attribution && d.attribution.maker && (d.attribution.maker.username || d.attribution.maker.id) ? [['Sync Maker', formatCreditUsername(d.attribution.maker.username || d.attribution.maker.id)]] : []),
     ...(d.attribution && d.attribution.uploader && (d.attribution.uploader.username || d.attribution.uploader.id) ? [['Sync Uploader', formatCreditUsername(d.attribution.uploader.username || d.attribution.uploader.id)]] : []),
@@ -4700,7 +4825,114 @@ function openSettingsTab(id) {
     renderCreditsInSettings();
     renderDiagnostics();
   }
+  if (want === 'customization') {
+    syncCustomizationSettingsUI();
+  }
 }
+
+function syncCustomizationSettingsUI() {
+  if (typeof window.renderCustomizationPanel === 'function') {
+    window.renderCustomizationPanel();
+  }
+
+  const cust = window.customization;
+  if (!cust || typeof document === 'undefined') return;
+
+  // 1. Spatial Orientation
+  const oriSelect = document.getElementById('cust-orientation-select') || document.getElementById('cust-orientation');
+  if (oriSelect) {
+    const ori = cust.get('layout.orientation') || 'horizontal';
+    oriSelect.value = ori;
+    if (window.customizationModules && window.customizationModules.typography) {
+      window.customizationModules.typography.applyOrientation(ori);
+    }
+  }
+
+  // 2. Artwork Shape & Spin
+  const shapeSelect = document.getElementById('cust-artwork-shape-select') || document.getElementById('cust-artwork-shape');
+  if (shapeSelect) {
+    const shape = cust.get('layout.artwork_shape') || 'rounded';
+    shapeSelect.value = shape;
+    if (window.customizationModules && window.customizationModules.artwork) {
+      window.customizationModules.artwork.applyShape(shape);
+    }
+  }
+
+  const artSpinBadge = document.getElementById('cust-artwork-spin-state') || document.getElementById('cust-artspin-state');
+  if (artSpinBadge) {
+    const spin = Boolean(cust.get('layout.artwork_spin_enabled'));
+    artSpinBadge.textContent = spin ? 'On' : 'Off';
+  }
+
+  // 3. Breakdown Stasis
+  const stasisBadge = document.getElementById('cust-breakdown-stasis-state') || document.getElementById('cust-stasis-state');
+  if (stasisBadge) {
+    const stasis = cust.get('visuals.breakdown_stasis_enabled') !== false;
+    stasisBadge.textContent = stasis ? 'On' : 'Off';
+  }
+
+  // 4. Kinetic Syllables & Shaders
+  const stretchBadge = document.getElementById('cust-syllable-stretch-state');
+  if (stretchBadge) {
+    const stretch = cust.get('lyrics.syllable_stretch_enabled') !== false;
+    stretchBadge.textContent = stretch ? 'On' : 'Off';
+  }
+
+  const popBadge = document.getElementById('cust-syllable-pop-state');
+  if (popBadge) {
+    const pop = cust.get('lyrics.syllable_pop_enabled') !== false;
+    popBadge.textContent = pop ? 'On' : 'Off';
+  }
+
+  const wipeBadge = document.getElementById('cust-gradient-wipe-state');
+  if (wipeBadge) {
+    const wipe = cust.get('lyrics.gradient_wipe_enabled') !== false;
+    wipeBadge.textContent = wipe ? 'On' : 'Off';
+  }
+
+  const auroraBadge = document.getElementById('cust-aurora-mesh-state');
+  if (auroraBadge) {
+    const aurora = cust.get('visuals.aurora_mesh_enabled') !== false;
+    auroraBadge.textContent = aurora ? 'On' : 'Off';
+  }
+
+  // 5. Lyrics Dock & Offsets
+  const dockSelect = document.getElementById('cust-lyrics-dock-select') || document.getElementById('cust-lyrics-dock');
+  if (dockSelect) {
+    const dock = cust.get('layout.lyrics_dock') || 'center';
+    dockSelect.value = dock;
+    if (window.customizationModules && window.customizationModules.typography) {
+      window.customizationModules.typography.applyLyricsDock(dock);
+    }
+  }
+
+  // 6. Secondary & Ad-lib Scales (Phase 5)
+  const secondarySlider = document.getElementById('slider-cust-secondary-scale');
+  const secondaryBadge = document.getElementById('badge-cust-secondary-scale');
+  if (secondarySlider) {
+    const secScale = Number(cust.get('lyrics.secondary_scale') !== undefined ? cust.get('lyrics.secondary_scale') : 0.75);
+    const secVal = Math.round(secScale * 100);
+    secondarySlider.value = secVal;
+    if (secondaryBadge) secondaryBadge.textContent = `${secVal}%`;
+  }
+
+  const adlibSlider = document.getElementById('slider-cust-adlib-scale');
+  const adlibBadge = document.getElementById('badge-cust-adlib-scale');
+  if (adlibSlider) {
+    const adScale = Number(cust.get('lyrics.adlib_scale') !== undefined ? cust.get('lyrics.adlib_scale') : 0.70);
+    const adVal = Math.round(adScale * 100);
+    adlibSlider.value = adVal;
+    if (adlibBadge) adlibBadge.textContent = `${adVal}%`;
+  }
+
+  // 7. Scroll Inertia Mode
+  const inertiaSelect = document.getElementById('cust-scroll-inertia') || document.getElementById('cust-scroll-inertia-select');
+  if (inertiaSelect) {
+    const mode = cust.get('lyrics.scroll_inertia_mode') || 'springy';
+    inertiaSelect.value = mode;
+  }
+}
+window.syncCustomizationSettingsUI = syncCustomizationSettingsUI;
 
 // Arrow keys move between tabs, Home/End jump to the ends — the ARIA tabs
 // pattern, so the strip behaves the way the control it claims to be does.
@@ -4962,6 +5194,9 @@ function openSettings(open) {
     if (search) search.value = '';
     runSettingsSearch('');
     openSettingsTab(settingsTab);
+    if (typeof window.syncCustomizationSettingsUI === 'function') {
+      window.syncCustomizationSettingsUI();
+    }
     if (window.renderModalLatencyFader) {
       window.renderModalLatencyFader();
       if (typeof requestAnimationFrame === 'function') {
@@ -6199,6 +6434,7 @@ if (container) {
     clearTimeout(userScrollTimer);
     userScrollTimer = setTimeout(() => {
       userScrolledRecently = false;
+      wakeRenderLoop();
     }, 2400);
   }, { passive: true });
 }
@@ -6495,7 +6731,17 @@ function updateSpringScroll(deltaMs) {
     scrollVelocity = 0;
   }
 
-  container.scrollTop = currentScrollY;
+  // Velocity-damped inertia offset for organic flowing physical momentum
+  let inertiaOffset = 0;
+  const inertiaMode = (window.customization && typeof window.customization.get === 'function')
+    ? (window.customization.get('lyrics.scroll_inertia_mode') || 'springy')
+    : 'springy';
+  if (inertiaMode !== 'off') {
+    const scale = inertiaMode === 'subtle' ? 0.007 : (inertiaMode === 'smooth' ? 0.011 : 0.016);
+    inertiaOffset = clamp(scrollVelocity * scale, -5.0, 5.0);
+  }
+
+  container.scrollTop = currentScrollY + inertiaOffset;
   return settled;
 }
 
@@ -6505,16 +6751,69 @@ function scrollToActiveCluster(indices) {
   const lastLine = lyricDom[indices[indices.length - 1]];
   if (!firstLine || !lastLine || !firstLine.element || !lastLine.element) return;
 
+  const primaryIdx = indices[0];
+  if (primaryIdx !== activeScrollLineIdx) {
+    activeScrollLineIdx = primaryIdx;
+    if (window.customizationModules && window.customizationModules.typography && typeof window.customizationModules.typography.triggerScrollCascade === 'function') {
+      window.customizationModules.typography.triggerScrollCascade(primaryIdx, lyricDom);
+    }
+  }
+
+  const isVerticalCol = (typeof document !== 'undefined') &&
+    (document.documentElement.getAttribute('data-orientation') === 'vertical-column');
+  if (isVerticalCol) {
+    const clusterLeft = firstLine.element.offsetLeft;
+    const clusterRight = lastLine.element.offsetLeft + lastLine.element.clientWidth;
+    const clusterCenterX = (clusterLeft + clusterRight) / 2;
+    targetScrollY = Math.max(0, clusterCenterX - (container.clientWidth / 2));
+    wakeRenderLoop();
+    return;
+  }
+
+  // Calculate target scroll using relative client bounding rects for sub-pixel centering precision
+  if (typeof container.getBoundingClientRect === 'function' && typeof firstLine.element.getBoundingClientRect === 'function') {
+    const cRect = container.getBoundingClientRect();
+    const fRect = firstLine.element.getBoundingClientRect();
+    const lRect = lastLine.element.getBoundingClientRect();
+    if (cRect.height > 0 && fRect.height > 0) {
+      const clusterCenter = (fRect.top + lRect.bottom) / 2;
+      const cCenter = cRect.top + (cRect.height / 2);
+      targetScrollY = Math.max(0, container.scrollTop + (clusterCenter - cCenter));
+      wakeRenderLoop();
+      return;
+    }
+  }
+
   const clusterTop = firstLine.element.offsetTop;
   const clusterBottom = lastLine.element.offsetTop + lastLine.element.clientHeight;
   const clusterCenter = (clusterTop + clusterBottom) / 2;
 
   targetScrollY = Math.max(0, clusterCenter - (container.clientHeight / 2));
+  wakeRenderLoop();
 }
 
 // Multi-Line Cinematic Depth of Field (Optimized for locked 60/120Hz)
 function updateLineDepthOfField(activeIndices) {
   if (!lyricDom || lyricDom.length === 0) return;
+
+  if (window.customizationModules && window.customizationModules.typography) {
+    if (window.customizationModules.typography.applyDepthOfField(lyricDom, activeIndices)) {
+      if (window.customizationModules.reactive && activeIndices) {
+        const primaryIdx = Array.isArray(activeIndices) ? activeIndices[0] : activeIndices;
+        if (primaryIdx !== undefined && lyricDom[primaryIdx]) {
+          const el = lyricDom[primaryIdx].element;
+          window.customizationModules.reactive.setActiveLyricElement(el);
+          if (window.customizationModules.visuals && typeof el.getBoundingClientRect === 'function') {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              window.customizationModules.visuals.setActiveLyricPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            }
+          }
+        }
+      }
+      return;
+    }
+  }
 
   const indices = Array.isArray(activeIndices)
     ? activeIndices
@@ -6646,6 +6945,12 @@ function tick() {
 
     springSettled = updateSpringScroll(delta);
     const beatSpringSettled = updateBeatSprings(delta);
+    if (window.customizationModules && window.customizationModules.reactive) {
+      window.customizationModules.reactive.update(delta);
+    }
+    if (window.customizationModules && window.customizationModules.artwork) {
+      window.customizationModules.artwork.update(delta, isPlaying);
+    }
     if (window.airPipeline) window.airPipeline.updateAndRender(delta, now);
     springSettled = springSettled && beatSpringSettled;
   } catch (err) {
@@ -6733,6 +7038,7 @@ window.showLoading = function(title, artist) {
   hideGapIndicator();
   currentAttribution = null;
   renderCornerAttribution();
+  renderCreditsInSettings();
 
   if (container) {
     container.scrollTop = 0;
@@ -7474,6 +7780,9 @@ function setSyllableState(sylDom, state, fillPct, progress = null, ms = null) {
     sylDom.element.className = `syllable ${state}${sylDom.hasLetters ? ' has-letters' : ''}`;
     sylDom.state = state;
     if (state !== 'singing') {
+      if (window.customizationModules && window.customizationModules.typography && typeof window.customizationModules.typography.settleSyllable === 'function') {
+        window.customizationModules.typography.settleSyllable(sylDom);
+      }
       // Per-frame sway lives on the text layers; clear it on state change.
       sylDom.anticipation = '';
       // Only a waiting frame may set the lean, so a state that is not waiting
@@ -7506,6 +7815,12 @@ function setSyllableState(sylDom, state, fillPct, progress = null, ms = null) {
     if (sylDom.fill !== fill) {
       sylDom.highlightEl.style.setProperty('--fill', fill.toFixed(4));
       sylDom.fill = fill;
+    }
+  }
+
+  if (state === 'singing') {
+    if (window.customizationModules && window.customizationModules.typography) {
+      window.customizationModules.typography.onSyllableActive(sylDom, sylDom.durationMs, ms);
     }
   }
 
@@ -7899,9 +8214,11 @@ function lyricFitMetrics(ctx, lDom, sizePx, italic, spacingEm) {
   const spaced = 'letterSpacing' in ctx;
   ctx.font = `${italic ? 'italic ' : ''}${ctx.lyricWeight} ${sizePx}px ${ctx.lyricFamily}`;
   if (spaced) ctx.letterSpacing = (spacingEm * sizePx) + 'px';
+  const spacePx = ctx.measureText(' ').width || (sizePx * 0.25);
 
   const words = [];
   let widest = 0;
+  let totalLine = 0;
   for (const word of (lDom && lDom.words) || []) {
     let total = 0;
     for (const syl of word.syllables) {
@@ -7913,12 +8230,15 @@ function lyricFitMetrics(ctx, lDom, sizePx, italic, spacingEm) {
       if (width > widest) widest = width;
     }
     words.push(total);
+    totalLine += total + spacePx;
   }
-  return { words, widest };
+  return { words, widest, totalLineWidth: Math.max(0, totalLine - spacePx) };
 }
 
 // Fits every line to the column it is in. Idempotent and cheap: no line is laid out, and a
 // line that already fits is never written to (a song must not change size line by line).
+// In PiP and small windows, pre-factors --cust-lyrics-active-scale and active offsets
+// so active lines never clip off-screen or truncate at the right edge.
 function fitLyricLines() {
   const container = document.getElementById('lyrics-container');
   if (!container || !lyricDom || !lyricDom.length) return;
@@ -7932,6 +8252,25 @@ function fitLyricLines() {
   const column = sample.element.clientWidth;
   if (!baseSize || !isFinite(baseSize) || !column) return;   // folded away: nothing to fit to
 
+  // Retrieve active line scale and active offset to prevent clipping in small/PiP windows
+  let activeScale = 1.08;
+  let activeOffsetX = 2;
+  if (window.customization && typeof window.customization.get === 'function') {
+    activeScale = Number(window.customization.get('lyrics.active_scale') || 1.08);
+    activeOffsetX = Number(window.customization.get('lyrics.active_offset_x') || 2);
+  } else if (typeof document !== 'undefined') {
+    const scaleCss = getComputedStyle(document.documentElement).getPropertyValue('--cust-lyric-active-scale');
+    if (scaleCss) {
+      const parsedScale = parseFloat(scaleCss);
+      if (parsedScale > 0) activeScale = parsedScale;
+    }
+    const offCss = getComputedStyle(document.documentElement).getPropertyValue('--cust-lyric-active-offset-x');
+    if (offCss) {
+      const parsedOff = parseFloat(offCss);
+      if (!isNaN(parsedOff)) activeOffsetX = Math.max(0, parsedOff);
+    }
+  }
+
   const ctx = lyricFitCanvas || (lyricFitCanvas = document.createElement('canvas').getContext('2d'));
   ctx.lyricFamily = info.fontFamily;
   ctx.lyricWeight = info.fontWeight;
@@ -7939,6 +8278,10 @@ function fitLyricLines() {
   ctx.font = `${info.fontWeight} ${baseSize}px ${info.fontFamily}`;
   if ('letterSpacing' in ctx) ctx.letterSpacing = (spacingEm * baseSize) + 'px';
   const spacePx = ctx.measureText(' ').width || baseSize * 0.25;
+
+  const usable = Math.max(1, column - spacePx - Math.abs(activeOffsetX));
+  const effectiveColumn = Math.max(1, usable / Math.max(1.0, activeScale));
+
   // The widths depend on the type, never on the column, so they are cached per line and
   // reused for every resize: dragging a window edge would otherwise re-measure a whole
   // song on each frame (24ms for 400 lines, measured), to answer a question whose answer
@@ -7953,27 +8296,35 @@ function fitLyricLines() {
       lDom.fitKey = lineKey;
     }
     const metrics = lDom.fitMetrics;
-    // A word wider than the whole column gets its own block and wraps between syllables.
+    // A word wider than the available column gets its own block and wraps between syllables.
     // Toggled rather than rebuilt, and only when the answer changes, so a resize that
     // changes nothing writes nothing: `word.element` holds the syllables the wipe and the
     // motion work on, and moving them would rebuild what this is protecting.
     const words = lDom.words || [];
     for (let w = 0; w < words.length; w++) {
-      const want = metrics.words[w] > column;
+      const want = metrics.words[w] > effectiveColumn;
       if (want !== !!words[w].wrapped) {
         words[w].wrapped = want;
         words[w].element.classList.toggle('is-wrapped', want);
       }
     }
-    // A syllable can also be pushed past the column by the space in front of it: the space
-    // box is preserved, it hangs at the end of the row it lands on, and the word after it
-    // is then laid out from there — so a word that only fits when it STARTS the row does
-    // not fit at all (measured at 330x380: a 269px word in a 270px column, laid out 9px
-    // over the edge). One space of slack is what that costs, and a line whose widest
-    // syllable is within a space of the column is fitted for it.
-    const usable = Math.max(1, column - spacePx);
-    const widest = metrics.widest;
-    const fit = widest > usable ? (usable * LYRIC_FIT_HEADROOM) / widest : 1;
+
+    // Precalculate widest unbroken segment accounting for active-line scale
+    let widestBlock = metrics.widest * activeScale;
+    for (let w = 0; w < words.length; w++) {
+      if (!words[w].wrapped) {
+        const wordW = (metrics.words[w] || 0) * activeScale;
+        if (wordW > widestBlock) widestBlock = wordW;
+      }
+    }
+
+    // In small / PiP windows, prevent single unbroken lines from clipping past column
+    if (words.length <= 1 && metrics.totalLineWidth) {
+      const totalW = metrics.totalLineWidth * activeScale;
+      if (totalW > widestBlock) widestBlock = totalW;
+    }
+
+    const fit = widestBlock > usable ? (usable * LYRIC_FIT_HEADROOM) / widestBlock : 1;
     const current = lDom.fit || 1;
     if (fit < 1) {
       // Only write when the ratio moves: a resize that changed nothing else must not
@@ -8261,7 +8612,7 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
 
       container.appendChild(lineDiv);
 
-      return {
+      const lineDomObj = {
         element: lineDiv,
         index: lIdx,
         isActive: false,
@@ -8274,6 +8625,12 @@ window.loadLyrics = function(data, title, artist, sourceName, initialElapsedMs, 
         dofTier: null,
         words: wordsDom
       };
+
+      if (window.customizationModules && window.customizationModules.typography) {
+        window.customizationModules.typography.onLineCreated(lineDomObj);
+      }
+
+      return lineDomObj;
     });
 
     // On-screen contribution & credit attribution at bottom of lyrics container (Section 6)
@@ -8528,6 +8885,28 @@ function renderProgress(ms) {
     return;
   } else {
     if (introDots) introDots.style.display = 'none';
+  }
+
+  if (window.customizationModules && window.customizationModules.stasis && lyrics.length > 0) {
+    let curr = null;
+    let next = null;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (ms >= lyrics[i].startTimeMs && ms < lyrics[i].endTimeMs + 600) {
+        curr = lyrics[i];
+        next = lyrics[i + 1] || null;
+        break;
+      }
+      if (ms < lyrics[i].startTimeMs) {
+        next = lyrics[i];
+        curr = lyrics[i - 1] || null;
+        break;
+      }
+    }
+    if (curr && next) {
+      window.customizationModules.stasis.checkGap(curr, next, ms);
+    } else {
+      window.customizationModules.stasis.exitStasis();
+    }
   }
 
   const currentActiveIndices = [];

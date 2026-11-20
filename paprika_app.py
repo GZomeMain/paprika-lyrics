@@ -88,6 +88,7 @@ try:
     from core.font_library import FONT_LIBRARY
     from core import native_window
     from core.simpmusic_bridge import SimpMusicBridge
+    from core.customization import CUSTOMIZATION_REGISTRY
 except ImportError as exc:
     _fatal(f"Failed to load a core module: {exc}\n" + DEPENDENCY_HINT)
     sys.exit(1)
@@ -963,6 +964,175 @@ class WindowApi:
         CACHE.save_profiles(data or {})
         return True
 
+    # =========================================================================
+    # Advanced Customization API Bridge
+    # =========================================================================
+    def customization_get_state(self) -> dict:
+        """
+        Returns the active customization state merged with full schema defaults,
+        along with the active preset ID.
+        """
+        import json
+        from storage import CACHE
+        raw_state = CACHE.get_customization_state()
+        active_preset_id = CACHE.get_customization_active_preset()
+        merged = CUSTOMIZATION_REGISTRY.merge_with_defaults(raw_state)
+        res = {
+            "success": True,
+            "active_preset_id": active_preset_id,
+            "state": merged,
+        }
+        res.update(merged)
+        return res
+
+    def customization_save_state(self, state: dict) -> bool:
+        """
+        Validates and persists customization state updates to cache.
+        Supports full or partial updates across domains.
+        """
+        if not isinstance(state, dict):
+            return False
+        from storage import CACHE
+
+        input_state = state.get("state") if isinstance(state.get("state"), dict) else state
+        active_preset_id = state.get("active_preset_id")
+
+        current = CACHE.get_customization_state()
+        merged = CUSTOMIZATION_REGISTRY.merge_with_defaults(current)
+
+        for domain in CUSTOMIZATION_REGISTRY.get_domains():
+            if domain in input_state and isinstance(input_state[domain], dict):
+                for opt_name, opt_val in input_state[domain].items():
+                    spec = CUSTOMIZATION_REGISTRY.get_option(domain, opt_name)
+                    if spec is not None:
+                        valid, coerced, _ = CUSTOMIZATION_REGISTRY.validate_value(spec, opt_val, clamp_bounds=True)
+                        merged[domain][opt_name] = coerced
+
+        CACHE.save_customization_state(merged, active_preset_id=active_preset_id)
+        return True
+
+    def customization_list_presets(self) -> dict:
+        """
+        Returns all registered built-in and user-saved presets.
+        """
+        from storage import CACHE
+        user_presets = CACHE.get_custom_presets()
+        info = CUSTOMIZATION_REGISTRY.list_presets(user_presets)
+        info["active_preset_id"] = CACHE.get_customization_active_preset()
+        info["success"] = True
+        return info
+
+    def customization_apply_preset(self, preset_id: str) -> dict:
+        """
+        Applies a preset by ID, merging with defaults and saving active state.
+        """
+        if not preset_id or not isinstance(preset_id, str):
+            return {"success": False, "error": "Invalid preset ID"}
+
+        from storage import CACHE
+        pid = preset_id.strip()
+        builtin = CUSTOMIZATION_REGISTRY.get_builtin_preset(pid)
+        target_state = None
+        preset_meta = None
+
+        if builtin:
+            target_state = builtin.state
+            preset_meta = builtin.to_dict()
+        else:
+            user_preset = CACHE.get_custom_preset(pid)
+            if user_preset:
+                target_state = user_preset.get("state", {})
+                preset_meta = user_preset
+
+        if target_state is None:
+            return {"success": False, "error": f"Preset '{pid}' not found"}
+
+        merged = CUSTOMIZATION_REGISTRY.merge_with_defaults(target_state)
+        CACHE.save_customization_state(merged, active_preset_id=pid)
+
+        res = {
+            "success": True,
+            "preset_id": pid,
+            "preset": preset_meta,
+            "state": merged,
+        }
+        res.update(merged)
+        return res
+
+    def customization_save_preset(self, name: str, state: dict) -> bool:
+        """
+        Saves a new user preset from the given name and state.
+        """
+        if not name or not isinstance(name, str) or not name.strip():
+            return False
+        if not isinstance(state, dict):
+            return False
+
+        from storage import CACHE
+        try:
+            preset = CUSTOMIZATION_REGISTRY.create_preset(name=name.strip(), state=state)
+            CACHE.save_custom_preset(preset.id, preset.to_dict())
+            return True
+        except Exception as exc:
+            print(f"⚠️ [Customization] Failed to save preset '{name}': {exc}")
+            return False
+
+    def customization_delete_preset(self, preset_id: str) -> bool:
+        """
+        Deletes a user-saved preset by ID. Built-in presets are protected.
+        """
+        if not preset_id or not isinstance(preset_id, str):
+            return False
+
+        from storage import CACHE
+        pid = preset_id.strip()
+        if CUSTOMIZATION_REGISTRY.get_builtin_preset(pid):
+            return False
+
+        deleted = CACHE.delete_custom_preset(pid)
+        if deleted and CACHE.get_customization_active_preset() == pid:
+            CACHE.set_customization_active_preset("default")
+        return deleted
+
+    def customization_export_preset(self, preset_id: str) -> str:
+        """
+        Exports a preset by ID as a portable JSON string envelope.
+        """
+        import json
+        if not preset_id or not isinstance(preset_id, str):
+            return json.dumps({"error": "Invalid preset ID"})
+
+        from storage import CACHE
+        pid = preset_id.strip()
+        builtin = CUSTOMIZATION_REGISTRY.get_builtin_preset(pid)
+        if builtin:
+            return CUSTOMIZATION_REGISTRY.export_preset(builtin)
+
+        user_preset = CACHE.get_custom_preset(pid)
+        if user_preset:
+            return CUSTOMIZATION_REGISTRY.export_preset(user_preset)
+
+        return json.dumps({"error": f"Preset '{pid}' not found"})
+
+    def customization_import_preset(self, json_str: str) -> dict:
+        """
+        Validates and imports a preset from JSON string, saving it to user presets.
+        """
+        if not json_str or not isinstance(json_str, str):
+            return {"success": False, "error": "Empty or invalid JSON string"}
+
+        from storage import CACHE
+        try:
+            preset_dict = CUSTOMIZATION_REGISTRY.import_preset(json_str)
+            CACHE.save_custom_preset(preset_dict["id"], preset_dict)
+            return {
+                "success": True,
+                "preset_id": preset_dict["id"],
+                "preset": preset_dict,
+            }
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
     def lock_source(self, key_or_id: str) -> bool:
         """Locks playback to a specific media session or source app."""
         SMTC_BRIDGE.lock_source(key_or_id)
@@ -984,7 +1154,7 @@ class WindowApi:
         masked = ""
         if key:
             if len(key) > 8:
-                prefix = key[:6] if key.startswith("sl_sk_") else key[:3]
+                prefix = key[:6] if key.startswith("sl_pk_") else key[:3]
                 suffix = key[-4:]
                 masked = f"{prefix}••••••••{suffix}"
             else:
@@ -997,11 +1167,21 @@ class WindowApi:
 
     def set_spicy_api_key(self, key: str) -> dict:
         """
-        Saves the user's Spicy Lyrics secret key, tests connectivity,
+        Saves the user's Spicy Lyrics publishable key, tests connectivity,
         and requests a reload so current lyrics re-resolve immediately.
+        Secret keys ('sl_sk_...') are strictly rejected.
         """
         import config
-        res = config.set_spicy_api_key(key)
+        try:
+            res = config.set_spicy_api_key(key)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "verified": False,
+                "error": str(exc),
+                "message": str(exc),
+                "status": f"Key rejected: {exc}",
+            }
         status_msg = "Key removed. Using LRCLIB line fallback."
         verified = False
 

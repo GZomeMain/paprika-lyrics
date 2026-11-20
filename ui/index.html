@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="customization.css">
 </head>
 <!-- `duration-unknown` starts on: the page has not been told a length yet, and a
      total it cannot know is not 0:00 — it is unknown. The host pushes the real
@@ -17,6 +18,7 @@
   <div class="app-root">
 
     <div class="ambient-backdrop">
+      <div class="theme-ambient-tint" id="theme-ambient-tint" aria-hidden="true"></div>
       <!-- Dynamic cover-art layers are created and cross-faded by app.js. The
            artwork IS the background; the scrim over it is a ::after, and the
            grain is the last layer. -->
@@ -536,6 +538,21 @@
             </svg>
             <span>Visuals</span>
           </button>
+          <button class="sp-tab" role="tab" id="qp-tab-customization" data-tab="customization"
+                  aria-controls="qp-panel-customization" aria-selected="false" tabindex="-1" title="Advanced Customization">
+            <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="4" y1="21" x2="4" y2="14"/>
+              <line x1="4" y1="10" x2="4" y2="3"/>
+              <line x1="12" y1="21" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12" y2="3"/>
+              <line x1="20" y1="21" x2="20" y2="16"/>
+              <line x1="20" y1="12" x2="20" y2="3"/>
+              <line x1="1" y1="14" x2="7" y2="14"/>
+              <line x1="9" y1="8" x2="15" y2="8"/>
+              <line x1="17" y1="16" x2="23" y2="16"/>
+            </svg>
+            <span>Customization</span>
+          </button>
           <button class="sp-tab" role="tab" id="qp-tab-profiles" data-tab="profiles"
                   aria-controls="qp-panel-profiles" aria-selected="false" tabindex="-1">
             <svg class="sp-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1006,6 +1023,415 @@
             </section>
           </div>
 
+          <!-- Advanced Customization Page (Pre-Alpha / Experimental) -->
+          <div class="sp-panel" id="qp-panel-customization" role="tabpanel"
+               aria-labelledby="qp-tab-customization" hidden>
+            <div class="sp-disclaimer-card" style="margin-bottom: 14px; border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08); padding: 10px 14px; border-radius: 6px; font-size: 11.5px; line-height: 1.5; color: #fbbf24;">
+              ⚠️ <strong>Pre-Alpha Preview / Experimental:</strong> The advanced customization and preset engine is in active development and not finalized for production. Schemas and settings are subject to change.
+            </div>
+            <!-- Group 1: Presets & Themes Hub -->
+            <section class="sp-group">
+              <div class="sp-group-head">
+                <h2 class="sp-group-title">Presets &amp; Themes Hub</h2>
+                <div class="sp-group-actions">
+                  <button type="button" class="sp-action-btn" onclick="openSavePresetDialog()" title="Save current settings as a custom preset">+ Save Preset</button>
+                  <button type="button" class="sp-action-btn sp-action-danger" id="cust-btn-delete-preset" onclick="deleteCurrentPreset()" title="Delete active custom preset">Delete</button>
+                  <button type="button" class="sp-action-btn" onclick="resetCustomizationToDefault()" title="Reset all customization parameters to default">Reset Defaults</button>
+                </div>
+              </div>
+
+              <!-- Preset Selection Row -->
+              <div class="cust-preset-bar">
+                <div class="cust-select-wrap">
+                  <label for="cust-preset-select" class="cust-field-label">Active Preset</label>
+                  <div class="cust-select-row">
+                    <select class="cust-select" id="cust-preset-select" onchange="onCustomizationPresetChange(this.value)" aria-label="Customization Preset">
+                      <option value="default">Default</option>
+                      <option value="minimalist">Minimalist</option>
+                      <option value="cyberpunk">Cyberpunk</option>
+                      <option value="ambient_neon">Ambient Neon</option>
+                      <option value="kinetic_karaoke">Kinetic Karaoke</option>
+                      <option value="studio_oled">Studio OLED</option>
+                      <option value="apple_classical">Apple Classical</option>
+                      <option value="retro_arcade">Retro Arcade</option>
+                    </select>
+                    <span class="cust-preset-badge" id="cust-preset-active-badge">Active</span>
+                  </div>
+                </div>
+
+                <!-- Export / Import Action Row -->
+                <div class="cust-io-actions">
+                  <button type="button" class="sp-action-btn" onclick="exportCustomizationPreset()" title="Export current preset as JSON">Export JSON</button>
+                  <button type="button" class="sp-action-btn" onclick="document.getElementById('cust-preset-file-input').click()" title="Import preset from JSON">Import JSON</button>
+                  <input type="file" id="cust-preset-file-input" accept=".json,application/json" onchange="importCustomizationPresetFile(event)" hidden>
+                </div>
+              </div>
+
+              <!-- Inline Save Preset Form (Hidden by default) -->
+              <div class="cust-inline-save-row" id="cust-inline-save-row" hidden>
+                <input type="text" id="cust-input-new-preset" class="qp-inline-input" placeholder="Preset name..." maxlength="32" onkeydown="onCustomPresetKeyDown(event)">
+                <button type="button" class="qp-inline-submit-btn" onclick="submitSavePreset()">Save</button>
+                <button type="button" class="sp-action-btn" onclick="cancelSavePreset()">Cancel</button>
+              </div>
+
+              <p class="sp-hint">Presets apply curated aesthetic themes across typography, shaders, dynamics, and responsiveness. Custom presets are persisted and can be exported as JSON files.</p>
+            </section>
+
+            <!-- Group 2: Dynamic Typography & Lyrics -->
+            <section class="sp-group">
+              <h2 class="sp-group-title">Dynamic Typography &amp; Lyrics</h2>
+
+              <!-- Active Line Scale Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Active Line Scale</span>
+                  <span class="sp-slider-badge" id="badge-cust-active-scale">1.08x</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-active-scale" min="1.0" max="1.5" step="0.01" value="1.08"
+                       oninput="onCustomizationSliderInput('lyrics.active_scale', this.value, 'badge-cust-active-scale', 'x', null)"
+                       aria-label="Active Line Scale">
+                <div class="sp-slider-labels">
+                  <span>1.0x (Standard)</span>
+                  <span>1.25x</span>
+                  <span>1.5x (Bold)</span>
+                </div>
+              </div>
+
+              <!-- Active Glow Slider & Color -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Active Singing Bloom Glow</span>
+                  <div class="cust-glow-ctrls">
+                    <input type="color" id="cust-active-glow-color" class="cust-color-picker" value="#ffffff" title="Bloom glow color"
+                           onchange="onCustomizationColorChange('lyrics.active_glow_color', this.value)">
+                    <span class="sp-slider-badge" id="badge-cust-active-glow">10px</span>
+                  </div>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-active-glow" min="0" max="40" step="1" value="10"
+                       oninput="onCustomizationSliderInput('lyrics.active_glow', this.value, 'badge-cust-active-glow', 'px', null)"
+                       aria-label="Active Bloom Glow Radius">
+                <div class="sp-slider-labels">
+                  <span>Off (0px)</span>
+                  <span>15px</span>
+                  <span>40px (Neon)</span>
+                </div>
+              </div>
+
+              <!-- Letter Spacing Tracking Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Letter Spacing (Tracking)</span>
+                  <span class="sp-slider-badge" id="badge-cust-letter-spacing">0.0px</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-letter-spacing" min="-2.0" max="10.0" step="0.2" value="0.0"
+                       oninput="onCustomizationSliderInput('lyrics.letter_spacing', this.value, 'badge-cust-letter-spacing', 'px', (v) => parseFloat(v).toFixed(1) + 'px')"
+                       aria-label="Lyrics Letter Spacing">
+                <div class="sp-slider-labels">
+                  <span>Tight (-2px)</span>
+                  <span>Normal (0px)</span>
+                  <span>Spaced (+10px)</span>
+                </div>
+              </div>
+
+              <!-- Font Weight Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Font Weight</span>
+                  <span class="sp-slider-badge" id="badge-cust-font-weight">700</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-font-weight" min="300" max="900" step="100" value="700"
+                       oninput="onCustomizationSliderInput('lyrics.font_weight', this.value, 'badge-cust-font-weight', '', null)"
+                       aria-label="Lyrics Font Weight">
+                <div class="sp-slider-labels">
+                  <span>300 (Light)</span>
+                  <span>500 (Medium)</span>
+                  <span>700 (Bold)</span>
+                  <span>900 (Heavy)</span>
+                </div>
+              </div>
+
+              <!-- Secondary Lyrics Opacity Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Secondary &amp; Backing Vocals Opacity</span>
+                  <span class="sp-slider-badge" id="badge-cust-secondary-opacity">50%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-secondary-opacity" min="0.1" max="1.0" step="0.05" value="0.5"
+                       oninput="onCustomizationSliderInput('lyrics.secondary_opacity', this.value, 'badge-cust-secondary-opacity', '', (v) => Math.round(parseFloat(v) * 100) + '%')"
+                       aria-label="Secondary Lyrics Opacity">
+                <div class="sp-slider-labels">
+                  <span>10% (Faint)</span>
+                  <span>50%</span>
+                  <span>100% (Solid)</span>
+                </div>
+              </div>
+
+              <!-- Secondary Lyrics Size Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Secondary &amp; Backing Vocals Size</span>
+                  <span class="sp-slider-badge" id="badge-cust-secondary-scale">75%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-secondary-scale" min="40" max="100" step="2" value="75"
+                       oninput="onCustomizationSliderInput('lyrics.secondary_scale', (this.value / 100), 'badge-cust-secondary-scale', '', (v) => Math.round(parseFloat(v) * 100) + '%')"
+                       aria-label="Secondary Lyrics Size Multiplier">
+                <div class="sp-slider-labels">
+                  <span>40% (Compact)</span>
+                  <span>75% (Standard)</span>
+                  <span>100% (Full)</span>
+                </div>
+              </div>
+
+              <!-- Ad-lib & Harmony Size Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Ad-lib &amp; Harmony Size</span>
+                  <span class="sp-slider-badge" id="badge-cust-adlib-scale">70%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-adlib-scale" min="40" max="100" step="2" value="70"
+                       oninput="onCustomizationSliderInput('lyrics.adlib_scale', (this.value / 100), 'badge-cust-adlib-scale', '', (v) => Math.round(parseFloat(v) * 100) + '%')"
+                       aria-label="Ad-lib Size Multiplier">
+                <div class="sp-slider-labels">
+                  <span>40% (Subtle)</span>
+                  <span>70% (Standard)</span>
+                  <span>100% (Full)</span>
+                </div>
+              </div>
+
+              <!-- Ad-lib Font Style Row -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Ad-lib &amp; Harmony Style</span>
+                <select class="cust-select cust-select-sm" id="cust-adlib-style" onchange="onCustomizationSelectChange('lyrics.adlib_font_style', this.value)" aria-label="Ad-lib Font Style">
+                  <option value="italic">Italic</option>
+                  <option value="normal">Normal</option>
+                  <option value="oblique">Oblique</option>
+                </select>
+              </div>
+
+              <!-- Scroll Inertia Animation Selector -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Scroll Inertia Animation</span>
+                <select class="cust-select cust-select-sm" id="cust-scroll-inertia" onchange="onCustomizationSelectChange('lyrics.scroll_inertia_mode', this.value)" aria-label="Scroll Inertia Animation Mode">
+                  <option value="springy">Springy Elastic Cascade</option>
+                  <option value="smooth">Smooth Fluid Momentum</option>
+                  <option value="subtle">Subtle Minimal</option>
+                  <option value="off">Off (Standard)</option>
+                </select>
+              </div>
+
+              <!-- Tactile Bevel / Stroke Button -->
+              <button class="qp-row qp-action" id="cust-toggle-bevel" onclick="toggleCustomizationBevel()">
+                <span class="qp-label">Tactile Embossed Bevel Stroke</span>
+                <span class="qp-state" id="cust-bevel-state">Off</span>
+              </button>
+
+              <!-- Kinetic Syllable Stretch Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-syllable-stretch" onclick="toggleCustomizationSyllableStretch()">
+                <span class="qp-label">Kinetic Syllable Stretch</span>
+                <span class="qp-state" id="cust-syllable-stretch-state">On</span>
+              </button>
+
+              <!-- Kinetic Syllable Pop Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-syllable-pop" onclick="toggleCustomizationSyllablePop()">
+                <span class="qp-label">Syllable Pop Impact</span>
+                <span class="qp-state" id="cust-syllable-pop-state">On</span>
+              </button>
+
+              <!-- Dynamic Gradient Wipe Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-gradient-wipe" onclick="toggleCustomizationGradientWipe()">
+                <span class="qp-label">Gradient Sweep Wipe</span>
+                <span class="qp-state" id="cust-gradient-wipe-state">On</span>
+              </button>
+            </section>
+
+            <!-- Group 3: Visuals & Particle Systems -->
+            <section class="sp-group">
+              <h2 class="sp-group-title">Visuals &amp; Particle Systems</h2>
+
+              <!-- Particle Pattern Selector -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Particle Pattern</span>
+                <select class="cust-select cust-select-sm" id="cust-particle-type" onchange="onCustomizationSelectChange('visuals.particle_type', this.value)" aria-label="Particle Pattern Style">
+                  <option value="motes">Floating Motes</option>
+                  <option value="stars">Star Field &amp; Stardust</option>
+                  <option value="ripples">Acoustic Ripples</option>
+                  <option value="bokeh">Dreamy Bokeh</option>
+                  <option value="none">None (Disabled)</option>
+                </select>
+              </div>
+
+              <!-- Particle Density Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Particle Density / Pool Size</span>
+                  <span class="sp-slider-badge" id="badge-cust-particle-density">60</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-particle-density" min="0" max="300" step="5" value="60"
+                       oninput="onCustomizationSliderInput('visuals.particle_count', this.value, 'badge-cust-particle-density', '', null)"
+                       aria-label="Particle Density">
+                <div class="sp-slider-labels">
+                  <span>0 (Off)</span>
+                  <span>60 (Standard)</span>
+                  <span>150</span>
+                  <span>300 (Dense)</span>
+                </div>
+              </div>
+
+              <!-- Particle Drift Speed Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Particle Drift Speed</span>
+                  <span class="sp-slider-badge" id="badge-cust-particle-speed">1.0x</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-particle-speed" min="0.1" max="3.0" step="0.1" value="1.0"
+                       oninput="onCustomizationSliderInput('visuals.particle_speed', this.value, 'badge-cust-particle-speed', 'x', (v) => parseFloat(v).toFixed(1) + 'x')"
+                       aria-label="Particle Drift Velocity">
+                <div class="sp-slider-labels">
+                  <span>0.1x (Gentle)</span>
+                  <span>1.0x</span>
+                  <span>3.0x (Rapid)</span>
+                </div>
+              </div>
+
+              <!-- Particle Opacity Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Particle Opacity &amp; Brightness</span>
+                  <span class="sp-slider-badge" id="badge-cust-particle-opacity">60%</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-particle-opacity" min="0.0" max="1.0" step="0.05" value="0.6"
+                       oninput="onCustomizationSliderInput('visuals.particle_opacity', this.value, 'badge-cust-particle-opacity', '', (v) => Math.round(parseFloat(v) * 100) + '%')"
+                       aria-label="Particle Opacity">
+                <div class="sp-slider-labels">
+                  <span>0%</span>
+                  <span>50%</span>
+                  <span>100% (Vivid)</span>
+                </div>
+              </div>
+
+              <!-- Breakdown Stasis Calm Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-breakdown-stasis" onclick="toggleCustomizationBreakdownStasis()">
+                <span class="qp-label">Musical Breakdown Stasis</span>
+                <span class="qp-state" id="cust-breakdown-stasis-state">On</span>
+              </button>
+
+              <!-- Aurora Mesh Background Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-aurora-mesh" onclick="toggleCustomizationAuroraMesh()">
+                <span class="qp-label">Ambient Aurora Mesh</span>
+                <span class="qp-state" id="cust-aurora-mesh-state">On</span>
+              </button>
+            </section>
+
+            <!-- Group 4: Audio-Reactive & Beat-Sync Targets -->
+            <section class="sp-group">
+              <h2 class="sp-group-title">Audio-Reactive &amp; Beat-Sync Targets</h2>
+
+              <!-- Beat Sync Master Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-beatsync" onclick="toggleCustomizationBeatSync()">
+                <span class="qp-label">Beat-Sync Impulses</span>
+                <span class="qp-state" id="cust-beatsync-state">On</span>
+              </button>
+
+              <!-- Pulse Strength Slider -->
+              <div class="sp-slider-card">
+                <div class="sp-slider-header">
+                  <span class="sp-slider-title">Impulse Pulse Amplitude</span>
+                  <span class="sp-slider-badge" id="badge-cust-pulse-strength">1.0x</span>
+                </div>
+                <input type="range" class="sp-range-slider" id="slider-cust-pulse-strength" min="0.0" max="2.5" step="0.1" value="1.0"
+                       oninput="onCustomizationSliderInput('reactive.pulse_strength', this.value, 'badge-cust-pulse-strength', 'x', (v) => parseFloat(v).toFixed(1) + 'x')"
+                       aria-label="Audio Reactive Pulse Amplitude">
+                <div class="sp-slider-labels">
+                  <span>0.0x (Muted)</span>
+                  <span>1.0x (Normal)</span>
+                  <span>2.5x (Punchy)</span>
+                </div>
+              </div>
+
+              <!-- Beat Impulse Targets Multi-Select Chips -->
+              <div class="cust-target-section">
+                <span class="cust-field-label">Active Beat Reactive Targets</span>
+                <div class="cust-target-grid" role="group" aria-label="Beat impulse targets">
+                  <label class="cust-target-chip">
+                    <input type="checkbox" id="cust-target-art" checked onchange="onCustomizationCheckboxChange('reactive.target_album_art', this.checked)">
+                    <span class="cust-chip-label">Album Art</span>
+                  </label>
+                  <label class="cust-target-chip">
+                    <input type="checkbox" id="cust-target-lyrics" checked onchange="onCustomizationCheckboxChange('reactive.target_lyrics_active', this.checked)">
+                    <span class="cust-chip-label">Active Lyrics</span>
+                  </label>
+                  <label class="cust-target-chip">
+                    <input type="checkbox" id="cust-target-controls" onchange="onCustomizationCheckboxChange('reactive.target_controls', this.checked)">
+                    <span class="cust-chip-label">Controls</span>
+                  </label>
+                  <label class="cust-target-chip">
+                    <input type="checkbox" id="cust-target-bloom" checked onchange="onCustomizationCheckboxChange('reactive.target_ambient_bloom', this.checked)">
+                    <span class="cust-chip-label">Ambient Bloom</span>
+                  </label>
+                  <label class="cust-target-chip">
+                    <input type="checkbox" id="cust-target-particles" checked onchange="onCustomizationCheckboxChange('reactive.target_particles', this.checked)">
+                    <span class="cust-chip-label">Particles</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Synced Motion Mode Selector -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Synced Motion Coordination</span>
+                <select class="cust-select cust-select-sm" id="cust-sync-motion-mode" onchange="onCustomizationSelectChange('reactive.sync_motion_mode', this.value)" aria-label="Synced Motion Mode">
+                  <option value="synchronized">Synchronized Phase</option>
+                  <option value="alternating">Alternating Phase</option>
+                  <option value="subtle">Subtle Whisper</option>
+                  <option value="off">Off (Independent)</option>
+                </select>
+              </div>
+
+              <!-- Orientation Dropdown -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Spatial Window Orientation</span>
+                <select class="cust-select cust-select-sm" id="cust-orientation-select" onchange="onCustomizationSelectChange('layout.orientation', this.value)" aria-label="Window Orientation Mode">
+                  <option value="horizontal">Horizontal (0°)</option>
+                  <option value="vertical-right">Vertical Right (90°)</option>
+                  <option value="vertical-left">Vertical Left (270°)</option>
+                  <option value="vertical-column">Vertical Column (East-Asian)</option>
+                </select>
+              </div>
+
+              <!-- Artwork Geometric Shape Dropdown -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Artwork Geometric Shape</span>
+                <select class="cust-select cust-select-sm" id="cust-artwork-shape-select" onchange="onCustomizationSelectChange('layout.artwork_shape', this.value)" aria-label="Artwork Geometric Shape">
+                  <option value="rounded">Rounded Rectangle</option>
+                  <option value="circle">Circle</option>
+                  <option value="squircle">Squircle</option>
+                  <option value="diamond">Diamond / Chamfer</option>
+                  <option value="pill">Pill</option>
+                  <option value="vinyl">Vinyl Disc</option>
+                </select>
+              </div>
+
+              <!-- Artwork Rotation Spin Toggle -->
+              <button class="qp-row qp-action" id="cust-toggle-artwork-spin" onclick="toggleCustomizationArtworkSpin()">
+                <span class="qp-label">Artwork Rotation Spin</span>
+                <span class="qp-state" id="cust-artwork-spin-state">Off</span>
+              </button>
+
+              <!-- Lyrics Dock Position Selector -->
+              <div class="qp-row qp-static">
+                <span class="qp-label">Lyrics Container Dock Position</span>
+                <select class="cust-select cust-select-sm" id="cust-lyrics-dock-select" onchange="onCustomizationSelectChange('layout.lyrics_dock', this.value)" aria-label="Lyrics Dock Anchor">
+                  <option value="center">Center</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                  <option value="top">Top</option>
+                  <option value="bottom">Bottom</option>
+                </select>
+              </div>
+
+              <p class="sp-hint">Coordinates motion, micro-tilts, and glow pulses synchronously across artwork, live lyric lines, and canvas particle emitters.</p>
+            </section>
+          </div>
+
           <!-- Profiles & Source Management Page -->
           <div class="sp-panel" id="qp-panel-profiles" role="tabpanel"
                aria-labelledby="qp-tab-profiles" hidden>
@@ -1314,6 +1740,8 @@
     <div class="resize-handle resize-nw" data-dir="nw" title=""></div>
   </div>
 
+  <script src="customization.js"></script>
+  <script src="customization_modules.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
